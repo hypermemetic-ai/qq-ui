@@ -1,0 +1,24 @@
+{
+  "name": "@hypermemetic-ai/qq-ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Server-rendered Cordis plugin for the qq operator console.",
+  "main": "src/plugin.mjs",
+  "exports": {
+    ".": "./src/plugin.mjs",
+    "./http": "./src/http-app.mjs",
+    "./render": "./src/render.mjs",
+    "./markdown": "./src/markdown.mjs"
+  },
+  "files": [
+    "assets/",
+    "src/",
+    "vendor/",
+    "vendor-pins.json",
+    "README.md"
+  ],
+  "dependencies": {
+    "@hypermemetic-ai/qq": "file:../qq"
+  }
+}

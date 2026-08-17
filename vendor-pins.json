@@ -1,0 +1,23 @@
+{
+  "schema": "qq.dsh-console-vendor-pins/v1",
+  "artifacts": [
+    {
+      "package": "htmx.org",
+      "version": "2.0.10",
+      "npmIntegrity": "sha512-kdeJe7ZVwaS6QMz/ebBIVtZdpwen6L0OQ5GOhPV9MKBb196TCZeZu4yA7ZIQsaLKv7EpXz+So7KSXNuHXhj7Cw==",
+      "source": "package/dist/htmx.min.js",
+      "file": "vendor/htmx-2.0.10.min.js",
+      "sha256": "71ea67185bfa8c98c39d31717c6fce5d852370fcdfd129db4543774d3145c0de",
+      "licenseFile": "vendor/HTMX-LICENSE"
+    },
+    {
+      "package": "htmx-ext-sse",
+      "version": "2.2.4",
+      "npmIntegrity": "sha512-LJmxVhykyflBWgh5PvbRidcyuqMHlgfajmmzumvKctv9puvsufeH6OaejSMZTNTnEI8O2wXXn4ZZtBdpEMqmEQ==",
+      "source": "package/sse.js",
+      "file": "vendor/htmx-ext-sse-2.2.4.js",
+      "sha256": "3b5992a541619babefc4c169505af474df5c3039da51e59b96ccf9241ecd61d2",
+      "licenseFile": "vendor/HTMX-EXT-SSE-LICENSE"
+    }
+  ]
+}
