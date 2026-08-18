@@ -59,9 +59,9 @@ const bundledAssets = Object.freeze({
     type: "text/html; charset=utf-8",
     body: readFileSync(new URL("assets/offline-v8.html", root)),
   },
-  "sw-v9.js": {
+  "sw-v10.js": {
     type: "text/javascript; charset=utf-8",
-    body: readFileSync(new URL("assets/sw-v9.js", root)),
+    body: readFileSync(new URL("assets/sw-v10.js", root)),
   },
 });
 
@@ -212,7 +212,7 @@ export function createConsoleHandler(backend, options = {}) {
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
     manifest: `${assetsPrefix}manifest-v3.webmanifest`,
-    serviceWorker: `${basePath}/sw-v9.js`,
+    serviceWorker: `${basePath}/sw-v10.js`,
   });
   const streams = new Set();
 
@@ -302,7 +302,7 @@ export function createConsoleHandler(backend, options = {}) {
         write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
         return;
       }
-      const asset = bundledAssets["sw-v9.js"];
+      const asset = bundledAssets["sw-v10.js"];
       write(
         res,
         200,
@@ -343,7 +343,7 @@ export function createConsoleHandler(backend, options = {}) {
         return;
       }
       const asset = resolveAsset(name, liveAssets);
-      if (!asset || name.includes("/") || name === "sw-v9.js") {
+      if (!asset || name.includes("/") || name === "sw-v10.js") {
         text(res, 404, "Not found", head);
         return;
       }
