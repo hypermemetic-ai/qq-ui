@@ -445,7 +445,7 @@ code {
 
 .composer-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: end;
   gap: .65rem;
 }
@@ -501,6 +501,20 @@ code {
   color: #07120f;
   font-weight: 800;
   cursor: pointer;
+}
+
+#composer-dictate {
+  min-width: 2.85rem;
+  padding-inline: .7rem;
+  border-color: #3a474f;
+  background: #151b20;
+  color: #e8eef2;
+}
+
+#composer-dictate[data-state="recording"] {
+  border-color: #ff8d86;
+  background: #3a1614;
+  color: #ffaaa4;
 }
 
 .composer-actions button { margin-left: auto; }
