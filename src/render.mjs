@@ -165,7 +165,7 @@ function sessionNavigation(snapshot, paths) {
   </details>`;
 }
 
-function composer(paths, running) {
+function composer(paths, running, sessionId = "") {
   if (running) {
     return `<form id="interrupt-form" class="composer interrupt-composer" action="${escapeHtml(paths.interrupt)}" method="post"
       hx-post="${escapeHtml(paths.interrupt)}"
@@ -181,6 +181,7 @@ function composer(paths, running) {
     </form>`;
   }
   return `<form id="composer" class="composer" action="${escapeHtml(paths.prompt)}" method="post"
+      data-session-id="${escapeHtml(sessionId)}"
       hx-post="${escapeHtml(paths.prompt)}"
       hx-target="#session-panel"
       hx-swap="innerHTML"
@@ -190,6 +191,7 @@ function composer(paths, running) {
       <label for="prompt">Message</label>
       <div class="composer-row">
         <textarea id="prompt" name="prompt" rows="1" maxlength="32768" required autocomplete="off" enterkeyhint="send" placeholder="Message this DSH session"></textarea>
+        <button id="composer-dictate" type="button" data-state="idle" aria-label="Dictate">Mic</button>
         <button id="composer-submit" type="submit">Send</button>
       </div>
       <div class="composer-meta">
@@ -218,7 +220,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
     <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
       ${transcript || '<p class="empty-transcript">This DSH session has no transcript yet.</p>'}
     </div>
-    ${composer(paths, status.key === "running")}`;
+    ${composer(paths, status.key === "running", snapshot.id)}`;
 }
 
 export function renderPage(snapshot, paths, assetPaths, notice = "") {
@@ -243,6 +245,7 @@ export function renderPage(snapshot, paths, assetPaths, notice = "") {
   <script defer src="${escapeHtml(assetPaths.htmx)}"></script>
   <script defer src="${escapeHtml(assetPaths.sse)}"></script>
   <script defer src="${escapeHtml(assetPaths.browser)}" data-service-worker="${escapeHtml(assetPaths.serviceWorker)}"></script>
+  <script defer src="/qq/dictate/client.js"></script>
 </head>
 <body>
   <header class="site-header">
