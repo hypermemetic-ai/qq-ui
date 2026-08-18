@@ -87,7 +87,7 @@ function safeTurnFailure(code) {
     case "INVALID_CREDENTIAL":
     case "MISSING_CREDENTIAL":
     case "AUTH":
-      return "The selected model route could not authenticate. Check the workbench credential, then try again.";
+      return "The selected model route could not authenticate. Check the qq credential, then try again.";
     case "QUOTA_EXCEEDED":
     case "RATE_LIMIT":
       return "The selected model route is temporarily rate-limited or out of quota. Wait, then try again.";
