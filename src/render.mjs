@@ -187,7 +187,7 @@ function sessionNavigation(snapshot, paths) {
   </details>`;
 }
 
-export function renderOfferPopup(offer, paths) {
+export function renderOfferPopup(offer, paths, notice = "") {
   if (!offer || typeof offer.brief !== "string" || offer.brief.trim().length === 0) return "";
   const runner = typeof offer.runnerBrief === "string" && offer.runnerBrief.trim()
     ? `<section class="offer-runner" aria-label="Runner-only brief">
@@ -196,6 +196,7 @@ export function renderOfferPopup(offer, paths) {
       </section>`
     : "";
   const action = escapeHtml(paths.offer ?? "");
+  const refusal = notice ? `<p class="notice" role="alert">${escapeHtml(notice)}</p>` : "";
   return `<aside class="offer-popup" role="dialog" aria-modal="true" aria-labelledby="offer-heading" data-offer-id="${escapeHtml(offer.id ?? "")}">
     <div class="offer-sheet">
       <header class="offer-head">
@@ -206,6 +207,7 @@ export function renderOfferPopup(offer, paths) {
         ${renderMessageText(offer.brief)}
         ${runner}
       </div>
+      ${refusal}
       <form class="offer-actions" action="${action}" method="post"
         hx-post="${action}"
         hx-target="#session-panel"
@@ -275,7 +277,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
       ${transcript || '<p class="empty-transcript">This DSH session has no transcript yet.</p>'}
     </div>
     ${composer(paths, status.key === "running", snapshot.id)}
-    ${renderOfferPopup(snapshot.offer, paths)}`;
+    ${renderOfferPopup(snapshot.offer, paths, notice)}`;
 }
 
 export function renderPage(snapshot, paths, assetPaths, notice = "") {
