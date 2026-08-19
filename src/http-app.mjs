@@ -27,6 +27,10 @@ const bundledAssets = Object.freeze({
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
   },
+  "console-v9.css": {
+    type: "text/css; charset=utf-8",
+    body: readFileSync(new URL("assets/console.css", root)),
+  },
   "geist-latin-wght-normal-5.3.0.woff2": {
     type: "font/woff2",
     body: readFileSync(new URL("assets/geist-latin-wght-normal-5.3.0.woff2", root)),
@@ -66,7 +70,7 @@ const bundledAssets = Object.freeze({
 });
 
 const LIVE_ASSET_FILES = Object.freeze({
-  "console-v8.css": "assets/console.css",
+  "console-v9.css": "assets/console.css",
   "browser-v4.js": "assets/browser-v4.js",
 });
 const RENDER_FILE = fileURLToPath(new URL("./render.mjs", import.meta.url));
@@ -207,7 +211,7 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v8.css`,
+    css: `${assetsPrefix}console-v9.css`,
     browser: `${assetsPrefix}browser-v4.js`,
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
