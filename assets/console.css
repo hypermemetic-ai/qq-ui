@@ -717,7 +717,7 @@ body > footer {
   background: #05070a;
   cursor: pointer;
 }
-.overlay-actions {
+.overlay-popup .overlay-actions {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .overlay-keep { border-color: #72d7c0; background: #72d7c0; color: #07120f; }
@@ -829,6 +829,17 @@ body > footer {
     padding: .65rem max(.65rem, env(safe-area-inset-right)) max(.65rem, env(safe-area-inset-bottom)) max(.65rem, env(safe-area-inset-left));
   }
   .offer-choice { min-height: 2.85rem; }
+  .overlay-popup .overlay-head {
+    padding: max(.55rem, env(safe-area-inset-top)) max(.65rem, env(safe-area-inset-right)) .45rem max(.65rem, env(safe-area-inset-left));
+  }
+  .overlay-popup .overlay-head h2 { font-size: 1rem; }
+  .overlay-popup .overlay-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .5rem;
+    padding: .55rem max(.65rem, env(safe-area-inset-right)) max(.65rem, env(safe-area-inset-bottom)) max(.65rem, env(safe-area-inset-left));
+  }
+  .overlay-popup .overlay-choice { min-height: 3rem; }
+  .overlay-popup .overlay-chrome-toggle { min-height: 2.6rem; font-size: .9rem; }
 }
 
 @media (max-width: 23rem) {

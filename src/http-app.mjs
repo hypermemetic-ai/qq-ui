@@ -39,6 +39,10 @@ const bundledAssets = Object.freeze({
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
   },
+  "console-v12.css": {
+    type: "text/css; charset=utf-8",
+    body: readFileSync(new URL("assets/console.css", root)),
+  },
   "geist-latin-wght-normal-5.3.0.woff2": {
     type: "font/woff2",
     body: readFileSync(new URL("assets/geist-latin-wght-normal-5.3.0.woff2", root)),
@@ -79,10 +83,14 @@ const bundledAssets = Object.freeze({
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("assets/sw-v11.js", root)),
   },
+  "sw-v12.js": {
+    type: "text/javascript; charset=utf-8",
+    body: readFileSync(new URL("assets/sw-v12.js", root)),
+  },
 });
 
 const LIVE_ASSET_FILES = Object.freeze({
-  "console-v11.css": "assets/console.css",
+  "console-v12.css": "assets/console.css",
   "browser-v4.js": "assets/browser-v4.js",
 });
 const RENDER_FILE = fileURLToPath(new URL("./render.mjs", import.meta.url));
@@ -250,12 +258,12 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v11.css`,
+    css: `${assetsPrefix}console-v12.css`,
     browser: `${assetsPrefix}browser-v4.js`,
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
     manifest: `${assetsPrefix}manifest-v3.webmanifest`,
-    serviceWorker: `${basePath}/sw-v11.js`,
+    serviceWorker: `${basePath}/sw-v12.js`,
   });
   const streams = new Set();
   const readOffer = typeof options.offerFor === "function" ? options.offerFor : null;
@@ -431,7 +439,7 @@ export function createConsoleHandler(backend, options = {}) {
         write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
         return;
       }
-      const asset = bundledAssets["sw-v11.js"];
+      const asset = bundledAssets["sw-v12.js"];
       write(
         res,
         200,
@@ -472,7 +480,7 @@ export function createConsoleHandler(backend, options = {}) {
         return;
       }
       const asset = resolveAsset(name, liveAssets);
-      if (!asset || name.includes("/") || name === "sw-v10.js" || name === "sw-v11.js") {
+      if (!asset || name.includes("/") || name === "sw-v10.js" || name === "sw-v11.js" || name === "sw-v12.js") {
         text(res, 404, "Not found", head);
         return;
       }
