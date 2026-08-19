@@ -44,7 +44,7 @@ a { color: inherit; }
 .site-header,
 body > footer,
 main {
-  width: min(100% - 2rem, 70rem);
+  width: min(100% - 2rem, 90ch);
   margin-inline: auto;
 }
 
@@ -514,16 +514,19 @@ code {
 }
 
 #composer-dictate svg {
+  grid-area: 1 / 1;
   display: block;
 }
 
 #composer-dictate .dictate-cancel,
 #composer-dictate[data-state="recording"] .dictate-mic {
-  display: none;
+  visibility: hidden;
+  opacity: 0;
 }
 
 #composer-dictate[data-state="recording"] .dictate-cancel {
-  display: block;
+  visibility: visible;
+  opacity: 1;
 }
 
 #composer-dictate[data-state="recording"] {
@@ -543,6 +546,15 @@ code {
 @media (min-width: 42.01rem) and (pointer: fine) {
   #composer-dictate { display: none; }
 }
+
+@media (min-width: 42.01rem) {
+  body { grid-template-rows: minmax(0, 1fr); }
+  .site-header, body > footer { display: none; }
+  main { width: min(90ch, 100% - 2rem); min-height: 0; }
+  .session-panel { border: 0; border-radius: 0; box-shadow: none; }
+}
+
+.close-session { display: none; }
 
 .composer-actions button { margin-left: auto; }
 
@@ -573,13 +585,20 @@ body > footer {
 .offline-message a { color: #72d7c0; }
 
 .offer-popup {
-  display: none;
+  display: flex;
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  width: 100%;
+  height: 100%;
+  background: #090c10;
 }
 
 .offer-sheet {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  width: 100%;
   height: 100%;
   background: #0d1216;
 }
@@ -813,15 +832,6 @@ body > footer {
   .interrupt-composer { align-items: center; }
   .interrupt-composer .composer-actions { justify-content: flex-end; }
   .key-hint { display: none; }
-  .offer-popup {
-    display: flex;
-    position: fixed;
-    inset: 0;
-    z-index: 8;
-    width: 100%;
-    height: 100%;
-    background: #090c10;
-  }
   .offer-sheet { width: 100%; }
   .offer-actions {
     grid-template-columns: 1fr;

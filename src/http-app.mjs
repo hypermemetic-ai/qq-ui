@@ -43,6 +43,10 @@ const bundledAssets = Object.freeze({
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
   },
+  "console-v13.css": {
+    type: "text/css; charset=utf-8",
+    body: readFileSync(new URL("assets/console.css", root)),
+  },
   "geist-latin-wght-normal-5.3.0.woff2": {
     type: "font/woff2",
     body: readFileSync(new URL("assets/geist-latin-wght-normal-5.3.0.woff2", root)),
@@ -54,6 +58,10 @@ const bundledAssets = Object.freeze({
   "browser-v4.js": {
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("assets/browser-v4.js", root)),
+  },
+  "browser-v5.js": {
+    type: "text/javascript; charset=utf-8",
+    body: readFileSync(new URL("assets/browser-v5.js", root)),
   },
   "reconnect-v1.js": {
     type: "text/javascript; charset=utf-8",
@@ -87,11 +95,15 @@ const bundledAssets = Object.freeze({
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("assets/sw-v12.js", root)),
   },
+  "sw-v13.js": {
+    type: "text/javascript; charset=utf-8",
+    body: readFileSync(new URL("assets/sw-v13.js", root)),
+  },
 });
 
 const LIVE_ASSET_FILES = Object.freeze({
-  "console-v12.css": "assets/console.css",
-  "browser-v4.js": "assets/browser-v4.js",
+  "console-v13.css": "assets/console.css",
+  "browser-v5.js": "assets/browser-v5.js",
 });
 const RENDER_FILE = fileURLToPath(new URL("./render.mjs", import.meta.url));
 
@@ -201,6 +213,7 @@ function routes(basePath, sessionId) {
     prompt: `${canonical}/prompt`,
     offer: `${canonical}/offer`,
     overlay: `${canonical}/overlay`,
+    close: `${canonical}/close`,
     createSession: `${basePath}/sessions`,
     switchSession: `${basePath}/sessions/open`,
   });
@@ -240,7 +253,8 @@ function isQqService(backend) {
     typeof backend.list === "function" &&
     typeof backend.create === "function" &&
     typeof backend.prompt === "function" &&
-    typeof backend.interrupt === "function",
+    typeof backend.interrupt === "function" &&
+    typeof backend.close === "function",
   );
 }
 
@@ -258,12 +272,12 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v12.css`,
-    browser: `${assetsPrefix}browser-v4.js`,
+    css: `${assetsPrefix}console-v13.css`,
+    browser: `${assetsPrefix}browser-v5.js`,
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
     manifest: `${assetsPrefix}manifest-v3.webmanifest`,
-    serviceWorker: `${basePath}/sw-v12.js`,
+    serviceWorker: `${basePath}/sw-v13.js`,
   });
   const streams = new Set();
   const readOffer = typeof options.offerFor === "function" ? options.offerFor : null;
@@ -439,7 +453,7 @@ export function createConsoleHandler(backend, options = {}) {
         write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
         return;
       }
-      const asset = bundledAssets["sw-v12.js"];
+      const asset = bundledAssets["sw-v13.js"];
       write(
         res,
         200,
@@ -480,7 +494,7 @@ export function createConsoleHandler(backend, options = {}) {
         return;
       }
       const asset = resolveAsset(name, liveAssets);
-      if (!asset || name.includes("/") || name === "sw-v10.js" || name === "sw-v11.js" || name === "sw-v12.js") {
+      if (!asset || name.includes("/") || name === "sw-v10.js" || name === "sw-v11.js" || name === "sw-v12.js" || name === "sw-v13.js") {
         text(res, 404, "Not found", head);
         return;
       }
@@ -642,6 +656,26 @@ export function createConsoleHandler(backend, options = {}) {
           }
         }
         text(res, errorStatus(error), message);
+      }
+      return;
+    }
+
+    if (selected?.action === "close") {
+      if (req.method !== "POST") {
+        write(res, 405, { Allow: "POST", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
+        return;
+      }
+      try {
+        if (!sameOrigin(req)) {
+          const error = new Error("Cross-origin form submission refused");
+          error.status = 403;
+          throw error;
+        }
+        await readForm(req);
+        const closed = await backend.close(selected.sessionId);
+        navigationResponse(req, res, routes(basePath, closed.id).canonical);
+      } catch (error) {
+        text(res, errorStatus(error), errorMessage(error));
       }
       return;
     }

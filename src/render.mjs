@@ -183,6 +183,9 @@ function sessionNavigation(snapshot, paths) {
       <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
         <button type="submit" aria-label="Start a new durable DSH session">New <span>session</span></button>
       </form>
+      <form id="close-session" class="close-session" action="${escapeHtml(paths.close)}" method="post" hidden>
+        <button type="submit" aria-label="Close this session">Close</button>
+      </form>
     </div>
   </details>`;
 }
@@ -255,6 +258,7 @@ export function renderOfferPopup(offer, paths, notice = "") {
 function composer(paths, running, sessionId = "") {
   if (running) {
     return `<form id="interrupt-form" class="composer interrupt-composer" action="${escapeHtml(paths.interrupt)}" method="post"
+      data-session-id="${escapeHtml(sessionId)}"
       hx-post="${escapeHtml(paths.interrupt)}"
       hx-target="#session-panel"
       hx-swap="innerHTML"
