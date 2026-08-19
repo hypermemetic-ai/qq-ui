@@ -79,6 +79,31 @@ const LIVE_ASSET_FILES = Object.freeze({
 });
 const RENDER_FILE = fileURLToPath(new URL("./render.mjs", import.meta.url));
 
+export function createRootRedirectHandler(basePath = "/qq") {
+  const target = normalizeBasePath(basePath);
+  return function rootRedirectHandler(req, res) {
+    const head = req.method === "HEAD";
+    if (req.method !== "GET" && !head) {
+      write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
+      return;
+    }
+    let search = "";
+    try {
+      search = new URL(req.url ?? "/", "http://qq-ui.invalid").search;
+    } catch {
+      text(res, 400, "Malformed request URL", head);
+      return;
+    }
+    write(
+      res,
+      308,
+      { Location: `${target}/${search}`, "Content-Type": "text/plain; charset=utf-8" },
+      "Permanent redirect\n",
+      head,
+    );
+  };
+}
+
 export function resolveAsset(name, liveAssets = false) {
   const bundled = bundledAssets[name];
   if (!bundled) return undefined;

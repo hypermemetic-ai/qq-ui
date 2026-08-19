@@ -1,4 +1,4 @@
-import { createConsoleHandler } from "./http-app.mjs";
+import { createConsoleHandler, createRootRedirectHandler } from "./http-app.mjs";
 
 export const name = "qq-ui";
 export const inject = ["qq", "webServer"];
@@ -22,14 +22,20 @@ export function apply(ctx, config) {
     loginSheetFor: (sessionId) => modelsOf()?.sheetFor?.(sessionId),
   });
   ctx.effect(() => {
-    const unregister = ctx.webServer.register({
+    const unregisterConsole = ctx.webServer.register({
       kind: "prefix",
       path: basePath,
       handler,
     });
+    const unregisterRoot = ctx.webServer.register({
+      kind: "exact",
+      path: "/",
+      handler: createRootRedirectHandler(basePath),
+    });
     return () => {
       handler.dispose();
-      unregister();
+      unregisterRoot();
+      unregisterConsole();
     };
   }, "qq-ui: HTML routes");
 }
