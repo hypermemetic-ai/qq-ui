@@ -187,6 +187,37 @@ function sessionNavigation(snapshot, paths) {
   </details>`;
 }
 
+export function renderLoginSheet(sheet, paths) {
+  const connectors = Array.isArray(sheet?.connectors) ? sheet.connectors : [];
+  if (connectors.length === 0) return "";
+  const action = sheet.action === "logout" ? "logout" : "login";
+  const heading = action === "logout" ? "Drop a connector" : "Connect a model";
+  const eyebrow = action === "logout" ? "Logout" : "Login";
+  const promptAction = escapeHtml(paths.prompt ?? "");
+  const buttons = connectors.map((connector) => {
+    const id = escapeHtml(connector.id ?? "");
+    const label = escapeHtml(connector.label ?? connector.id ?? "");
+    const host = connector.hostOwned ? " host-owned" : "";
+    const value = escapeHtml(`/${action} ${connector.id ?? ""}`);
+    return `<button class="offer-choice login-choice" type="submit" name="prompt" value="${value}" data-connector="${id}">${label}${host ? ` <span>${escapeHtml(host.trim())}</span>` : ""}</button>`;
+  }).join("");
+  return `<aside class="offer-popup login-popup" role="dialog" aria-modal="true" aria-labelledby="login-heading" data-login-action="${escapeHtml(action)}">
+    <div class="offer-sheet">
+      <header class="offer-head">
+        <p class="eyebrow">${escapeHtml(eyebrow)}</p>
+        <h2 id="login-heading">${escapeHtml(heading)}</h2>
+      </header>
+      <form class="offer-actions login-actions" action="${promptAction}" method="post"
+        hx-post="${promptAction}"
+        hx-target="#session-panel"
+        hx-swap="innerHTML"
+        hx-disabled-elt=".login-choice">
+        ${buttons}
+      </form>
+    </div>
+  </aside>`;
+}
+
 export function renderOfferPopup(offer, paths, notice = "") {
   if (!offer || typeof offer.brief !== "string" || offer.brief.trim().length === 0) return "";
   const runner = typeof offer.runnerBrief === "string" && offer.runnerBrief.trim()
@@ -277,6 +308,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
       ${transcript || '<p class="empty-transcript">This DSH session has no transcript yet.</p>'}
     </div>
     ${composer(paths, status.key === "running", snapshot.id)}
+    ${renderLoginSheet(snapshot.loginSheet, paths)}
     ${renderOfferPopup(snapshot.offer, paths, notice)}`;
 }
 

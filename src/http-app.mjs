@@ -226,15 +226,28 @@ export function createConsoleHandler(backend, options = {}) {
   const streams = new Set();
   const readOffer = typeof options.offerFor === "function" ? options.offerFor : null;
   const chooseOffer = typeof options.chooseOffer === "function" ? options.chooseOffer : null;
+  const readLoginSheet = typeof options.loginSheetFor === "function" ? options.loginSheetFor : null;
 
-  async function withOffer(snapshot) {
-    if (!readOffer || !snapshot?.id) return snapshot;
-    try {
-      const offer = await readOffer(snapshot.id);
-      return offer ? { ...snapshot, offer } : snapshot;
-    } catch {
-      return snapshot;
+  async function withSheets(snapshot) {
+    if (!snapshot?.id) return snapshot;
+    let next = snapshot;
+    if (readOffer) {
+      try {
+        const offer = await readOffer(snapshot.id);
+        if (offer) next = { ...next, offer };
+      } catch {
+        /* leftover offer is optional */
+      }
     }
+    if (readLoginSheet) {
+      try {
+        const loginSheet = await readLoginSheet(snapshot.id);
+        if (loginSheet) next = { ...next, loginSheet };
+      } catch {
+        /* login sheet is optional */
+      }
+    }
+    return next;
   }
 
   function viewFingerprint(snapshot) {
@@ -253,6 +266,8 @@ export function createConsoleHandler(backend, options = {}) {
       snapshot?.alias,
       offer?.id ?? "",
       offer?.brief ?? "",
+      snapshot?.loginSheet?.action ?? "",
+      (snapshot?.loginSheet?.connectors ?? []).map((connector) => connector.id),
     ]);
   }
 
@@ -262,7 +277,7 @@ export function createConsoleHandler(backend, options = {}) {
     if (!available.some((session) => session.id === snapshot.id)) {
       available.unshift({ id: snapshot.id, createdAt: 0 });
     }
-    return withOffer({ ...snapshot, sessions: available });
+    return withSheets({ ...snapshot, sessions: available });
   }
 
   function watch(sessionId, listener, extra = {}) {
@@ -558,18 +573,20 @@ export function createConsoleHandler(backend, options = {}) {
           error.status = 413;
           throw error;
         }
-        await backend.prompt(selected.sessionId, prompt);
-        await mutationResponse(req, res, selected.sessionId);
+        const result = await backend.prompt(selected.sessionId, prompt);
+        await mutationResponse(req, res, selected.sessionId, typeof result === "string" ? result : "");
       } catch (error) {
-        if (String(req.headers["hx-request"] ?? "").toLowerCase() === "true") {
+        const message = errorMessage(error);
+        const unknownSlash = /unknown slash command/.test(message);
+        if (!unknownSlash && String(req.headers["hx-request"] ?? "").toLowerCase() === "true") {
           try {
-            await mutationResponse(req, res, selected.sessionId, errorMessage(error));
+            await mutationResponse(req, res, selected.sessionId, message);
             return;
           } catch {
             // Fall through when the DSH session itself cannot be read.
           }
         }
-        text(res, errorStatus(error), errorMessage(error));
+        text(res, errorStatus(error), message);
       }
       return;
     }
