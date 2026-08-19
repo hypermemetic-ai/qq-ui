@@ -12,6 +12,7 @@ export function apply(ctx, config) {
   if (!qq) throw new Error("qq-ui: qq service is unavailable");
   const workflowsOf = () => ctx.get?.("qq-workflows", false) ?? null;
   const modelsOf = () => ctx.get?.("qq-models", false) ?? null;
+  const finderOf = () => ctx.get?.("image-finder", false) ?? null;
   const basePath = String(config?.basePath ?? "/qq");
   const handler = createConsoleHandler(qq, {
     basePath,
@@ -20,6 +21,8 @@ export function apply(ctx, config) {
     offerFor: (sessionId) => workflowsOf()?.offer?.(sessionId),
     chooseOffer: (sessionId, choice) => workflowsOf()?.choose?.(sessionId, { choice }),
     loginSheetFor: (sessionId) => modelsOf()?.sheetFor?.(sessionId),
+    overlayFor: (sessionId) => finderOf()?.overlayFor?.(sessionId),
+    chooseOverlay: (sessionId, form) => finderOf()?.chooseOverlay?.(sessionId, form),
   });
   ctx.effect(() => {
     const unregisterConsole = ctx.webServer.register({

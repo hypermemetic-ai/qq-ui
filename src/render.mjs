@@ -278,7 +278,14 @@ function composer(paths, running, sessionId = "") {
       <label for="prompt">Message</label>
       <div class="composer-row">
         <textarea id="prompt" name="prompt" rows="1" maxlength="32768" required autocomplete="off" enterkeyhint="send" placeholder="Message this DSH session"></textarea>
-        <button id="composer-dictate" type="button" data-state="idle" aria-label="Dictate">Mic</button>
+        <button id="composer-dictate" type="button" data-state="idle" aria-label="Dictate">
+          <svg class="dictate-mic" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
+            <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
+          </svg>
+          <svg class="dictate-cancel" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
+            <path fill="currentColor" d="M18.3 5.71 12 12.01 5.7 5.7 4.29 7.11 10.59 13.4 4.29 19.7 5.7 21.11 12 14.82l6.3 6.29 1.41-1.41-6.29-6.3 6.29-6.29z"/>
+          </svg>
+        </button>
         <button id="composer-submit" type="submit">Send</button>
       </div>
       <div class="composer-meta">
@@ -309,7 +316,58 @@ export function renderSessionContent(snapshot, paths, notice = "") {
     </div>
     ${composer(paths, status.key === "running", snapshot.id)}
     ${renderLoginSheet(snapshot.loginSheet, paths)}
-    ${renderOfferPopup(snapshot.offer, paths, notice)}`;
+    ${renderOfferPopup(snapshot.offer, paths, notice)}
+    ${renderOverlay(snapshot.overlay, paths, notice)}`;
+}
+
+export function renderOverlay(overlay, paths, notice = "") {
+  if (!overlay || typeof overlay !== "object" || !overlay.id || !overlay.media?.src) return "";
+  const chrome = overlay.chrome !== false;
+  const action = escapeHtml(paths.overlay ?? "");
+  const title = escapeHtml(overlay.title || "Rate this picture");
+  const src = escapeHtml(overlay.media.src);
+  const alt = escapeHtml(overlay.media.alt || overlay.title || "");
+  const actions = Array.isArray(overlay.actions) ? overlay.actions : [];
+  const buttons = actions.map((item) => {
+    const id = escapeHtml(item.id ?? "");
+    const label = escapeHtml(item.label ?? item.id ?? "");
+    return `<button class="offer-choice overlay-choice overlay-${id}" type="submit" name="choice" value="${id}">${label}</button>`;
+  }).join("");
+  const refusal = notice ? `<p class="notice" role="alert">${escapeHtml(notice)}</p>` : "";
+  const stage = chrome
+    ? `<div class="overlay-stage"><img src="${src}" alt="${alt}"></div>`
+    : `<form class="overlay-stage overlay-stage-hit" action="${action}" method="post"
+        hx-post="${action}"
+        hx-target="#session-panel"
+        hx-swap="innerHTML">
+        <button type="submit" name="choice" value="chrome" aria-label="Show buttons">
+          <img src="${src}" alt="${alt}">
+        </button>
+      </form>`;
+  return `<aside class="overlay-popup${chrome ? "" : " overlay-chrome-hidden"}" role="dialog" aria-modal="true" aria-labelledby="overlay-heading" data-overlay-id="${escapeHtml(overlay.id)}">
+    <div class="offer-sheet overlay-sheet">
+      <header class="offer-head overlay-head">
+        <p class="eyebrow">Find</p>
+        <h2 id="overlay-heading">${title}</h2>
+        <form class="overlay-dismiss" action="${action}" method="post"
+          hx-post="${action}"
+          hx-target="#session-panel"
+          hx-swap="innerHTML">
+          <button type="submit" name="choice" value="dismiss" aria-label="Close">×</button>
+        </form>
+      </header>
+      ${stage}
+      ${refusal}
+      <form class="offer-actions overlay-actions" action="${action}" method="post"
+        hx-post="${action}"
+        hx-target="#session-panel"
+        hx-swap="innerHTML"
+        hx-disabled-elt=".overlay-choice">
+        <button class="offer-choice overlay-choice overlay-chrome-toggle" type="submit" name="choice" value="chrome">Hide buttons</button>
+        ${buttons}
+      </form>
+    </div>
+  </aside>`;
 }
 
 export function renderPage(snapshot, paths, assetPaths, notice = "") {

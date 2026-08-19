@@ -35,6 +35,10 @@ const bundledAssets = Object.freeze({
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
   },
+  "console-v11.css": {
+    type: "text/css; charset=utf-8",
+    body: readFileSync(new URL("assets/console.css", root)),
+  },
   "geist-latin-wght-normal-5.3.0.woff2": {
     type: "font/woff2",
     body: readFileSync(new URL("assets/geist-latin-wght-normal-5.3.0.woff2", root)),
@@ -71,10 +75,14 @@ const bundledAssets = Object.freeze({
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("assets/sw-v10.js", root)),
   },
+  "sw-v11.js": {
+    type: "text/javascript; charset=utf-8",
+    body: readFileSync(new URL("assets/sw-v11.js", root)),
+  },
 });
 
 const LIVE_ASSET_FILES = Object.freeze({
-  "console-v10.css": "assets/console.css",
+  "console-v11.css": "assets/console.css",
   "browser-v4.js": "assets/browser-v4.js",
 });
 const RENDER_FILE = fileURLToPath(new URL("./render.mjs", import.meta.url));
@@ -184,6 +192,7 @@ function routes(basePath, sessionId) {
     interrupt: `${canonical}/interrupt`,
     prompt: `${canonical}/prompt`,
     offer: `${canonical}/offer`,
+    overlay: `${canonical}/overlay`,
     createSession: `${basePath}/sessions`,
     switchSession: `${basePath}/sessions/open`,
   });
@@ -241,17 +250,19 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v10.css`,
+    css: `${assetsPrefix}console-v11.css`,
     browser: `${assetsPrefix}browser-v4.js`,
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
     manifest: `${assetsPrefix}manifest-v3.webmanifest`,
-    serviceWorker: `${basePath}/sw-v10.js`,
+    serviceWorker: `${basePath}/sw-v11.js`,
   });
   const streams = new Set();
   const readOffer = typeof options.offerFor === "function" ? options.offerFor : null;
   const chooseOffer = typeof options.chooseOffer === "function" ? options.chooseOffer : null;
   const readLoginSheet = typeof options.loginSheetFor === "function" ? options.loginSheetFor : null;
+  const readOverlay = typeof options.overlayFor === "function" ? options.overlayFor : null;
+  const chooseOverlay = typeof options.chooseOverlay === "function" ? options.chooseOverlay : null;
 
   async function withSheets(snapshot) {
     if (!snapshot?.id) return snapshot;
@@ -270,6 +281,14 @@ export function createConsoleHandler(backend, options = {}) {
         if (loginSheet) next = { ...next, loginSheet };
       } catch {
         /* login sheet is optional */
+      }
+    }
+    if (readOverlay) {
+      try {
+        const overlay = await readOverlay(snapshot.id);
+        if (overlay) next = { ...next, overlay };
+      } catch {
+        /* session overlay is optional */
       }
     }
     return next;
@@ -293,6 +312,9 @@ export function createConsoleHandler(backend, options = {}) {
       offer?.brief ?? "",
       snapshot?.loginSheet?.action ?? "",
       (snapshot?.loginSheet?.connectors ?? []).map((connector) => connector.id),
+      snapshot?.overlay?.id ?? "",
+      snapshot?.overlay?.media?.src ?? "",
+      snapshot?.overlay?.chrome === false ? "0" : "1",
     ]);
   }
 
@@ -309,7 +331,7 @@ export function createConsoleHandler(backend, options = {}) {
     if (typeof backend.observe !== "function") {
       throw new Error("qq-ui: qq service observe() is required");
     }
-    if (!readOffer) {
+    if (!readOffer && !readOverlay) {
       return backend.observe(sessionId, listener, { intervalMs: ssePollMs, ...extra });
     }
     const intervalMs = extra.intervalMs ?? ssePollMs;
@@ -409,7 +431,7 @@ export function createConsoleHandler(backend, options = {}) {
         write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
         return;
       }
-      const asset = bundledAssets["sw-v10.js"];
+      const asset = bundledAssets["sw-v11.js"];
       write(
         res,
         200,
@@ -450,7 +472,7 @@ export function createConsoleHandler(backend, options = {}) {
         return;
       }
       const asset = resolveAsset(name, liveAssets);
-      if (!asset || name.includes("/") || name === "sw-v10.js") {
+      if (!asset || name.includes("/") || name === "sw-v10.js" || name === "sw-v11.js") {
         text(res, 404, "Not found", head);
         return;
       }
@@ -662,6 +684,42 @@ export function createConsoleHandler(backend, options = {}) {
         const decided = await chooseOffer(selected.sessionId, choice);
         const notice = decided?.status === "refused"
           ? (decided.reason || "leftover offer refused")
+          : "";
+        await mutationResponse(req, res, selected.sessionId, notice);
+      } catch (error) {
+        if (String(req.headers["hx-request"] ?? "").toLowerCase() === "true") {
+          try {
+            await mutationResponse(req, res, selected.sessionId, errorMessage(error));
+            return;
+          } catch {
+            // Fall through when the DSH session itself cannot be read.
+          }
+        }
+        text(res, errorStatus(error), errorMessage(error));
+      }
+      return;
+    }
+
+    if (selected?.action === "overlay") {
+      if (req.method !== "POST") {
+        write(res, 405, { Allow: "POST", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
+        return;
+      }
+      try {
+        if (!sameOrigin(req)) {
+          const error = new Error("Cross-origin form submission refused");
+          error.status = 403;
+          throw error;
+        }
+        if (!chooseOverlay) {
+          const error = new Error("session overlay is unavailable");
+          error.status = 503;
+          throw error;
+        }
+        const form = await readForm(req);
+        const decided = await chooseOverlay(selected.sessionId, form);
+        const notice = decided?.status === "refused"
+          ? (decided.reason || "overlay action refused")
           : "";
         await mutationResponse(req, res, selected.sessionId, notice);
       } catch (error) {
