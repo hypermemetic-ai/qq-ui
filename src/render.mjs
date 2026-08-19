@@ -139,6 +139,30 @@ export function deriveStatus(events, agentStatus) {
   }
 }
 
+function sessionFace(session) {
+  if (typeof session?.alias === "string" && session.alias.length > 0) {
+    return session.alias;
+  }
+  if (Number.isFinite(session?.createdAt) && session.createdAt > 0) {
+    const date = eventTime(session.createdAt).slice(0, 10);
+    if (date) return date;
+  }
+  return "durable";
+}
+
+function liveFace(snapshot) {
+  if (typeof snapshot?.alias === "string" && snapshot.alias.length > 0) {
+    return snapshot.alias;
+  }
+  const current = Array.isArray(snapshot.sessions)
+    ? snapshot.sessions.find((session) => session.id === snapshot.id)
+    : undefined;
+  return sessionFace({
+    alias: current?.alias,
+    createdAt: current?.createdAt,
+  });
+}
+
 function sessionNavigation(snapshot, paths) {
   const choices = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
   return `<details class="session-menu">
@@ -149,10 +173,8 @@ function sessionNavigation(snapshot, paths) {
         <select id="session-choice" name="session" required>
           ${choices.map((session) => {
             const current = session.id === snapshot.id;
-            const created = Number.isFinite(session.createdAt) && session.createdAt > 0
-              ? eventTime(session.createdAt).slice(0, 10)
-              : "durable";
-            const label = `${current ? "Current · " : ""}${created} · ${session.id}`;
+            const face = sessionFace(session);
+            const label = `${current ? "Current · " : ""}${face}`;
             return `<option value="${escapeHtml(session.id)}"${current ? " selected" : ""}>${escapeHtml(label)}</option>`;
           }).join("")}
         </select>
@@ -210,7 +232,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
       <div>
         <p class="eyebrow">DSH durable session</p>
         <h1 id="session-heading">Operator console</h1>
-        <code>${escapeHtml(snapshot.id)}</code>
+        <code>${escapeHtml(liveFace(snapshot))}</code>
       </div>
       <p class="status status-${escapeHtml(status.key)}" role="status"><span class="status-dot" aria-hidden="true"></span><span class="status-label">${escapeHtml(status.label)}</span></p>
       ${sessionNavigation(snapshot, paths)}
