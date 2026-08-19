@@ -31,6 +31,10 @@ const bundledAssets = Object.freeze({
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
   },
+  "console-v10.css": {
+    type: "text/css; charset=utf-8",
+    body: readFileSync(new URL("assets/console.css", root)),
+  },
   "geist-latin-wght-normal-5.3.0.woff2": {
     type: "font/woff2",
     body: readFileSync(new URL("assets/geist-latin-wght-normal-5.3.0.woff2", root)),
@@ -70,7 +74,7 @@ const bundledAssets = Object.freeze({
 });
 
 const LIVE_ASSET_FILES = Object.freeze({
-  "console-v9.css": "assets/console.css",
+  "console-v10.css": "assets/console.css",
   "browser-v4.js": "assets/browser-v4.js",
 });
 const RENDER_FILE = fileURLToPath(new URL("./render.mjs", import.meta.url));
@@ -154,6 +158,7 @@ function routes(basePath, sessionId) {
     events: `${canonical}/events`,
     interrupt: `${canonical}/interrupt`,
     prompt: `${canonical}/prompt`,
+    offer: `${canonical}/offer`,
     createSession: `${basePath}/sessions`,
     switchSession: `${basePath}/sessions/open`,
   });
@@ -211,7 +216,7 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v9.css`,
+    css: `${assetsPrefix}console-v10.css`,
     browser: `${assetsPrefix}browser-v4.js`,
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
@@ -219,6 +224,37 @@ export function createConsoleHandler(backend, options = {}) {
     serviceWorker: `${basePath}/sw-v10.js`,
   });
   const streams = new Set();
+  const readOffer = typeof options.offerFor === "function" ? options.offerFor : null;
+  const chooseOffer = typeof options.chooseOffer === "function" ? options.chooseOffer : null;
+
+  async function withOffer(snapshot) {
+    if (!readOffer || !snapshot?.id) return snapshot;
+    try {
+      const offer = await readOffer(snapshot.id);
+      return offer ? { ...snapshot, offer } : snapshot;
+    } catch {
+      return snapshot;
+    }
+  }
+
+  function viewFingerprint(snapshot) {
+    const events = Array.isArray(snapshot?.events) ? snapshot.events : [];
+    const last = events.at(-1);
+    const sessions = Array.isArray(snapshot?.sessions) ? snapshot.sessions : [];
+    const offer = snapshot?.offer;
+    return JSON.stringify([
+      snapshot?.id,
+      snapshot?.agentStatus,
+      events.length,
+      last?.seq,
+      last?.type,
+      last?.data?.reason?.kind,
+      sessions.map((session) => [session.id, session.createdAt, session.alias]),
+      snapshot?.alias,
+      offer?.id ?? "",
+      offer?.brief ?? "",
+    ]);
+  }
 
   async function view(sessionId) {
     const snapshot = await backend.read(sessionId);
@@ -226,14 +262,41 @@ export function createConsoleHandler(backend, options = {}) {
     if (!available.some((session) => session.id === snapshot.id)) {
       available.unshift({ id: snapshot.id, createdAt: 0 });
     }
-    return { ...snapshot, sessions: available };
+    return withOffer({ ...snapshot, sessions: available });
   }
 
   function watch(sessionId, listener, extra = {}) {
     if (typeof backend.observe !== "function") {
       throw new Error("qq-ui: qq service observe() is required");
     }
-    return backend.observe(sessionId, listener, { intervalMs: ssePollMs, ...extra });
+    if (!readOffer) {
+      return backend.observe(sessionId, listener, { intervalMs: ssePollMs, ...extra });
+    }
+    const intervalMs = extra.intervalMs ?? ssePollMs;
+    let cancelled = false;
+    let timer;
+    let fingerprint;
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        const snapshot = await view(sessionId);
+        const next = viewFingerprint(snapshot);
+        if (next !== fingerprint) {
+          fingerprint = next;
+          try { listener(null, snapshot); } catch {}
+        }
+      } catch (error) {
+        try { listener(error); } catch {}
+      }
+      if (cancelled) return;
+      timer = setTimeout(tick, intervalMs);
+      timer.unref?.();
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }
 
   function navigationResponse(req, res, location, head = false) {
@@ -531,6 +594,43 @@ export function createConsoleHandler(backend, options = {}) {
           interrupted ? "Interrupt requested for the running DSH turn." : "No DSH turn was running.",
         );
       } catch (error) {
+        text(res, errorStatus(error), errorMessage(error));
+      }
+      return;
+    }
+
+    if (selected?.action === "offer") {
+      if (req.method !== "POST") {
+        write(res, 405, { Allow: "POST", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
+        return;
+      }
+      try {
+        if (!sameOrigin(req)) {
+          const error = new Error("Cross-origin form submission refused");
+          error.status = 403;
+          throw error;
+        }
+        if (!chooseOffer) {
+          const error = new Error("leftover offer is unavailable");
+          error.status = 503;
+          throw error;
+        }
+        const form = await readForm(req);
+        const choice = String(form.get("choice") ?? "").trim();
+        const decided = await chooseOffer(selected.sessionId, choice);
+        const notice = decided?.status === "refused"
+          ? (decided.reason || "leftover offer refused")
+          : "";
+        await mutationResponse(req, res, selected.sessionId, notice);
+      } catch (error) {
+        if (String(req.headers["hx-request"] ?? "").toLowerCase() === "true") {
+          try {
+            await mutationResponse(req, res, selected.sessionId, errorMessage(error));
+            return;
+          } catch {
+            // Fall through when the DSH session itself cannot be read.
+          }
+        }
         text(res, errorStatus(error), errorMessage(error));
       }
       return;

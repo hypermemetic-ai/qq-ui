@@ -187,6 +187,38 @@ function sessionNavigation(snapshot, paths) {
   </details>`;
 }
 
+export function renderOfferPopup(offer, paths) {
+  if (!offer || typeof offer.brief !== "string" || offer.brief.trim().length === 0) return "";
+  const runner = typeof offer.runnerBrief === "string" && offer.runnerBrief.trim()
+    ? `<section class="offer-runner" aria-label="Runner-only brief">
+        <h3>For the runner</h3>
+        ${renderMessageText(offer.runnerBrief)}
+      </section>`
+    : "";
+  const action = escapeHtml(paths.offer ?? "");
+  return `<aside class="offer-popup" role="dialog" aria-modal="true" aria-labelledby="offer-heading" data-offer-id="${escapeHtml(offer.id ?? "")}">
+    <div class="offer-sheet">
+      <header class="offer-head">
+        <p class="eyebrow">Ready leftover</p>
+        <h2 id="offer-heading">${escapeHtml(offer.title || "Hand off, bank, or ignore")}</h2>
+      </header>
+      <div class="offer-brief" tabindex="0">
+        ${renderMessageText(offer.brief)}
+        ${runner}
+      </div>
+      <form class="offer-actions" action="${action}" method="post"
+        hx-post="${action}"
+        hx-target="#session-panel"
+        hx-swap="innerHTML"
+        hx-disabled-elt=".offer-choice">
+        <button class="offer-choice offer-handoff" type="submit" name="choice" value="handoff">Hand off</button>
+        <button class="offer-choice offer-bank" type="submit" name="choice" value="bank">Bank</button>
+        <button class="offer-choice offer-ignore" type="submit" name="choice" value="ignore">Ignore</button>
+      </form>
+    </div>
+  </aside>`;
+}
+
 function composer(paths, running, sessionId = "") {
   if (running) {
     return `<form id="interrupt-form" class="composer interrupt-composer" action="${escapeHtml(paths.interrupt)}" method="post"
@@ -242,7 +274,8 @@ export function renderSessionContent(snapshot, paths, notice = "") {
     <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
       ${transcript || '<p class="empty-transcript">This DSH session has no transcript yet.</p>'}
     </div>
-    ${composer(paths, status.key === "running", snapshot.id)}`;
+    ${composer(paths, status.key === "running", snapshot.id)}
+    ${renderOfferPopup(snapshot.offer, paths)}`;
 }
 
 export function renderPage(snapshot, paths, assetPaths, notice = "") {

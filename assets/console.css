@@ -545,6 +545,95 @@ body > footer {
 
 .offline-message a { color: #72d7c0; }
 
+.offer-popup {
+  display: none;
+}
+
+.offer-sheet {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: #0d1216;
+}
+
+.offer-head {
+  flex: none;
+  padding: max(.85rem, env(safe-area-inset-top)) 1.1rem .7rem;
+  border-bottom: 1px solid #253039;
+}
+
+.offer-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  line-height: 1.2;
+}
+
+.offer-brief {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 1rem 1.1rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.offer-runner {
+  margin-top: 1.1rem;
+  padding-top: .85rem;
+  border-top: 1px dashed #304039;
+}
+
+.offer-runner h3 {
+  margin: 0 0 .45rem;
+  color: #97a3af;
+  font-size: .72rem;
+  font-weight: 750;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.offer-actions {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: .55rem;
+  padding: .75rem 1.1rem max(.9rem, env(safe-area-inset-bottom));
+  border-top: 1px solid #253039;
+  background: #0c1115;
+}
+
+.offer-choice {
+  min-height: 2.85rem;
+  padding: .7rem 1rem;
+  border: 1px solid #34414b;
+  border-radius: .65rem;
+  background: #151d23;
+  color: #e8edf2;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.offer-handoff {
+  border-color: #72d7c0;
+  background: #72d7c0;
+  color: #07120f;
+}
+
+.offer-bank {
+  border-color: #4b9e8b;
+  background: #12231f;
+  color: #dffbf3;
+}
+
+.offer-ignore {
+  border-color: #3a474f;
+  background: #10151a;
+  color: #c9d2d9;
+}
+
+.offer-choice:disabled { cursor: wait; opacity: .55; }
+
 @media (max-width: 42rem) {
   html, body {
     position: fixed;
@@ -620,6 +709,22 @@ body > footer {
   .interrupt-composer { align-items: center; }
   .interrupt-composer .composer-actions { justify-content: flex-end; }
   .key-hint { display: none; }
+  .offer-popup {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 8;
+    width: 100%;
+    height: 100%;
+    background: #090c10;
+  }
+  .offer-sheet { width: 100%; }
+  .offer-actions {
+    grid-template-columns: 1fr;
+    gap: .5rem;
+    padding: .65rem max(.65rem, env(safe-area-inset-right)) max(.65rem, env(safe-area-inset-bottom)) max(.65rem, env(safe-area-inset-left));
+  }
+  .offer-choice { min-height: 2.85rem; }
 }
 
 @media (max-width: 23rem) {

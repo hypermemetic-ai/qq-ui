@@ -9,6 +9,7 @@ const staticPaths = [
   `${scopePath}/assets/htmx-ext-sse-2.2.4.js`,
   `${scopePath}/assets/console-v8.css`,
   `${scopePath}/assets/console-v9.css`,
+  `${scopePath}/assets/console-v10.css`,
   `${scopePath}/assets/geist-latin-wght-normal-5.3.0.woff2`,
   `${scopePath}/assets/geist-latin-wght-italic-5.3.0.woff2`,
   `${scopePath}/assets/browser-v4.js`,

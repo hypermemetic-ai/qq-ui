@@ -10,11 +10,14 @@ export function apply(ctx, config) {
   }
   const qq = ctx.get("qq");
   if (!qq) throw new Error("qq-ui: qq service is unavailable");
+  const workflowsOf = () => ctx.get?.("qq-workflows", false) ?? null;
   const basePath = String(config?.basePath ?? "/qq");
   const handler = createConsoleHandler(qq, {
     basePath,
     ssePollMs: config?.ssePollMs,
     liveAssets: config?.liveAssets === true,
+    offerFor: (sessionId) => workflowsOf()?.offer?.(sessionId),
+    chooseOffer: (sessionId, choice) => workflowsOf()?.choose?.(sessionId, { choice }),
   });
   ctx.effect(() => {
     const unregister = ctx.webServer.register({
