@@ -25,6 +25,12 @@ export function apply(ctx, config) {
     overlayFor: (sessionId) => finderOf()?.overlayFor?.(sessionId),
     chooseOverlay: (sessionId, form) => finderOf()?.chooseOverlay?.(sessionId, form),
     progressFor: () => mediaOf()?.progressFor?.(),
+    inFindMode: (sessionId) => finderOf()?.inFindMode?.(sessionId) === true,
+    sessionModeFor: (sessionId) => {
+      const selected = workflowsOf()?.workflows?.selected?.(sessionId) ?? null;
+      if (selected === "architect" || selected === "iterate" || selected === "find") return selected;
+      return finderOf()?.inFindMode?.(sessionId) ? "find" : null;
+    },
   });
   ctx.effect(() => {
     const unregisterConsole = ctx.webServer.register({

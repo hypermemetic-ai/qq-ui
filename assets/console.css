@@ -153,6 +153,18 @@ code {
 .status-running { color: #f7ce74; border-color: #514526; background: #201c10; }
 .status-error, .status-stopped { color: #ffaaa4; border-color: #59302e; background: #231413; }
 
+.session-mode {
+  margin: 0 0 .35rem;
+  color: #f7ce74;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.session-mode[data-mode="find"] { color: #70d8c1; }
+.session-mode[data-mode="architect"] { color: #9ecbff; }
+.session-mode[data-mode="iterate"] { color: #d4b3ff; }
+
 .session-menu { flex: none; }
 
 .session-menu > summary {
@@ -210,7 +222,7 @@ code {
 
 .session-picker {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   min-width: 0;
   align-items: center;
   gap: .55rem;
@@ -267,7 +279,8 @@ code {
   color: #dffbf3;
 }
 
-.notice {
+.notice,
+.notice-ok {
   flex: none;
   margin: .7rem 1.5rem 0;
   padding: .65rem .8rem;
@@ -276,6 +289,19 @@ code {
   background: #2a1715;
   color: #ffc4bf;
   font-size: .8rem;
+  white-space: pre-wrap;
+}
+
+.notice-ok {
+  border-color: #2d5a4a;
+  background: #12231f;
+  color: #dffbf3;
+}
+
+.workflows-current {
+  border-color: #4b9e8b;
+  background: #12231f;
+  color: #dffbf3;
 }
 
 .turn-error {
@@ -565,6 +591,11 @@ code {
 }
 
 .close-session { display: none; }
+.close-session button {
+  border-color: #6a3834;
+  background: #2a1715;
+  color: #ffc4bf;
+}
 
 .composer-actions button { margin-left: auto; }
 
@@ -711,6 +742,30 @@ body > footer {
 }
 .overlay-popup .overlay-head .eyebrow,
 .overlay-popup .overlay-head h2 { grid-column: 1; }
+.overlay-saving {
+  grid-column: 1;
+  margin: 0;
+  color: #f7ce74;
+  font-size: .78rem;
+  font-weight: 650;
+}
+.overlay-cancel {
+  grid-column: 2;
+  grid-row: 3;
+  margin: 0;
+}
+.overlay-cancel button {
+  min-height: 2.2rem;
+  padding: .35rem .7rem;
+  border: 1px solid #59302e;
+  border-radius: .55rem;
+  background: #231413;
+  color: #ffaaa4;
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 650;
+  cursor: pointer;
+}
 .overlay-dismiss { grid-column: 2; grid-row: 1 / span 2; }
 .overlay-dismiss button {
   min-width: 2.6rem;
@@ -734,6 +789,10 @@ body > footer {
 .overlay-stage img {
   max-width: 100%;
   max-height: 100%;
+}
+.overlay-stage img[data-fit="contain"] {
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 .overlay-stage-hit,
@@ -756,7 +815,9 @@ body > footer {
 .overlay-chrome-toggle { grid-column: 1 / -1; }
 .overlay-chrome-hidden .overlay-actions,
 .overlay-chrome-hidden .overlay-head .eyebrow,
-.overlay-chrome-hidden .overlay-head h2 { display: none; }
+.overlay-chrome-hidden .overlay-head h2,
+.overlay-chrome-hidden .overlay-saving,
+.overlay-chrome-hidden .overlay-cancel { display: none; }
 .overlay-chrome-hidden .overlay-sheet { background: #000; }
 .overlay-chrome-hidden .overlay-head {
   position: absolute;
@@ -784,6 +845,11 @@ body > footer {
     padding: max(.45rem, env(safe-area-inset-top)) max(.65rem, env(safe-area-inset-right)) .45rem max(.65rem, env(safe-area-inset-left));
   }
   .session-heading .eyebrow { display: none; }
+  .session-heading .session-mode {
+    display: block;
+    margin: 0 0 .15rem;
+    font-size: .62rem;
+  }
   .session-heading h1 { margin-bottom: .12rem; font-size: 1rem; }
   .download-chip {
     margin-top: .15rem;
@@ -811,14 +877,25 @@ body > footer {
     right: max(.65rem, env(safe-area-inset-right));
     width: auto;
     left: max(.65rem, env(safe-area-inset-left));
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: .5rem;
     padding: .5rem;
   }
-  .session-picker { gap: .4rem; }
+  .session-picker { grid-column: 1 / -1; gap: .4rem; }
   .session-picker label span { display: none; }
   .session-picker select { height: 2.75rem; padding-inline: .5rem; }
+  .close-session { display: block; }
   .session-controls button { min-height: 2.75rem; padding-inline: .65rem; }
-  .notice {
+  .composer-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+  #composer-submit {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+  }
+  .notice,
+  .notice-ok {
     margin: .5rem .85rem 0;
     padding: .55rem .65rem;
     line-height: 1.35;
@@ -877,7 +954,8 @@ body > footer {
   .session-controls { padding-block: .4rem; }
   .session-picker select,
   .session-controls button { min-height: 2.75rem; height: 2.75rem; }
-  .notice { font-size: .74rem; }
+  .notice,
+  .notice-ok { font-size: .74rem; }
   .composer { padding-top: .35rem; }
   .composer textarea,
   .composer button { min-height: 2.75rem; }

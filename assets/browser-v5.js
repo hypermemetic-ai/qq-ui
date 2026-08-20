@@ -37,12 +37,10 @@
     .map((option) => option.value)
     .filter(Boolean);
   const openSession = (sessionId) => {
-    if (!sessionId) return;
-    const form = document.querySelector(".session-picker");
-    const select = document.querySelector("#session-choice");
-    if (!(form instanceof HTMLFormElement) || !(select instanceof HTMLSelectElement)) return;
-    select.value = sessionId;
-    form.requestSubmit();
+    if (!sessionId || sessionId === currentSessionId()) return;
+    const match = location.pathname.match(/^(.*)\/session\/session-[0-9a-fA-F-]{36}(?:\/|$)/);
+    const base = match ? match[1] : "/qq";
+    location.assign(`${base}/session/${sessionId}`);
   };
   const neighborSession = (delta) => {
     const ids = sessionIds();
@@ -61,14 +59,14 @@
     if (mode === "end") transcript.scrollTop = transcript.scrollHeight;
   };
   const dismissSheet = () => {
-    const overlayDismiss = document.querySelector('.overlay-dismiss button[value="dismiss"]');
-    if (overlayDismiss instanceof HTMLElement) {
-      overlayDismiss.click();
-      return true;
-    }
     const ignore = document.querySelector(".offer-ignore");
     if (ignore instanceof HTMLElement) {
       ignore.click();
+      return true;
+    }
+    const workflows = document.querySelector(".workflows-popup");
+    if (workflows) {
+      workflows.remove();
       return true;
     }
     return false;
@@ -85,6 +83,19 @@
   };
 
   let pendingClose = false;
+
+  document.addEventListener("change", (event) => {
+    const select = event.target;
+    if (!(select instanceof HTMLSelectElement) || select.id !== "session-choice") return;
+    if (select.value) openSession(select.value);
+  });
+
+  document.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest(".workflows-dismiss") : null;
+    if (!(button instanceof HTMLElement)) return;
+    event.preventDefault();
+    button.closest(".workflows-popup")?.remove();
+  });
 
   document.addEventListener("input", (event) => {
     if (event.target instanceof HTMLTextAreaElement && event.target.id === "prompt") {
@@ -124,6 +135,14 @@
       if (key === "x" || key === "X") {
         event.preventDefault();
         pendingClose = false;
+        if (document.querySelector(".overlay-popup")) {
+          clickButton('.overlay-dismiss button[value="dismiss"]');
+          return;
+        }
+        if (document.querySelector(".workflows-popup")) {
+          document.querySelector(".workflows-popup")?.remove();
+          return;
+        }
         submitForm("#close-session");
         return;
       }
@@ -152,6 +171,18 @@
       event.preventDefault();
       submitForm(".new-session");
       return;
+    }
+    const overlay = document.querySelector(".overlay-popup");
+    if (overlay) {
+      const reserved = key === "h" || key === "H" || key === "q" || key === "Q" || key === "x" || key === "X" || key === "Escape";
+      let bound = null;
+      try { bound = JSON.parse(overlay.dataset.overlayKeys || "{}"); } catch { bound = null; }
+      const action = !reserved && bound && bound[key];
+      if (typeof action === "string" && action) {
+        event.preventDefault();
+        clickButton(`.overlay-${action}`);
+        return;
+      }
     }
     if (key === "ArrowLeft") {
       event.preventDefault();

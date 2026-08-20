@@ -47,6 +47,18 @@ const bundledAssets = Object.freeze({
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
   },
+  "console-v14.css": {
+    type: "text/css; charset=utf-8",
+    body: readFileSync(new URL("assets/console.css", root)),
+  },
+  "console-v15.css": {
+    type: "text/css; charset=utf-8",
+    body: readFileSync(new URL("assets/console.css", root)),
+  },
+  "console-v16.css": {
+    type: "text/css; charset=utf-8",
+    body: readFileSync(new URL("assets/console.css", root)),
+  },
   "geist-latin-wght-normal-5.3.0.woff2": {
     type: "font/woff2",
     body: readFileSync(new URL("assets/geist-latin-wght-normal-5.3.0.woff2", root)),
@@ -60,6 +72,14 @@ const bundledAssets = Object.freeze({
     body: readFileSync(new URL("assets/browser-v4.js", root)),
   },
   "browser-v5.js": {
+    type: "text/javascript; charset=utf-8",
+    body: readFileSync(new URL("assets/browser-v5.js", root)),
+  },
+  "browser-v6.js": {
+    type: "text/javascript; charset=utf-8",
+    body: readFileSync(new URL("assets/browser-v5.js", root)),
+  },
+  "browser-v7.js": {
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("assets/browser-v5.js", root)),
   },
@@ -99,11 +119,23 @@ const bundledAssets = Object.freeze({
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("assets/sw-v13.js", root)),
   },
+  "sw-v14.js": {
+    type: "text/javascript; charset=utf-8",
+    body: readFileSync(new URL("assets/sw-v14.js", root)),
+  },
+  "sw-v15.js": {
+    type: "text/javascript; charset=utf-8",
+    body: readFileSync(new URL("assets/sw-v15.js", root)),
+  },
+  "sw-v16.js": {
+    type: "text/javascript; charset=utf-8",
+    body: readFileSync(new URL("assets/sw-v16.js", root)),
+  },
 });
 
 const LIVE_ASSET_FILES = Object.freeze({
-  "console-v13.css": "assets/console.css",
-  "browser-v5.js": "assets/browser-v5.js",
+  "console-v16.css": "assets/console.css",
+  "browser-v7.js": "assets/browser-v5.js",
 });
 const RENDER_FILE = fileURLToPath(new URL("./render.mjs", import.meta.url));
 
@@ -258,6 +290,20 @@ function isQqService(backend) {
   );
 }
 
+function overlaySaveChoice(form) {
+  const choice = String(form?.get?.("choice") ?? "").trim();
+  return choice === "keep" || choice === "good";
+}
+
+function compilingFindPrompt(prompt, sessionId, inFindMode) {
+  const trimmed = String(prompt ?? "").trim();
+  if (!trimmed) return false;
+  const match = /^\/find(?:[\t ]+(.*))?$/su.exec(trimmed);
+  if (match) return Boolean(String(match[1] ?? "").trim());
+  if (trimmed.startsWith("/")) return false;
+  return typeof inFindMode === "function" && inFindMode(sessionId) === true;
+}
+
 /** Build one HTTP handler over the qq session service. */
 export function createConsoleHandler(backend, options = {}) {
   if (!isQqService(backend)) {
@@ -272,20 +318,23 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v13.css`,
-    browser: `${assetsPrefix}browser-v5.js`,
+    css: `${assetsPrefix}console-v16.css`,
+    browser: `${assetsPrefix}browser-v7.js`,
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
     manifest: `${assetsPrefix}manifest-v3.webmanifest`,
-    serviceWorker: `${basePath}/sw-v13.js`,
+    serviceWorker: `${basePath}/sw-v16.js`,
   });
   const streams = new Set();
+  const findWork = new Map();
   const readOffer = typeof options.offerFor === "function" ? options.offerFor : null;
   const chooseOffer = typeof options.chooseOffer === "function" ? options.chooseOffer : null;
   const readLoginSheet = typeof options.loginSheetFor === "function" ? options.loginSheetFor : null;
   const readOverlay = typeof options.overlayFor === "function" ? options.overlayFor : null;
   const chooseOverlay = typeof options.chooseOverlay === "function" ? options.chooseOverlay : null;
   const readProgress = typeof options.progressFor === "function" ? options.progressFor : null;
+  const inFindMode = typeof options.inFindMode === "function" ? options.inFindMode : null;
+  const sessionModeFor = typeof options.sessionModeFor === "function" ? options.sessionModeFor : null;
 
   async function withSheets(snapshot) {
     if (!snapshot?.id) return snapshot;
@@ -322,6 +371,10 @@ export function createConsoleHandler(backend, options = {}) {
         /* download chip is optional */
       }
     }
+    const mode = sessionModeFor?.(snapshot.id) ?? (inFindMode?.(snapshot.id) ? "find" : null);
+    if (mode) next = { ...next, sessionMode: mode };
+    const work = findWork.get(snapshot.id);
+    if (work) next = { ...next, findWork: work };
     return next;
   }
 
@@ -350,6 +403,8 @@ export function createConsoleHandler(backend, options = {}) {
       snapshot?.progress?.percent ?? "",
       snapshot?.progress?.rate ?? "",
       snapshot?.progress?.eta ?? "",
+      snapshot?.sessionMode ?? "",
+      snapshot?.findWork ?? "",
     ]);
   }
 
@@ -366,7 +421,7 @@ export function createConsoleHandler(backend, options = {}) {
     if (typeof backend.observe !== "function") {
       throw new Error("qq-ui: qq service observe() is required");
     }
-    if (!readOffer && !readOverlay && !readProgress) {
+    if (!readOffer && !readOverlay && !readProgress && !inFindMode && !sessionModeFor) {
       return backend.observe(sessionId, listener, { intervalMs: ssePollMs, ...extra });
     }
     const intervalMs = extra.intervalMs ?? ssePollMs;
@@ -466,7 +521,7 @@ export function createConsoleHandler(backend, options = {}) {
         write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
         return;
       }
-      const asset = bundledAssets["sw-v13.js"];
+      const asset = bundledAssets["sw-v16.js"];
       write(
         res,
         200,
@@ -507,7 +562,7 @@ export function createConsoleHandler(backend, options = {}) {
         return;
       }
       const asset = resolveAsset(name, liveAssets);
-      if (!asset || name.includes("/") || name === "sw-v10.js" || name === "sw-v11.js" || name === "sw-v12.js" || name === "sw-v13.js") {
+      if (!asset || name.includes("/") || name === "sw-v10.js" || name === "sw-v11.js" || name === "sw-v12.js" || name === "sw-v13.js" || name === "sw-v14.js" || name === "sw-v15.js" || name === "sw-v16.js") {
         text(res, 404, "Not found", head);
         return;
       }
@@ -655,9 +710,17 @@ export function createConsoleHandler(backend, options = {}) {
           error.status = 413;
           throw error;
         }
-        const result = await backend.prompt(selected.sessionId, prompt);
-        await mutationResponse(req, res, selected.sessionId, typeof result === "string" ? result : "");
+        const compiling = compilingFindPrompt(prompt, selected.sessionId, inFindMode);
+        if (compiling) findWork.set(selected.sessionId, "compile");
+        try {
+          const result = await backend.prompt(selected.sessionId, prompt);
+          findWork.delete(selected.sessionId);
+          await mutationResponse(req, res, selected.sessionId, typeof result === "string" ? result : "");
+        } finally {
+          findWork.delete(selected.sessionId);
+        }
       } catch (error) {
+        findWork.delete(selected.sessionId);
         const message = errorMessage(error);
         const unknownSlash = /unknown slash command/.test(message);
         if (!unknownSlash && String(req.headers["hx-request"] ?? "").toLowerCase() === "true") {
@@ -705,6 +768,7 @@ export function createConsoleHandler(backend, options = {}) {
           throw error;
         }
         await readForm(req);
+        findWork.delete(selected.sessionId);
         const interrupted = await backend.interrupt(selected.sessionId);
         await mutationResponse(
           req,
@@ -772,12 +836,20 @@ export function createConsoleHandler(backend, options = {}) {
           throw error;
         }
         const form = await readForm(req);
-        const decided = await chooseOverlay(selected.sessionId, form);
-        const notice = decided?.status === "refused"
-          ? (decided.reason || "overlay action refused")
-          : "";
-        await mutationResponse(req, res, selected.sessionId, notice);
+        const saving = overlaySaveChoice(form);
+        if (saving) findWork.set(selected.sessionId, "save");
+        try {
+          const decided = await chooseOverlay(selected.sessionId, form);
+          findWork.delete(selected.sessionId);
+          const notice = decided?.status === "refused"
+            ? (decided.reason || "overlay action refused")
+            : "";
+          await mutationResponse(req, res, selected.sessionId, notice);
+        } finally {
+          findWork.delete(selected.sessionId);
+        }
       } catch (error) {
+        findWork.delete(selected.sessionId);
         if (String(req.headers["hx-request"] ?? "").toLowerCase() === "true") {
           try {
             await mutationResponse(req, res, selected.sessionId, errorMessage(error));
@@ -810,6 +882,8 @@ export const internals = Object.freeze({
   LIVE_ASSET_FILES,
   assetNames: Object.keys(bundledAssets),
   file: fileURLToPath(import.meta.url),
+  compilingFindPrompt,
+  overlaySaveChoice,
   normalizeBasePath,
   parseSessionRoute,
   resolveAsset,

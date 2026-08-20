@@ -178,10 +178,11 @@ function liveFace(snapshot) {
 
 function sessionNavigation(snapshot, paths) {
   const choices = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
+  const switchAction = escapeHtml(paths.switchSession);
   return `<details class="session-menu">
     <summary aria-label="Show session controls"><span>Sessions</span></summary>
     <div class="session-controls" role="group" aria-label="Session controls">
-      <form class="session-picker" action="${escapeHtml(paths.switchSession)}" method="get">
+      <form class="session-picker" action="${switchAction}" method="get">
         <label for="session-choice">Session <span>${choices.length} durable</span></label>
         <select id="session-choice" name="session" required>
           ${choices.map((session) => {
@@ -191,12 +192,11 @@ function sessionNavigation(snapshot, paths) {
             return `<option value="${escapeHtml(session.id)}"${current ? " selected" : ""}>${escapeHtml(label)}</option>`;
           }).join("")}
         </select>
-        <button type="submit">Open</button>
       </form>
       <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
         <button type="submit" aria-label="Start a new durable DSH session">New <span>session</span></button>
       </form>
-      <form id="close-session" class="close-session" action="${escapeHtml(paths.close)}" method="post" hidden>
+      <form id="close-session" class="close-session" action="${escapeHtml(paths.close)}" method="post">
         <button type="submit" aria-label="Close this session">Close</button>
       </form>
     </div>
@@ -268,8 +268,82 @@ export function renderOfferPopup(offer, paths, notice = "") {
   </aside>`;
 }
 
-function composer(paths, running, sessionId = "") {
-  if (running) {
+function renderSlashNotice(notice, paths) {
+  const text = String(notice ?? "").trim();
+  if (!text) return "";
+  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const names = [];
+  let selected = "";
+  let isList = lines.length >= 2;
+  for (const line of lines) {
+    if (line === "none selected") continue;
+    const match = /^([a-z][a-z0-9-]*)(?: \(selected\))?$/.exec(line);
+    if (!match) {
+      isList = false;
+      break;
+    }
+    names.push(match[1]);
+    if (line.endsWith("(selected)")) selected = match[1];
+  }
+  if (!isList || names.length === 0) {
+    const kind = / selected$/.test(text) || text === "none selected" ? "notice-ok" : "notice";
+    return `<p class="${kind}" role="status">${escapeHtml(text)}</p>`;
+  }
+  const action = escapeHtml(paths.prompt ?? "");
+  const buttons = [
+    ...names.map((name) => {
+      const current = name === selected ? " workflows-current" : "";
+      return `<button class="offer-choice workflows-choice${current}" type="submit" name="prompt" value="/workflows ${escapeHtml(name)}">${escapeHtml(name)}</button>`;
+    }),
+    `<button class="offer-choice workflows-choice workflows-none" type="submit" name="prompt" value="/workflows none">none</button>`,
+  ].join("");
+  return `<aside class="offer-popup workflows-popup" role="dialog" aria-modal="true" aria-labelledby="workflows-heading">
+    <div class="offer-sheet">
+      <header class="offer-head">
+        <p class="eyebrow">Workflows</p>
+        <h2 id="workflows-heading">Pick a workflow</h2>
+      </header>
+      <form class="offer-actions workflows-actions" action="${action}" method="post"
+        hx-post="${action}"
+        hx-target="#session-panel"
+        hx-swap="innerHTML"
+        hx-disabled-elt=".workflows-choice">
+        ${buttons}
+        <button class="offer-choice workflows-choice workflows-dismiss" type="button">Cancel</button>
+      </form>
+    </div>
+  </aside>`;
+}
+
+function overlayKeysAttr(keys) {
+  if (!keys || typeof keys !== "object") return "";
+  const reserved = new Set(["h", "H", "q", "Q", "x", "X", "Escape"]);
+  const allowed = {};
+  for (const [key, action] of Object.entries(keys)) {
+    if (reserved.has(key)) continue;
+    if (!/^[A-Za-z][A-Za-z0-9]*$/.test(key)) continue;
+    const id = String(action ?? "");
+    if (!/^[a-z][a-z0-9-]*$/.test(id)) continue;
+    allowed[key] = id;
+  }
+  if (Object.keys(allowed).length === 0) return "";
+  return ` data-overlay-keys="${escapeHtml(JSON.stringify(allowed))}"`;
+}
+
+function sessionModeChip(mode) {
+  if (mode !== "architect" && mode !== "iterate" && mode !== "find") return "";
+  const label = mode === "architect" ? "Architect" : mode === "iterate" ? "Iterate" : "Find";
+  return `<p class="session-mode" data-mode="${mode}">${label}</p>`;
+}
+
+function composer(paths, running, sessionId = "", findWork = "") {
+  if (findWork === "compile" || findWork === "save" || running) {
+    const label = findWork === "save"
+      ? "Saving…"
+      : findWork === "compile"
+        ? "Finding…"
+        : "The current DSH turn is still running.";
+    const submit = findWork ? "Cancel" : "Interrupt";
     return `<form id="interrupt-form" class="composer interrupt-composer" action="${escapeHtml(paths.interrupt)}" method="post"
       data-session-id="${escapeHtml(sessionId)}"
       hx-post="${escapeHtml(paths.interrupt)}"
@@ -277,10 +351,10 @@ function composer(paths, running, sessionId = "") {
       hx-swap="innerHTML"
       hx-disabled-elt="#interrupt-submit"
       hx-indicator="#interrupt-working">
-      <p>The current DSH turn is still running.</p>
+      <p>${label}</p>
       <div class="composer-actions">
         <span id="interrupt-working" class="htmx-indicator" aria-live="polite">Interrupting DSH…</span>
-        <button id="interrupt-submit" class="button-danger" type="submit">Interrupt</button>
+        <button id="interrupt-submit" class="button-danger" type="submit">${submit}</button>
       </div>
     </form>`;
   }
@@ -317,9 +391,11 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   const events = Array.isArray(snapshot.events) ? snapshot.events : [];
   const status = deriveStatus(events, snapshot.agentStatus);
   const transcript = events.map(eventMessage).filter(Boolean).join("\n");
+  const findWork = snapshot.findWork === "save" ? "save" : snapshot.findWork === "compile" ? "compile" : "";
   return `<div class="session-heading">
       <div>
         <p class="eyebrow">DSH durable session</p>
+        ${sessionModeChip(snapshot.sessionMode)}
         <h1 id="session-heading">Operator console</h1>
         <code>${escapeHtml(liveFace(snapshot))}</code>
         ${renderProgressChip(snapshot.progress)}
@@ -328,23 +404,25 @@ export function renderSessionContent(snapshot, paths, notice = "") {
       ${sessionNavigation(snapshot, paths)}
     </div>
     ${status.detail ? `<p class="notice turn-error" role="alert"><strong>${escapeHtml(status.label)}</strong><span>${escapeHtml(status.detail)}</span>${status.code ? `<code>${escapeHtml(status.code)}</code>` : ""}</p>` : ""}
-    ${notice ? `<p class="notice" role="alert">${escapeHtml(notice)}</p>` : ""}
+    ${renderSlashNotice(notice, paths)}
     <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
       ${transcript || '<p class="empty-transcript">This DSH session has no transcript yet.</p>'}
     </div>
-    ${composer(paths, status.key === "running", snapshot.id)}
+    ${composer(paths, status.key === "running", snapshot.id, findWork)}
     ${renderLoginSheet(snapshot.loginSheet, paths)}
     ${renderOfferPopup(snapshot.offer, paths, notice)}
-    ${renderOverlay(snapshot.overlay, paths, notice)}`;
+    ${renderOverlay(snapshot.overlay, paths, notice, findWork)}`;
 }
 
-export function renderOverlay(overlay, paths, notice = "") {
+export function renderOverlay(overlay, paths, notice = "", findWork = "") {
   if (!overlay || typeof overlay !== "object" || !overlay.id || !overlay.media?.src) return "";
   const chrome = overlay.chrome !== false;
   const action = escapeHtml(paths.overlay ?? "");
   const title = escapeHtml(overlay.title || "Rate this picture");
   const src = escapeHtml(overlay.media.src);
   const alt = escapeHtml(overlay.media.alt || overlay.title || "");
+  const fit = overlay.media.fit === "contain" ? " data-fit=\"contain\"" : "";
+  const keysAttr = overlayKeysAttr(overlay.keys);
   const actions = Array.isArray(overlay.actions) ? overlay.actions : [];
   const buttons = actions.map((item) => {
     const id = escapeHtml(item.id ?? "");
@@ -352,21 +430,31 @@ export function renderOverlay(overlay, paths, notice = "") {
     return `<button class="offer-choice overlay-choice overlay-${id}" type="submit" name="choice" value="${id}">${label}</button>`;
   }).join("");
   const refusal = notice ? `<p class="notice" role="alert">${escapeHtml(notice)}</p>` : "";
+  const saving = findWork === "save"
+    ? `<p class="overlay-saving" aria-live="polite">Saving…</p>
+        <form class="overlay-cancel" action="${escapeHtml(paths.interrupt)}" method="post"
+          hx-post="${escapeHtml(paths.interrupt)}"
+          hx-target="#session-panel"
+          hx-swap="innerHTML">
+          <button type="submit">Cancel</button>
+        </form>`
+    : "";
   const stage = chrome
-    ? `<div class="overlay-stage"><img src="${src}" alt="${alt}"></div>`
+    ? `<div class="overlay-stage"><img src="${src}" alt="${alt}"${fit}></div>`
     : `<form class="overlay-stage overlay-stage-hit" action="${action}" method="post"
         hx-post="${action}"
         hx-target="#session-panel"
         hx-swap="innerHTML">
         <button type="submit" name="choice" value="chrome" aria-label="Show buttons">
-          <img src="${src}" alt="${alt}">
+          <img src="${src}" alt="${alt}"${fit}>
         </button>
       </form>`;
-  return `<aside class="overlay-popup${chrome ? "" : " overlay-chrome-hidden"}" role="dialog" aria-modal="true" aria-labelledby="overlay-heading" data-overlay-id="${escapeHtml(overlay.id)}">
+  return `<aside class="overlay-popup${chrome ? "" : " overlay-chrome-hidden"}" role="dialog" aria-modal="true" aria-labelledby="overlay-heading" data-overlay-id="${escapeHtml(overlay.id)}"${keysAttr}>
     <div class="offer-sheet overlay-sheet">
       <header class="offer-head overlay-head">
         <p class="eyebrow">Find</p>
         <h2 id="overlay-heading">${title}</h2>
+        ${saving}
         <form class="overlay-dismiss" action="${action}" method="post"
           hx-post="${action}"
           hx-target="#session-panel"
