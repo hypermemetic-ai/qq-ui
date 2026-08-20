@@ -236,7 +236,29 @@ function sameOrigin(req) {
   }
 }
 
-function routes(basePath, sessionId) {
+function encodeProject(name) {
+  return encodeURIComponent(String(name ?? ""));
+}
+
+function routes(basePath, sessionId, project) {
+  if (project) {
+    const projectBase = `${basePath}/project/${encodeProject(project)}`;
+    const canonical = sessionId
+      ? `${projectBase}/session/${encodeURIComponent(sessionId)}`
+      : projectBase;
+    return Object.freeze({
+      canonical,
+      project: projectBase,
+      events: sessionId ? `${canonical}/events` : "",
+      interrupt: sessionId ? `${canonical}/interrupt` : "",
+      prompt: sessionId ? `${canonical}/prompt` : "",
+      offer: sessionId ? `${canonical}/offer` : "",
+      overlay: sessionId ? `${canonical}/overlay` : "",
+      close: sessionId ? `${canonical}/close` : "",
+      createSession: `${projectBase}/sessions`,
+      switchSession: `${basePath}/sessions/open`,
+    });
+  }
   const canonical = `${basePath}/session/${encodeURIComponent(sessionId)}`;
   return Object.freeze({
     canonical,
@@ -263,6 +285,43 @@ function parseSessionRoute(basePath, pathname) {
     return undefined;
   }
   return { sessionId, action: parts[1] ?? "page" };
+}
+
+function parseProjectRoute(basePath, pathname) {
+  const prefix = `${basePath}/project/`;
+  if (!pathname.startsWith(prefix)) return undefined;
+  const parts = pathname.slice(prefix.length).split("/");
+  if (!parts[0]) return undefined;
+  let project;
+  try {
+    project = decodeURIComponent(parts[0]);
+  } catch {
+    return undefined;
+  }
+  if (parts.length === 1) return { project, action: "project" };
+  if (parts[1] === "sessions" && parts.length === 2) return { project, action: "create" };
+  if (parts[1] === "session" && parts[2]) {
+    let sessionId;
+    try {
+      sessionId = decodeURIComponent(parts[2]);
+    } catch {
+      return undefined;
+    }
+    return { project, sessionId, action: parts[3] ?? "page" };
+  }
+  return undefined;
+}
+
+function isProjectAware(backend) {
+  return typeof backend.listProjects === "function" && Boolean(backend.defaultProject);
+}
+
+function isHtmx(req) {
+  return String(req.headers["hx-request"] ?? "").toLowerCase() === "true";
+}
+
+function isNavigateResult(result) {
+  return Boolean(result && typeof result === "object" && result.kind === "navigate" && result.project);
 }
 
 function sseEvent(name, data) {
@@ -385,12 +444,13 @@ export function createConsoleHandler(backend, options = {}) {
     const offer = snapshot?.offer;
     return JSON.stringify([
       snapshot?.id,
+      snapshot?.project,
       snapshot?.agentStatus,
       events.length,
       last?.seq,
       last?.type,
       last?.data?.reason?.kind,
-      sessions.map((session) => [session.id, session.createdAt, session.alias]),
+      sessions.map((session) => [session.id, session.createdAt, session.alias, session.project]),
       snapshot?.alias,
       offer?.id ?? "",
       offer?.brief ?? "",
@@ -410,11 +470,45 @@ export function createConsoleHandler(backend, options = {}) {
 
   async function view(sessionId) {
     const snapshot = await backend.read(sessionId);
-    const available = await backend.list();
-    if (!available.some((session) => session.id === snapshot.id)) {
-      available.unshift({ id: snapshot.id, createdAt: 0 });
+    const available = await backend.list(snapshot.project);
+    if (snapshot.id && !available.some((session) => session.id === snapshot.id)) {
+      available.unshift({
+        id: snapshot.id,
+        createdAt: 0,
+        ...(snapshot.project ? { project: snapshot.project } : {}),
+      });
     }
     return withSheets({ ...snapshot, sessions: available });
+  }
+
+  async function projectView(project) {
+    const available = await backend.list(project);
+    return withSheets({
+      id: "",
+      project,
+      sessions: available,
+      events: [],
+      agentStatus: "idle",
+    });
+  }
+
+  function locationFor(snapshot) {
+    return routes(basePath, snapshot?.id, snapshot?.project).canonical;
+  }
+
+  async function liveLocation(sessionId) {
+    if (typeof backend.inspect === "function") {
+      const info = await backend.inspect(sessionId);
+      if (info.live === false) {
+        const error = new Error("DSH session is not active");
+        error.status = 404;
+        error.code = "inactive";
+        throw error;
+      }
+      return routes(basePath, info.id, info.project).canonical;
+    }
+    const snapshot = await backend.read(sessionId);
+    return locationFor(snapshot);
   }
 
   function watch(sessionId, listener, extra = {}) {
@@ -452,7 +546,7 @@ export function createConsoleHandler(backend, options = {}) {
   }
 
   function navigationResponse(req, res, location, head = false) {
-    if (String(req.headers["hx-request"] ?? "").toLowerCase() === "true") {
+    if (isHtmx(req)) {
       write(
         res,
         200,
@@ -471,6 +565,18 @@ export function createConsoleHandler(backend, options = {}) {
     );
   }
 
+  async function conflictResponse(req, res, sessionId, message) {
+    const snapshot = await view(sessionId);
+    const paths = routes(basePath, snapshot.id, snapshot.project);
+    if (isHtmx(req)) {
+      const { renderSessionContent } = await loadRender();
+      const body = renderSessionContent(snapshot, paths, message);
+      write(res, 409, { "Content-Type": "text/html; charset=utf-8" }, body);
+      return;
+    }
+    text(res, 409, message);
+  }
+
   async function loadRender() {
     if (!liveAssets) {
       return { renderPage: bundledRenderPage, renderSessionContent: bundledRenderSessionContent };
@@ -480,10 +586,11 @@ export function createConsoleHandler(backend, options = {}) {
   }
 
   async function mutationResponse(req, res, sessionId, notice = "") {
-    const paths = routes(basePath, sessionId);
-    if (String(req.headers["hx-request"] ?? "").toLowerCase() === "true") {
+    const snapshot = await view(sessionId);
+    const paths = routes(basePath, snapshot.id, snapshot.project);
+    if (isHtmx(req)) {
       const { renderSessionContent } = await loadRender();
-      const body = renderSessionContent(await view(sessionId), paths, notice);
+      const body = renderSessionContent(snapshot, paths, notice);
       write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, body);
       return;
     }
@@ -583,12 +690,22 @@ export function createConsoleHandler(backend, options = {}) {
     if (url.pathname === switchSessionPath && (req.method === "GET" || head)) {
       try {
         const sessionId = String(url.searchParams.get("session") ?? "");
-        const snapshot = await backend.read(sessionId);
-        navigationResponse(req, res, routes(basePath, snapshot.id).canonical, head);
+        navigationResponse(req, res, await liveLocation(sessionId), head);
       } catch (error) {
         text(res, errorStatus(error), `DSH session unavailable: ${errorMessage(error)}`, head);
       }
       return;
+    }
+
+    async function createAt(projectName) {
+      if (!sameOrigin(req)) {
+        const error = new Error("Cross-origin form submission refused");
+        error.status = 403;
+        throw error;
+      }
+      await readForm(req);
+      const created = await backend.create(projectName);
+      navigationResponse(req, res, routes(basePath, created.id, created.project).canonical);
     }
 
     if (url.pathname === sessionsPath) {
@@ -597,27 +714,94 @@ export function createConsoleHandler(backend, options = {}) {
         return;
       }
       try {
-        if (!sameOrigin(req)) {
-          const error = new Error("Cross-origin form submission refused");
-          error.status = 403;
-          throw error;
-        }
-        await readForm(req);
-        const created = await backend.create();
-        navigationResponse(req, res, routes(basePath, created.id).canonical);
+        await createAt(isProjectAware(backend) ? backend.defaultProject : undefined);
       } catch (error) {
         text(res, errorStatus(error), errorMessage(error));
       }
       return;
     }
 
-    const selected = parseSessionRoute(basePath, url.pathname);
+    const projectRoute = parseProjectRoute(basePath, url.pathname);
+    if (projectRoute) {
+      if (!isProjectAware(backend)) {
+        text(res, 404, "Not found", head);
+        return;
+      }
+      const known = backend.listProjects().some((entry) => entry.name === projectRoute.project);
+      if (!known) {
+        text(res, 404, "qq: project not found", head);
+        return;
+      }
+      if (projectRoute.action === "create") {
+        if (req.method !== "POST") {
+          write(res, 405, { Allow: "POST", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
+          return;
+        }
+        try {
+          await createAt(projectRoute.project);
+        } catch (error) {
+          text(res, errorStatus(error), errorMessage(error));
+        }
+        return;
+      }
+      if (projectRoute.action === "project" && (req.method === "GET" || head)) {
+        try {
+          const rows = await backend.list(projectRoute.project);
+          if (rows[0]) {
+            write(
+              res,
+              303,
+              {
+                Location: routes(basePath, rows[0].id, projectRoute.project).canonical + url.search,
+                "Content-Type": "text/plain; charset=utf-8",
+              },
+              "See other\n",
+              head,
+            );
+            return;
+          }
+          const snapshot = await projectView(projectRoute.project);
+          const paths = routes(basePath, "", projectRoute.project);
+          const { renderPage } = await loadRender();
+          const body = renderPage(snapshot, paths, assetPaths);
+          write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, body, head);
+        } catch (error) {
+          text(res, errorStatus(error), errorMessage(error), head);
+        }
+        return;
+      }
+    }
+
+    const selected = projectRoute?.sessionId
+      ? projectRoute
+      : parseSessionRoute(basePath, url.pathname);
     const rootPage = url.pathname === `${basePath}/`;
     if ((rootPage || selected?.action === "page") && (req.method === "GET" || head)) {
-      const sessionId = rootPage ? backend.defaultSessionId : selected.sessionId;
       try {
+        if (rootPage && isProjectAware(backend)) {
+          write(
+            res,
+            303,
+            {
+              Location: `${basePath}/project/${encodeProject(backend.defaultProject)}${url.search}`,
+              "Content-Type": "text/plain; charset=utf-8",
+            },
+            "See other\n",
+            head,
+          );
+          return;
+        }
+        if (selected?.sessionId && isProjectAware(backend) && !projectRoute) {
+          navigationResponse(req, res, await liveLocation(selected.sessionId), head);
+          return;
+        }
+        const sessionId = rootPage ? backend.defaultSessionId : selected.sessionId;
         const snapshot = await view(sessionId);
-        const paths = routes(basePath, snapshot.id);
+        if (projectRoute && snapshot.project && snapshot.project !== projectRoute.project) {
+          text(res, 404, "DSH session is not in this project", head);
+          return;
+        }
+        const paths = routes(basePath, snapshot.id, snapshot.project);
         const { renderPage } = await loadRender();
         const body = renderPage(snapshot, paths, assetPaths);
         write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, body, head);
@@ -635,11 +819,15 @@ export function createConsoleHandler(backend, options = {}) {
       let snapshot;
       try {
         snapshot = await view(selected.sessionId);
+        if (projectRoute && snapshot.project && snapshot.project !== projectRoute.project) {
+          text(res, 404, "DSH session is not in this project");
+          return;
+        }
       } catch (error) {
         text(res, errorStatus(error), `DSH session unavailable: ${errorMessage(error)}`);
         return;
       }
-      const paths = routes(basePath, snapshot.id);
+      const paths = routes(basePath, snapshot.id, snapshot.project);
       res.writeHead(200, {
         ...SECURITY_HEADERS,
         "Content-Type": "text/event-stream; charset=utf-8",
@@ -715,6 +903,10 @@ export function createConsoleHandler(backend, options = {}) {
         try {
           const result = await backend.prompt(selected.sessionId, prompt);
           findWork.delete(selected.sessionId);
+          if (isNavigateResult(result)) {
+            navigationResponse(req, res, routes(basePath, result.id, result.project).canonical);
+            return;
+          }
           await mutationResponse(req, res, selected.sessionId, typeof result === "string" ? result : "");
         } finally {
           findWork.delete(selected.sessionId);
@@ -722,8 +914,16 @@ export function createConsoleHandler(backend, options = {}) {
       } catch (error) {
         findWork.delete(selected.sessionId);
         const message = errorMessage(error);
+        if (errorStatus(error) === 409 && isHtmx(req)) {
+          try {
+            await conflictResponse(req, res, selected.sessionId, message);
+            return;
+          } catch {
+            // Fall through when the DSH session itself cannot be read.
+          }
+        }
         const unknownSlash = /unknown slash command/.test(message);
-        if (!unknownSlash && String(req.headers["hx-request"] ?? "").toLowerCase() === "true") {
+        if (!unknownSlash && isHtmx(req) && errorStatus(error) !== 409) {
           try {
             await mutationResponse(req, res, selected.sessionId, message);
             return;
@@ -749,9 +949,21 @@ export function createConsoleHandler(backend, options = {}) {
         }
         await readForm(req);
         const closed = await backend.close(selected.sessionId);
-        navigationResponse(req, res, routes(basePath, closed.id).canonical);
+        const next = closed.id
+          ? routes(basePath, closed.id, closed.project).canonical
+          : routes(basePath, "", closed.project || (isProjectAware(backend) ? backend.defaultProject : undefined)).canonical;
+        navigationResponse(req, res, next);
       } catch (error) {
-        text(res, errorStatus(error), errorMessage(error));
+        const message = errorMessage(error);
+        if (errorStatus(error) === 409) {
+          try {
+            await conflictResponse(req, res, selected.sessionId, message);
+            return;
+          } catch {
+            // Fall through when the DSH session itself cannot be read.
+          }
+        }
+        text(res, errorStatus(error), message);
       }
       return;
     }
@@ -886,6 +1098,7 @@ export const internals = Object.freeze({
   overlaySaveChoice,
   normalizeBasePath,
   parseSessionRoute,
+  parseProjectRoute,
   resolveAsset,
   routes,
   sameOrigin,

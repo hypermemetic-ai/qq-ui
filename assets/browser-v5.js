@@ -38,9 +38,39 @@
     .filter(Boolean);
   const openSession = (sessionId) => {
     if (!sessionId || sessionId === currentSessionId()) return;
+    const projectMatch = location.pathname.match(/^(.*\/project\/[^/]+)\/session\/session-[0-9a-fA-F-]{36}(?:\/|$)/);
+    if (projectMatch) {
+      location.assign(`${projectMatch[1]}/session/${sessionId}`);
+      return;
+    }
     const match = location.pathname.match(/^(.*)\/session\/session-[0-9a-fA-F-]{36}(?:\/|$)/);
     const base = match ? match[1] : "/qq";
     location.assign(`${base}/session/${sessionId}`);
+  };
+  const confirmingClose = () => document.querySelector(".session-controls.close-confirming");
+  const restoreCloseFocus = () => {
+    const arm = document.querySelector(".close-arm");
+    if (arm instanceof HTMLElement) arm.focus();
+  };
+  const disarmClose = () => {
+    const controls = document.querySelector(".session-controls");
+    const confirm = document.querySelector(".close-confirm");
+    const arm = document.querySelector(".close-arm");
+    if (!controls) return;
+    controls.classList.remove("close-confirming");
+    if (confirm) confirm.hidden = true;
+    if (arm) arm.hidden = false;
+  };
+  const armClose = () => {
+    const controls = document.querySelector(".session-controls");
+    const confirm = document.querySelector(".close-confirm");
+    const arm = document.querySelector(".close-arm");
+    const keep = document.querySelector(".close-keep");
+    if (!controls || !confirm) return;
+    controls.classList.add("close-confirming");
+    confirm.hidden = false;
+    if (arm) arm.hidden = true;
+    if (keep instanceof HTMLElement) keep.focus();
   };
   const neighborSession = (delta) => {
     const ids = sessionIds();
@@ -87,15 +117,41 @@
   document.addEventListener("change", (event) => {
     const select = event.target;
     if (!(select instanceof HTMLSelectElement) || select.id !== "session-choice") return;
+    disarmClose();
     if (select.value) openSession(select.value);
   });
 
   document.addEventListener("click", (event) => {
-    const button = event.target instanceof Element ? event.target.closest(".workflows-dismiss") : null;
-    if (!(button instanceof HTMLElement)) return;
-    event.preventDefault();
-    button.closest(".workflows-popup")?.remove();
+    const target = event.target instanceof Element ? event.target : null;
+    const dismiss = target?.closest(".workflows-dismiss");
+    if (dismiss instanceof HTMLElement) {
+      event.preventDefault();
+      dismiss.closest(".workflows-popup")?.remove();
+      return;
+    }
+    const arm = target?.closest(".close-arm");
+    if (arm instanceof HTMLElement) {
+      event.preventDefault();
+      armClose();
+      return;
+    }
+    const keep = target?.closest(".close-keep");
+    if (keep instanceof HTMLElement) {
+      event.preventDefault();
+      disarmClose();
+      restoreCloseFocus();
+      return;
+    }
+    if (confirmingClose() && !target?.closest(".session-controls")) {
+      disarmClose();
+    }
   });
+
+  document.addEventListener("toggle", (event) => {
+    const menu = event.target;
+    if (!(menu instanceof HTMLDetailsElement) || !menu.classList.contains("session-menu")) return;
+    if (!menu.open) disarmClose();
+  }, true);
 
   document.addEventListener("input", (event) => {
     if (event.target instanceof HTMLTextAreaElement && event.target.id === "prompt") {
@@ -117,6 +173,11 @@
       }
       if (event.key === "Escape") {
         event.preventDefault();
+        if (confirmingClose()) {
+          disarmClose();
+          restoreCloseFocus();
+          return;
+        }
         if (document.querySelector("#interrupt-form")) {
           submitForm("#interrupt-form");
           return;
@@ -124,6 +185,13 @@
         if (dismissSheet()) return;
         input.blur();
       }
+      return;
+    }
+
+    if (event.key === "Escape" && confirmingClose()) {
+      event.preventDefault();
+      disarmClose();
+      restoreCloseFocus();
       return;
     }
 
@@ -160,6 +228,11 @@
     }
     if (key === "Escape") {
       event.preventDefault();
+      if (confirmingClose()) {
+        disarmClose();
+        restoreCloseFocus();
+        return;
+      }
       if (document.querySelector("#interrupt-form")) {
         submitForm("#interrupt-form");
         return;

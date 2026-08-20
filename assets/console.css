@@ -209,7 +209,7 @@ code {
   top: calc(100% + .5rem);
   right: 1.5rem;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   width: min(40rem, calc(100% - 3rem));
   align-items: center;
   gap: .65rem;
@@ -219,6 +219,38 @@ code {
   background: #0c1115;
   box-shadow: 0 1rem 3rem rgba(0, 0, 0, .45);
 }
+.session-empty {
+  margin: 0;
+  color: #aeb9c2;
+  font-size: .75rem;
+}
+.close-arm {
+  min-width: 2.5rem;
+}
+.close-confirm {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: .45rem;
+  padding: .15rem .1rem .1rem;
+}
+.close-confirm[hidden] { display: none; }
+.close-confirm p {
+  margin: 0;
+  color: #dce4e9;
+  font-size: .8rem;
+}
+.close-confirm-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  justify-items: start;
+  gap: .65rem;
+}
+.close-confirm-actions .close-keep { justify-self: start; }
+.close-confirm-actions .close-session { justify-self: end; }
+.session-controls.close-confirming .session-picker,
+.session-controls.close-confirming .session-empty,
+.session-controls.close-confirming .new-session,
+.session-controls.close-confirming .close-arm { display: none; }
 
 .session-picker {
   display: grid;
@@ -590,8 +622,8 @@ code {
   .session-panel { border: 0; border-radius: 0; box-shadow: none; }
 }
 
-.close-session { display: none; }
-.close-session button {
+.close-session button,
+.close-arm {
   border-color: #6a3834;
   background: #2a1715;
   color: #ffc4bf;
@@ -884,7 +916,11 @@ body > footer {
   .session-picker { grid-column: 1 / -1; gap: .4rem; }
   .session-picker label span { display: none; }
   .session-picker select { height: 2.75rem; padding-inline: .5rem; }
-  .close-session { display: block; }
+  .session-empty { grid-column: 1 / -1; }
+  .close-confirm { grid-column: 1 / -1; }
+  .close-confirm-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .close-confirm-actions .close-keep { justify-self: stretch; }
+  .close-confirm-actions .close-session { justify-self: stretch; }
   .session-controls button { min-height: 2.75rem; padding-inline: .65rem; }
   .composer-row { grid-template-columns: minmax(0, 1fr) auto auto; }
   #composer-submit {
@@ -945,7 +981,7 @@ body > footer {
 }
 
 @media (max-width: 23rem) {
-  .new-session button span { display: none; }
+  .session-controls { gap: .4rem; }
 }
 
 @media (max-height: 36rem) and (max-width: 42rem) {

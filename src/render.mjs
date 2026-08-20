@@ -179,26 +179,44 @@ function liveFace(snapshot) {
 function sessionNavigation(snapshot, paths) {
   const choices = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
   const switchAction = escapeHtml(paths.switchSession);
-  return `<details class="session-menu">
-    <summary aria-label="Show session controls"><span>Sessions</span></summary>
-    <div class="session-controls" role="group" aria-label="Session controls">
-      <form class="session-picker" action="${switchAction}" method="get">
-        <label for="session-choice">Session <span>${choices.length} durable</span></label>
+  const selected = snapshot.id
+    ? choices.find((session) => session.id === snapshot.id) ?? snapshot
+    : undefined;
+  const face = selected ? sessionFace(selected) : "";
+  const picker = snapshot.id && choices.length > 0
+    ? `<form class="session-picker" action="${switchAction}" method="get">
+        <label for="session-choice">sessions <span>${choices.length} live</span></label>
         <select id="session-choice" name="session" required>
           ${choices.map((session) => {
             const current = session.id === snapshot.id;
-            const face = sessionFace(session);
-            const label = `${current ? "Current · " : ""}${face}`;
+            const optionFace = sessionFace(session);
+            const label = `${current ? "Current · " : ""}${optionFace}`;
             return `<option value="${escapeHtml(session.id)}"${current ? " selected" : ""}>${escapeHtml(label)}</option>`;
           }).join("")}
         </select>
-      </form>
+      </form>`
+    : `<p class="session-empty">no live sessions</p>`;
+  const closeControls = snapshot.id && paths.close
+    ? `<button type="button" class="close-arm" aria-label="Close this session">close</button>
+      <div class="close-confirm" hidden role="alertdialog" aria-modal="true" aria-labelledby="close-confirm-title" aria-describedby="close-confirm-copy">
+        <p id="close-confirm-title">close session ${escapeHtml(face)}?</p>
+        <p id="close-confirm-copy">history is kept</p>
+        <div class="close-confirm-actions">
+          <button type="button" class="close-keep" aria-label="Keep this session">keep</button>
+          <form id="close-session" class="close-session" action="${escapeHtml(paths.close)}" method="post">
+            <button type="submit" class="close-confirm-submit" aria-label="Close this session">close</button>
+          </form>
+        </div>
+      </div>`
+    : "";
+  return `<details class="session-menu">
+    <summary aria-label="Show session controls"><span>sessions</span></summary>
+    <div class="session-controls" role="group" aria-label="Session controls">
+      ${picker}
       <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
-        <button type="submit" aria-label="Start a new durable DSH session">New <span>session</span></button>
+        <button type="submit" aria-label="New session">+</button>
       </form>
-      <form id="close-session" class="close-session" action="${escapeHtml(paths.close)}" method="post">
-        <button type="submit" aria-label="Close this session">Close</button>
-      </form>
+      ${closeControls}
     </div>
   </details>`;
 }
@@ -388,16 +406,20 @@ function composer(paths, running, sessionId = "", findWork = "") {
 
 /** Render only the stable SSE target's children. */
 export function renderSessionContent(snapshot, paths, notice = "") {
+  const emptyProject = !snapshot?.id;
   const events = Array.isArray(snapshot.events) ? snapshot.events : [];
-  const status = deriveStatus(events, snapshot.agentStatus);
+  const status = emptyProject
+    ? { key: "ready", label: "Ready · no sessions" }
+    : deriveStatus(events, snapshot.agentStatus);
   const transcript = events.map(eventMessage).filter(Boolean).join("\n");
   const findWork = snapshot.findWork === "save" ? "save" : snapshot.findWork === "compile" ? "compile" : "";
+  const face = emptyProject ? (snapshot.project || "project") : liveFace(snapshot);
   return `<div class="session-heading">
       <div>
-        <p class="eyebrow">DSH durable session</p>
+        <p class="eyebrow">${emptyProject ? "qq project" : "DSH durable session"}</p>
         ${sessionModeChip(snapshot.sessionMode)}
         <h1 id="session-heading">Operator console</h1>
-        <code>${escapeHtml(liveFace(snapshot))}</code>
+        <code>${escapeHtml(face)}</code>
         ${renderProgressChip(snapshot.progress)}
       </div>
       <p class="status status-${escapeHtml(status.key)}" role="status"><span class="status-dot" aria-hidden="true"></span><span class="status-label">${escapeHtml(status.label)}</span></p>
@@ -405,10 +427,10 @@ export function renderSessionContent(snapshot, paths, notice = "") {
     </div>
     ${status.detail ? `<p class="notice turn-error" role="alert"><strong>${escapeHtml(status.label)}</strong><span>${escapeHtml(status.detail)}</span>${status.code ? `<code>${escapeHtml(status.code)}</code>` : ""}</p>` : ""}
     ${renderSlashNotice(notice, paths)}
-    <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
+    ${emptyProject ? "" : `<div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
       ${transcript || '<p class="empty-transcript">This DSH session has no transcript yet.</p>'}
-    </div>
-    ${composer(paths, status.key === "running", snapshot.id, findWork)}
+    </div>`}
+    ${emptyProject ? "" : composer(paths, status.key === "running", snapshot.id, findWork)}
     ${renderLoginSheet(snapshot.loginSheet, paths)}
     ${renderOfferPopup(snapshot.offer, paths, notice)}
     ${renderOverlay(snapshot.overlay, paths, notice, findWork)}`;
@@ -489,7 +511,7 @@ export function renderPage(snapshot, paths, assetPaths, notice = "") {
   <meta name="apple-mobile-web-app-title" content="qq">
   <meta name="application-name" content="qq">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="htmx-config" content='{"disableInheritance":true,"historyCacheSize":0}'>
+  <meta name="htmx-config" content='{"disableInheritance":true,"historyCacheSize":0,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"409","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
   <title>qq</title>
   <link rel="manifest" href="${escapeHtml(assetPaths.manifest)}">
   <link rel="icon" href="${escapeHtml(assetPaths.icon192)}" sizes="192x192">
@@ -505,9 +527,9 @@ export function renderPage(snapshot, paths, assetPaths, notice = "") {
     <a href="${escapeHtml(paths.canonical)}" aria-label="Reload the selected DSH session">qq / DSH</a>
     <span>Sequential handoff</span>
   </header>
-  <main id="console-stream" hx-ext="sse" sse-connect="${escapeHtml(paths.events)}" hx-history="false">
-    <section id="session-panel" class="session-panel" aria-labelledby="session-heading"
-      hx-ext="sse" sse-swap="session" hx-swap="innerHTML">${content}</section>
+  <main id="console-stream"${paths.events ? ` hx-ext="sse" sse-connect="${escapeHtml(paths.events)}"` : ""} hx-history="false">
+    <section id="session-panel" class="session-panel" aria-labelledby="session-heading"${paths.events ? `
+      hx-ext="sse" sse-swap="session" hx-swap="innerHTML"` : ""}>${content}</section>
   </main>
   <footer>DSH owns session identity, transcript order, turn status, and interruption. Browser view state is not shared.</footer>
 </body>
