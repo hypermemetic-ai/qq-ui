@@ -90,6 +90,16 @@ main { min-height: 0; }
   border-bottom: 1px solid #253039;
 }
 
+.download-chip {
+  margin: .35rem 0 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #c9d2d9;
+  font-size: .75rem;
+}
+
 .eyebrow {
   margin: 0 0 .3rem;
   color: #70d8c1;
@@ -775,6 +785,11 @@ body > footer {
   }
   .session-heading .eyebrow { display: none; }
   .session-heading h1 { margin-bottom: .12rem; font-size: 1rem; }
+  .download-chip {
+    margin-top: .15rem;
+    max-width: min(72vw, 18rem);
+    font-size: .68rem;
+  }
   .session-heading code {
     display: block;
     max-width: min(48vw, 13rem);

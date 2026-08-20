@@ -13,6 +13,7 @@ export function apply(ctx, config) {
   const workflowsOf = () => ctx.get?.("qq-workflows", false) ?? null;
   const modelsOf = () => ctx.get?.("qq-models", false) ?? null;
   const finderOf = () => ctx.get?.("image-finder", false) ?? null;
+  const mediaOf = () => ctx.get?.("media-box", false) ?? null;
   const basePath = String(config?.basePath ?? "/qq");
   const handler = createConsoleHandler(qq, {
     basePath,
@@ -23,6 +24,7 @@ export function apply(ctx, config) {
     loginSheetFor: (sessionId) => modelsOf()?.sheetFor?.(sessionId),
     overlayFor: (sessionId) => finderOf()?.overlayFor?.(sessionId),
     chooseOverlay: (sessionId, form) => finderOf()?.chooseOverlay?.(sessionId, form),
+    progressFor: () => mediaOf()?.progressFor?.(),
   });
   ctx.effect(() => {
     const unregisterConsole = ctx.webServer.register({

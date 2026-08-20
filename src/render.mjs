@@ -2,6 +2,19 @@ import { escapeHtml, renderMarkdownText, renderMessageText } from "./markdown.mj
 
 export { escapeHtml };
 
+/** One-line host-wide download chip. Idle (missing/empty) renders nothing. */
+export function renderProgressChip(progress) {
+  if (!progress || typeof progress !== "object") return "";
+  const title = String(progress.title ?? "").trim();
+  if (!title) return "";
+  const parts = [title];
+  for (const key of ["percent", "rate", "eta"]) {
+    const value = String(progress[key] ?? "").trim();
+    if (value) parts.push(value);
+  }
+  return `<p class="download-chip" role="status">${escapeHtml(parts.join(" · "))}</p>`;
+}
+
 function safeType(value) {
   return typeof value === "string" ? value : "unknown";
 }
@@ -309,6 +322,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
         <p class="eyebrow">DSH durable session</p>
         <h1 id="session-heading">Operator console</h1>
         <code>${escapeHtml(liveFace(snapshot))}</code>
+        ${renderProgressChip(snapshot.progress)}
       </div>
       <p class="status status-${escapeHtml(status.key)}" role="status"><span class="status-dot" aria-hidden="true"></span><span class="status-label">${escapeHtml(status.label)}</span></p>
       ${sessionNavigation(snapshot, paths)}

@@ -285,6 +285,7 @@ export function createConsoleHandler(backend, options = {}) {
   const readLoginSheet = typeof options.loginSheetFor === "function" ? options.loginSheetFor : null;
   const readOverlay = typeof options.overlayFor === "function" ? options.overlayFor : null;
   const chooseOverlay = typeof options.chooseOverlay === "function" ? options.chooseOverlay : null;
+  const readProgress = typeof options.progressFor === "function" ? options.progressFor : null;
 
   async function withSheets(snapshot) {
     if (!snapshot?.id) return snapshot;
@@ -313,6 +314,14 @@ export function createConsoleHandler(backend, options = {}) {
         /* session overlay is optional */
       }
     }
+    if (readProgress) {
+      try {
+        const progress = await readProgress(snapshot.id);
+        if (progress) next = { ...next, progress };
+      } catch {
+        /* download chip is optional */
+      }
+    }
     return next;
   }
 
@@ -337,6 +346,10 @@ export function createConsoleHandler(backend, options = {}) {
       snapshot?.overlay?.id ?? "",
       snapshot?.overlay?.media?.src ?? "",
       snapshot?.overlay?.chrome === false ? "0" : "1",
+      snapshot?.progress?.title ?? "",
+      snapshot?.progress?.percent ?? "",
+      snapshot?.progress?.rate ?? "",
+      snapshot?.progress?.eta ?? "",
     ]);
   }
 
@@ -353,7 +366,7 @@ export function createConsoleHandler(backend, options = {}) {
     if (typeof backend.observe !== "function") {
       throw new Error("qq-ui: qq service observe() is required");
     }
-    if (!readOffer && !readOverlay) {
+    if (!readOffer && !readOverlay && !readProgress) {
       return backend.observe(sessionId, listener, { intervalMs: ssePollMs, ...extra });
     }
     const intervalMs = extra.intervalMs ?? ssePollMs;
