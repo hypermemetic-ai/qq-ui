@@ -633,7 +633,9 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   const transcript = nodes.map(renderConversationNode).filter(Boolean).join("\n");
   const findWork = snapshot.findWork === "save" ? "save" : snapshot.findWork === "compile" ? "compile" : "";
   const face = emptyProject ? (snapshot.project || "project") : liveFace(snapshot);
+  const edgeTarget = paths?.fileView ? '<span class="drawer-edge" aria-hidden="true"></span>' : "";
   return `<div class="session-heading">
+      ${emptyProject ? edgeTarget : ""}
       <div>
         <p class="eyebrow">${emptyProject ? "qq project" : "DSH durable session"}</p>
         ${sessionModeChip(snapshot.sessionMode)}
@@ -647,6 +649,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
     ${status.detail ? `<p class="notice turn-error" role="alert"><strong>${escapeHtml(status.label)}</strong><span>${escapeHtml(status.detail)}</span>${status.code ? `<code>${escapeHtml(status.code)}</code>` : ""}</p>` : ""}
     ${renderSlashNotice(notice, paths, nodes)}
     ${emptyProject ? "" : `<div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
+      ${edgeTarget}
       ${transcript || '<p class="empty-transcript">This DSH session has no transcript yet.</p>'}
     </div>`}
     ${emptyProject ? "" : renderPendingQueue(snapshot, paths)}
@@ -775,7 +778,6 @@ export function renderProjectDrawer(drawer, paths) {
   }).join("");
   const empty = rows || '<li class="drawer-empty">nothing at this level</li>';
   return `<button id="project-drawer-toggle" class="drawer-toggle" type="button" aria-controls="project-drawer" aria-expanded="${opened ? "true" : "false"}"${opened ? " inert" : ""}>files</button>
-  <span class="drawer-edge" aria-hidden="true"></span>
   <button id="project-drawer-backdrop" class="drawer-backdrop" type="button" aria-label="Close files"${opened ? "" : " hidden"}></button>
   <aside id="project-drawer" class="project-drawer" role="dialog" aria-modal="true" aria-hidden="${opened ? "false" : "true"}" aria-labelledby="project-drawer-title" data-drawer-path="${escapeHtml(drawer.scope === "projects" ? "~" : drawer.path)}"${opened ? "" : " inert"}>
     <header class="drawer-head">
@@ -853,7 +855,7 @@ ${documentHead(assetPaths, `${name} · qq`)}
         </div>
         <a class="file-back" href="${escapeHtml(paths.project)}">console</a>
       </header>
-      <div class="file-document">${content}</div>
+      <div class="file-document"><span class="drawer-edge" aria-hidden="true"></span>${content}</div>
     </article>
   </main>
 </body>

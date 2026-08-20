@@ -1307,11 +1307,24 @@ body > footer {
 }
 
 .drawer-edge {
+  display: none;
   position: fixed;
   z-index: 8;
   inset: 0 auto 0 0;
   width: 1.5rem;
   pointer-events: none;
+  user-select: none;
+}
+
+.file-document > .drawer-edge,
+#transcript > .drawer-edge {
+  position: sticky;
+  flex: none;
+  inset: 0 auto auto 0;
+  height: 100vh;
+  height: 100dvh;
+  margin-bottom: -100vh;
+  margin-bottom: -100dvh;
 }
 
 .drawer-backdrop {
@@ -1635,16 +1648,24 @@ body.file-page {
 
 @media (max-width: 42rem) {
   .project-drawer { width: min(15.5rem, calc(100vw - 8rem)); }
-  .session-heading { padding-left: max(4.45rem, calc(env(safe-area-inset-left) + 4rem)); }
-  .drawer-toggle {
-    top: max(.45rem, env(safe-area-inset-top));
-    left: max(.5rem, env(safe-area-inset-left));
-    min-height: 2.55rem;
+  .drawer-toggle { display: none; }
+  .drawer-edge {
+    display: block;
+    width: max(1.5rem, env(safe-area-inset-left));
+    pointer-events: auto;
+    touch-action: pan-y;
   }
+  #transcript > .drawer-edge {
+    margin-bottom: calc(-100vh - .7rem);
+    margin-bottom: calc(-100dvh - .7rem);
+    transform: translateX(calc(-1 * max(.65rem, env(safe-area-inset-left))));
+  }
+  .file-document > .drawer-edge { transform: translateX(calc(-1 * max(.8rem, env(safe-area-inset-left)))); }
+  .drawer-open .drawer-edge { pointer-events: none; }
   .file-main { width: 100%; padding: 0; }
   .file-surface { border: 0; border-radius: 0; box-shadow: none; }
   .file-heading {
-    padding: max(.55rem, env(safe-area-inset-top)) max(.65rem, env(safe-area-inset-right)) .55rem max(4.45rem, calc(env(safe-area-inset-left) + 4rem));
+    padding: max(.55rem, env(safe-area-inset-top)) max(.65rem, env(safe-area-inset-right)) .55rem max(.65rem, env(safe-area-inset-left));
   }
   .file-heading .eyebrow { display: none; }
   .file-heading h1 { font-size: 1rem; }

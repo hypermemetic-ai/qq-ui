@@ -176,6 +176,7 @@
   const projectDrawer = () => document.querySelector("#project-drawer");
   const drawerToggle = () => document.querySelector("#project-drawer-toggle");
   const drawerBackdrop = () => document.querySelector("#project-drawer-backdrop");
+  let drawerReturnFocus = null;
   const drawerIsOpen = () => document.body.classList.contains("drawer-open");
   const updateDrawerUrl = (open) => {
     const url = new URL(location.href);
@@ -193,9 +194,9 @@
     const drawer = projectDrawer();
     const toggle = drawerToggle();
     const backdrop = drawerBackdrop();
-    if (!drawer || !toggle || !backdrop) return;
+    if (!drawer || !backdrop) return;
     const open = drawerIsOpen();
-    toggle.setAttribute("aria-expanded", String(open));
+    toggle?.setAttribute("aria-expanded", String(open));
     drawer.setAttribute("aria-hidden", String(!open));
     drawer.inert = !open;
     backdrop.hidden = !open;
@@ -207,11 +208,11 @@
   const openDrawer = ({ updateUrl = true, focus = true } = {}) => {
     const drawer = projectDrawer();
     if (!drawer) return;
-    if (updateUrl && drawer.dataset.drawerPath) {
-      const url = new URL(location.href);
-      url.searchParams.set("drawer", "");
-      location.assign(`${url.pathname}${url.search}${url.hash}`);
-      return;
+    if (!drawerIsOpen()) {
+      const active = document.activeElement;
+      drawerReturnFocus = active instanceof HTMLElement && active !== document.body && !drawer.contains(active)
+        ? active
+        : null;
     }
     document.body.classList.add("drawer-open");
     syncDrawerChrome();
@@ -222,11 +223,17 @@
     }
   };
   const closeDrawer = ({ updateUrl = true, restoreFocus = true } = {}) => {
-    if (!projectDrawer()) return;
+    const drawer = projectDrawer();
+    if (!drawer) return;
+    const returnFocus = drawerReturnFocus;
+    drawerReturnFocus = null;
     document.body.classList.remove("drawer-open");
     syncDrawerChrome();
     if (updateUrl) updateDrawerUrl(false);
-    if (restoreFocus) drawerToggle()?.focus({ preventScroll: true });
+    if (!restoreFocus) return;
+    if (desktopChair()) drawerToggle()?.focus({ preventScroll: true });
+    else if (returnFocus?.isConnected && !returnFocus.inert) returnFocus.focus({ preventScroll: true });
+    else if (document.activeElement instanceof HTMLElement && drawer.contains(document.activeElement)) document.activeElement.blur();
   };
   const trapDrawerFocus = (event) => {
     const focusable = drawerFocusables();
@@ -244,27 +251,38 @@
   };
 
   let edgeGesture = null;
-  const cancelEdgeGesture = () => { edgeGesture = null; };
+  const cancelEdgeGesture = (event) => {
+    if (event && edgeGesture?.id !== event.pointerId) return;
+    const gesture = edgeGesture;
+    edgeGesture = null;
+    if (gesture?.target.hasPointerCapture?.(gesture.id)) gesture.target.releasePointerCapture(gesture.id);
+  };
   document.addEventListener("pointerdown", (event) => {
-    if (drawerIsOpen() || desktopChair() || event.button !== 0 || event.clientX > 24) return;
+    const target = event.target instanceof Element ? event.target.closest(".drawer-edge") : null;
+    if (!target || drawerIsOpen() || desktopChair() || event.button !== 0 || event.isPrimary === false) return;
     if (event.pointerType && event.pointerType !== "touch" && event.pointerType !== "pen") return;
-    edgeGesture = { id: event.pointerId, x: event.clientX, y: event.clientY, at: performance.now(), cancelled: false };
+    edgeGesture = { id: event.pointerId, target, x: event.clientX, y: event.clientY, at: performance.now(), cancelled: false, captured: false };
   }, { passive: true });
   document.addEventListener("pointermove", (event) => {
     if (!edgeGesture || edgeGesture.id !== event.pointerId) return;
     const dx = event.clientX - edgeGesture.x;
     const dy = event.clientY - edgeGesture.y;
+    if (!edgeGesture.captured && dx >= 10 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+      edgeGesture.captured = true;
+      try { edgeGesture.target.setPointerCapture(event.pointerId); } catch {}
+    }
     if (dx < -8 || Math.abs(dy) > Math.max(28, Math.abs(dx) * .72)) edgeGesture.cancelled = true;
   }, { passive: true });
   document.addEventListener("pointerup", (event) => {
     if (!edgeGesture || edgeGesture.id !== event.pointerId) return;
     const gesture = edgeGesture;
-    cancelEdgeGesture();
+    cancelEdgeGesture(event);
     const dx = event.clientX - gesture.x;
     const dy = Math.abs(event.clientY - gesture.y);
     if (!gesture.cancelled && dx >= 56 && dy <= 42 && performance.now() - gesture.at <= 800) openDrawer();
   }, { passive: true });
   document.addEventListener("pointercancel", cancelEdgeGesture, { passive: true });
+  document.addEventListener("lostpointercapture", cancelEdgeGesture, { passive: true });
 
   let pendingClose = false;
 
