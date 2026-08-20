@@ -292,18 +292,20 @@ function renderSlashNotice(notice, paths) {
   const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
   const names = [];
   let selected = "";
+  let unbound = "";
   let isList = lines.length >= 2;
   for (const line of lines) {
     if (line === "none selected") continue;
-    const match = /^([a-z][a-z0-9-]*)(?: \(selected\))?$/.exec(line);
+    const match = /^([a-z][a-z0-9-]*)(?: \((selected|selected, unbound)\))?$/.exec(line);
     if (!match) {
       isList = false;
       break;
     }
-    names.push(match[1]);
-    if (line.endsWith("(selected)")) selected = match[1];
+    if (match[2] === "selected, unbound") unbound = match[1];
+    else names.push(match[1]);
+    if (match[2] === "selected") selected = match[1];
   }
-  if (!isList || names.length === 0) {
+  if (!isList || (names.length === 0 && !unbound)) {
     const kind = / selected$/.test(text) || text === "none selected" ? "notice-ok" : "notice";
     return `<p class="${kind}" role="status">${escapeHtml(text)}</p>`;
   }
@@ -313,6 +315,9 @@ function renderSlashNotice(notice, paths) {
       const current = name === selected ? " workflows-current" : "";
       return `<button class="offer-choice workflows-choice${current}" type="submit" name="prompt" value="/workflows ${escapeHtml(name)}">${escapeHtml(name)}</button>`;
     }),
+    ...(unbound
+      ? [`<p class="workflows-unbound" role="status">${escapeHtml(`${unbound} (selected, unbound)`)}</p>`]
+      : []),
     `<button class="offer-choice workflows-choice workflows-none" type="submit" name="prompt" value="/workflows none">none</button>`,
   ].join("");
   return `<aside class="offer-popup workflows-popup" role="dialog" aria-modal="true" aria-labelledby="workflows-heading">
@@ -349,8 +354,8 @@ function overlayKeysAttr(keys) {
 }
 
 function sessionModeChip(mode) {
-  if (mode !== "architect" && mode !== "iterate" && mode !== "find") return "";
-  const label = mode === "architect" ? "Architect" : mode === "iterate" ? "Iterate" : "Find";
+  if (typeof mode !== "string" || mode === "none" || !/^[a-z][a-z0-9-]{0,31}$/.test(mode)) return "";
+  const label = `${mode[0].toUpperCase()}${mode.slice(1)}`;
   return `<p class="session-mode" data-mode="${mode}">${label}</p>`;
 }
 

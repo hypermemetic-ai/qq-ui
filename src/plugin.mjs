@@ -27,8 +27,12 @@ export function apply(ctx, config) {
     progressFor: () => mediaOf()?.progressFor?.(),
     inFindMode: (sessionId) => finderOf()?.inFindMode?.(sessionId) === true,
     sessionModeFor: (sessionId) => {
-      const selected = workflowsOf()?.workflows?.selected?.(sessionId) ?? null;
-      if (selected === "architect" || selected === "iterate" || selected === "find") return selected;
+      const facade = workflowsOf()?.workflows;
+      const selected = facade?.selected?.(sessionId) ?? null;
+      const registered = facade?.names?.();
+      if (typeof selected === "string" && Array.isArray(registered) && registered.includes(selected)) {
+        return selected;
+      }
       return finderOf()?.inFindMode?.(sessionId) ? "find" : null;
     },
   });
