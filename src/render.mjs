@@ -15,41 +15,33 @@ export function renderProgressChip(progress) {
   return `<p class="download-chip" role="status">${escapeHtml(parts.join(" · "))}</p>`;
 }
 
+const TOOL_PREVIEW_LINES = 80;
+const TOOL_PREVIEW_BYTES = 12 * 1024;
+
 function safeType(value) {
   return typeof value === "string" ? value : "unknown";
 }
 
-function contentBlocks(blocks, { markdown = false } = {}) {
+function attachmentBlock(block) {
+  const attachment = block?.attachment ?? {};
+  const dimensions = Number.isFinite(attachment.width) && Number.isFinite(attachment.height)
+    ? ` ${attachment.width}×${attachment.height}`
+    : "";
+  return `<p class="attachment">Image attachment${escapeHtml(dimensions)}</p>`;
+}
+
+function contentBlocks(blocks, { markdown = false, empty = true } = {}) {
   if (!Array.isArray(blocks) || blocks.length === 0) {
-    return '<p class="empty-content">No displayable content</p>';
+    return empty ? '<p class="empty-content">No displayable content</p>' : "";
   }
-  return blocks
-    .map((block) => {
-      if (!block || typeof block !== "object") {
-        return '<p class="empty-content">Unsupported content</p>';
-      }
-      switch (block.type) {
-        case "text":
-          return markdown ? renderMarkdownText(block.text ?? "") : renderMessageText(block.text ?? "");
-        case "reasoning":
-          return `<details class="reasoning"><summary>Reasoning</summary>${renderMessageText(block.text ?? "")}</details>`;
-        case "tool-call":
-          return `<details class="tool"><summary>Tool: ${escapeHtml(block.name ?? "unknown")}</summary><pre>${escapeHtml(block.arguments ?? "")}</pre></details>`;
-        case "tool-result":
-          return `<details class="tool${block.isError ? " tool-error" : ""}" open><summary>Tool result${block.isError ? " — error" : ""}</summary>${contentBlocks(block.content)}</details>`;
-        case "image": {
-          const attachment = block.attachment ?? {};
-          const dimensions =
-            Number.isFinite(attachment.width) && Number.isFinite(attachment.height)
-              ? ` ${attachment.width}×${attachment.height}`
-              : "";
-          return `<p class="attachment">Image attachment${escapeHtml(dimensions)}</p>`;
-        }
-        default:
-          return `<p class="empty-content">Unsupported content: ${escapeHtml(safeType(block.type))}</p>`;
-      }
-    })
-    .join("");
+  return blocks.map((block) => {
+    if (!block || typeof block !== "object") return '<p class="empty-content">Unsupported content</p>';
+    if (block.type === "text") {
+      return markdown ? renderMarkdownText(block.text ?? "") : renderMessageText(block.text ?? "");
+    }
+    if (block.type === "image") return attachmentBlock(block);
+    return `<p class="empty-content">Unsupported content: ${escapeHtml(safeType(block.type))}</p>`;
+  }).join("");
 }
 
 function eventTime(value) {
@@ -57,40 +49,251 @@ function eventTime(value) {
   return Number.isNaN(date.valueOf()) ? "" : date.toISOString();
 }
 
-function eventMessage(event) {
-  if (event?.surfaceOp !== "append") return "";
-  const time = eventTime(event.time);
-  const timeElement = time
-    ? `<time datetime="${time}">${escapeHtml(time)}</time>`
-    : "";
-  if (event.type === "user/message") {
-    const source = event.data?.source;
-    const direct = source?.kind === "user";
-    if (!direct) {
-      const label = `Context · ${source?.plugin ?? source?.kind ?? "unknown"}`;
-      return `<details class="message message-context" data-seq="${escapeHtml(event.seq)}">
-        <summary><strong>${escapeHtml(label)}</strong>${timeElement}</summary>
-        <div class="message-body">${contentBlocks(event.data?.content)}</div>
-      </details>`;
+function timeElement(value) {
+  const time = eventTime(value);
+  return time ? `<time datetime="${time}">${escapeHtml(time)}</time>` : "";
+}
+
+function utf8Prefix(value, maxBytes) {
+  const text = String(value ?? "");
+  const encoder = new TextEncoder();
+  if (encoder.encode(text).length <= maxBytes) return text;
+  let kept = "";
+  let bytes = 0;
+  for (const character of text) {
+    const size = encoder.encode(character).length;
+    if (bytes + size > maxBytes) break;
+    kept += character;
+    bytes += size;
+  }
+  return kept;
+}
+
+export function truncateToolOutput(value, limits = {}) {
+  const text = String(value ?? "");
+  const maxLines = limits.maxLines ?? TOOL_PREVIEW_LINES;
+  const maxBytes = limits.maxBytes ?? TOOL_PREVIEW_BYTES;
+  const lines = text.split("\n");
+  const linePreview = lines.slice(0, maxLines).join("\n");
+  const preview = utf8Prefix(linePreview, maxBytes);
+  const bytes = new TextEncoder().encode(text).length;
+  return {
+    text,
+    preview,
+    lines: lines.length,
+    bytes,
+    truncated: preview !== text,
+  };
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  return `${Math.ceil(bytes / 1024)} KiB`;
+}
+
+function renderToolText(text) {
+  const output = truncateToolOutput(text);
+  const preview = `<pre class="tool-output-preview">${escapeHtml(output.preview)}</pre>`;
+  if (!output.truncated) return preview;
+  return `${preview}<details class="tool-output-full">
+    <summary>Show full output · ${output.lines} lines · ${formatBytes(output.bytes)}</summary>
+    <pre>${escapeHtml(output.text)}</pre>
+  </details>`;
+}
+
+function toolViewBlocks(view) {
+  if (!view || typeof view !== "object") return [];
+  if (view.card === "generic") return Array.isArray(view.content) ? view.content : [];
+  if (view.card === "terminal") {
+    return typeof view.output === "string" ? [{ type: "text", text: view.output }] : [];
+  }
+  if (view.card === "read") {
+    const lines = Array.isArray(view.lines)
+      ? view.lines.map((line) => `${line.number} │ ${line.text}`).join("\n")
+      : "";
+    return lines ? [{ type: "text", text: lines }] : [];
+  }
+  if (view.card === "diff") {
+    const text = (Array.isArray(view.diffs) ? view.diffs : []).map((diff) => [
+      `--- ${diff.path}`,
+      `+++ ${diff.path}`,
+      ...(typeof diff.oldText === "string" ? diff.oldText.split("\n").map((line) => `- ${line}`) : []),
+      ...String(diff.newText ?? "").split("\n").map((line) => `+ ${line}`),
+    ].join("\n")).join("\n\n");
+    return text ? [{ type: "text", text }] : [];
+  }
+  if (view.card === "search") {
+    const text = view.shape === "paths"
+      ? (Array.isArray(view.paths) ? view.paths.join("\n") : "")
+      : (Array.isArray(view.files) ? view.files.flatMap((file) =>
+          (Array.isArray(file.matches) ? file.matches : []).map((match) =>
+            `${file.path}:${match.lineNumber}: ${match.line}`)).join("\n") : "");
+    return text ? [{ type: "text", text }] : [];
+  }
+  if (view.card === "web") {
+    if (view.kind === "fetch") {
+      return [{ type: "text", text: `${view.statusCode ?? ""} ${view.url ?? ""}`.trim() }];
     }
-    const accessibleLabel = time ? `Your message at ${time}` : "Your message";
-    return `<article class="message message-user" data-seq="${escapeHtml(event.seq)}" aria-label="${escapeHtml(accessibleLabel)}">
-      ${contentBlocks(event.data?.content)}
+    const sources = Array.isArray(view.sources) ? view.sources : [];
+    const text = [
+      typeof view.answer === "string" ? view.answer : "",
+      ...sources.map((source) => `${source.title || source.url}\n${source.url}${source.snippet ? `\n${source.snippet}` : ""}`),
+    ].filter(Boolean).join("\n\n");
+    return text ? [{ type: "text", text }] : [];
+  }
+  return [];
+}
+
+function renderToolContent(node) {
+  const preferred = toolViewBlocks(node.resultView);
+  const blocks = preferred.length > 0 ? preferred : (Array.isArray(node.content) ? node.content : []);
+  const rendered = blocks.map((block) => {
+    if (block?.type === "text") return renderToolText(block.text ?? "");
+    if (block?.type === "image") return attachmentBlock(block);
+    return `<p class="empty-content">Unsupported tool output: ${escapeHtml(safeType(block?.type))}</p>`;
+  }).join("");
+  if (rendered) return rendered;
+  if (node.status === "running") return '<p class="tool-empty">Waiting for result</p>';
+  if (node.status === "stopped") return '<p class="tool-empty">Stopped before completion</p>';
+  if (node.status === "error") return '<p class="tool-empty">The tool failed without displayable output</p>';
+  return '<p class="tool-empty">Completed with no output</p>';
+}
+
+function contextLabel(source) {
+  return `Context · ${source?.plugin ?? source?.kind ?? "unknown"}`;
+}
+
+function renderConversationNode(node) {
+  const seq = escapeHtml(node?.seq ?? "");
+  const time = eventTime(node?.time);
+  if (node?.kind === "user" || node?.kind === "steering") {
+    const steering = node.kind === "steering";
+    const label = steering ? "Steering message" : "Your message";
+    const accessibleLabel = time ? `${label} at ${time}` : label;
+    return `<article class="message message-user${steering ? " message-steering" : ""}" data-seq="${seq}" aria-label="${escapeHtml(accessibleLabel)}">
+      ${contentBlocks(node.content)}
     </article>`;
   }
-  if (event.type === "assistant/message") {
-    const accessibleLabel = time ? `Assistant message at ${time}` : "Assistant message";
-    return `<article class="message message-assistant" data-seq="${escapeHtml(event.seq)}" aria-label="${escapeHtml(accessibleLabel)}">
-      ${contentBlocks(event.data?.message?.content, { markdown: true })}
-    </article>`;
-  }
-  if (event.type === "tool/result") {
-    return `<details class="message message-tool" data-seq="${escapeHtml(event.seq)}">
-      <summary><strong>Tool result</strong>${timeElement}</summary>
-      <div class="message-body">${contentBlocks(event.data?.message?.content)}</div>
+  if (node?.kind === "context") {
+    return `<details class="message message-context" data-seq="${seq}">
+      <summary><strong>${escapeHtml(contextLabel(node.source))}</strong>${timeElement(node.time)}</summary>
+      <div class="message-body">${contentBlocks(node.content)}</div>
     </details>`;
   }
+  if (node?.kind === "assistant") {
+    const streaming = node.status === "streaming";
+    const blocks = (Array.isArray(node.blocks) ? node.blocks : []).map((block) => {
+      if (block?.type === "text") return renderMarkdownText(block.text ?? "");
+      if (block?.type === "reasoning" && String(block.text ?? "").trim()) {
+        return `<section class="assistant-reasoning" aria-label="Reasoning">
+          <p class="reasoning-label">Reasoning</p>
+          ${renderMessageText(block.text)}
+        </section>`;
+      }
+      if (block?.type === "image") return attachmentBlock(block);
+      return "";
+    }).join("");
+    const accessibleLabel = time ? `Assistant message at ${time}` : "Assistant message";
+    return `<article class="message message-assistant${streaming ? " message-streaming" : ""}${node.status === "interrupted" ? " message-interrupted" : ""}" data-seq="${seq}" data-turn="${escapeHtml(node.turn ?? "")}" data-step="${escapeHtml(node.step ?? "")}" aria-label="${escapeHtml(accessibleLabel)}"${streaming ? ' aria-busy="true"' : ""}>
+      ${blocks}
+    </article>`;
+  }
+  if (node?.kind === "tool") {
+    const state = node.status === "success" ? "Completed" : node.status === "running" ? "Running" : node.status === "stopped" ? "Stopped" : "Failed";
+    const card = node.resultView?.card ?? node.callView?.card ?? "generic";
+    const title = node.resultView?.title ?? node.callView?.title ?? node.name ?? "unknown";
+    const argument = node.argumentSummary
+      && !String(title).toLocaleLowerCase().includes(String(node.argumentSummary).toLocaleLowerCase())
+      ? `<span class="tool-argument">${escapeHtml(node.argumentSummary)}</span>`
+      : "";
+    const terminal = node.resultView?.card === "terminal" ? node.resultView : null;
+    const exit = terminal && Number.isFinite(terminal.exitCode)
+      ? `<span class="tool-exit">exit ${terminal.exitCode}</span>`
+      : terminal?.signal ? `<span class="tool-exit">${escapeHtml(terminal.signal)}</span>` : "";
+    return `<details class="message message-tool tool-${escapeHtml(node.status)}" data-seq="${seq}" data-call-id="${escapeHtml(node.callId ?? "")}" data-card="${escapeHtml(card)}"${node.expanded ? " open" : ""}>
+      <summary><span class="tool-state">${state}</span><strong>${escapeHtml(title)}</strong>${argument}${exit}</summary>
+      <div class="message-body">${renderToolContent(node)}</div>
+    </details>`;
+  }
+  if (node?.kind === "command") {
+    const name = `/${node.name || "command"}`;
+    const text = typeof node.outcome?.text === "string" ? node.outcome.text : "";
+    const status = node.status === "running" ? "Running" : node.status === "error" ? (text || "Failed") : (text || "Completed");
+    const error = node.status === "error" ? " command-error" : "";
+    if (status.includes("\n")) {
+      const first = status.split("\n").find((line) => line.trim()) ?? (node.status === "error" ? "Failed" : "Completed");
+      return `<details class="message message-command${error}" data-seq="${seq}">
+        <summary><strong>${escapeHtml(name)}</strong><span>${escapeHtml(first)}</span></summary>
+        <div class="message-body">${renderMessageText(status)}</div>
+      </details>`;
+    }
+    return `<p class="message message-command${error}" data-seq="${seq}"><strong>${escapeHtml(name)}</strong><span>· ${escapeHtml(status)}</span></p>`;
+  }
+  if (node?.kind === "retry") {
+    const current = node.current ?? {};
+    const maximum = current.mode === "always" ? "∞" : (current.maxRetries ?? "?");
+    const state = current.state === "cancelled" ? "cancelled" : current.state === "started" ? "started" : "scheduled";
+    return `<details class="message message-retry" data-seq="${seq}">
+      <summary><strong>Model retry ${escapeHtml(current.retry ?? "?")}/${escapeHtml(maximum)}</strong><span>${escapeHtml(state)} · ${escapeHtml(current.delayMs ?? 0)} ms</span></summary>
+      <div class="message-body"><p>${current.code ? `Request failed (${escapeHtml(current.code)}). ` : "Request failed. "}The provider route will be tried again.</p></div>
+    </details>`;
+  }
+  if (node?.kind === "compaction") {
+    const count = Number.isSafeInteger(node.shadowedItemCount) ? `${node.shadowedItemCount} items` : "conversation history";
+    const tokens = Number.isSafeInteger(node.shadowedTokenCount) ? ` · ~${node.shadowedTokenCount} tokens` : "";
+    const state = node.status === "running" ? "Running" : node.status === "error" ? "Failed" : "Completed";
+    return `<details class="message message-compaction${node.status === "error" ? " compaction-error" : ""}" data-seq="${seq}">
+      <summary><strong>${escapeHtml(node.title || "Context compacted")}</strong><span>${state} · ${escapeHtml(count)}${escapeHtml(tokens)}</span></summary>
+      ${node.summary ? `<div class="message-body">${renderMessageText(node.summary)}</div>` : ""}
+    </details>`;
+  }
+  if (node?.kind === "turn-error") {
+    return `<article class="message message-turn-error" data-seq="${seq}" role="alert"><strong>Turn failed</strong><p>${escapeHtml(safeTurnFailure(node.code))}</p>${node.code ? `<code>${escapeHtml(node.code)}</code>` : ""}</article>`;
+  }
+  if (node?.kind === "turn-status") {
+    const labels = {
+      aborted: "Turn interrupted",
+      interrupted: "Turn recovered after interruption",
+      blocked: "Turn blocked",
+      "max-tokens": "Turn reached its token limit",
+    };
+    return `<p class="message message-turn-status" data-seq="${seq}">${escapeHtml(labels[node.status] ?? "Turn stopped")}</p>`;
+  }
+  if (node?.kind === "fallback") {
+    return `<details class="message message-fallback" data-seq="${seq}"><summary><strong>${escapeHtml(node.eventType || "Unknown event")}</strong></summary>${node.summary ? `<div class="message-body">${renderMessageText(node.summary)}</div>` : ""}</details>`;
+  }
   return "";
+}
+
+function renderPendingQueue(snapshot, paths) {
+  const pending = Array.isArray(snapshot?.conversation?.pending) ? snapshot.conversation.pending : [];
+  if (pending.length === 0) return "";
+  const action = escapeHtml(paths.queue ?? "");
+  const mutable = snapshot.canMutatePending === true && Boolean(paths.queue);
+  const rows = pending.map((item, index) => {
+    const id = escapeHtml(item.id ?? "");
+    const label = item.placement === "steering" ? "Steering" : "Queued";
+    const edit = mutable && item.editable
+      ? `<form class="queue-edit" action="${action}" method="post" hx-post="${action}" hx-target="#session-panel" hx-swap="innerHTML" hx-disabled-elt="find button">
+          <input type="hidden" name="operation" value="edit">
+          <input type="hidden" name="itemId" value="${id}">
+          <label for="queue-text-${index}">Edit pending message ${index + 1}</label>
+          <textarea id="queue-text-${index}" class="queue-edit-text" name="text" rows="1" maxlength="32768" required data-message-id="${id}">${escapeHtml(item.text ?? "")}</textarea>
+          <button type="submit" aria-label="Save pending message ${index + 1}">Save</button>
+        </form>`
+      : `<p class="queue-preview">${escapeHtml(item.text || "Pending message")}</p>`;
+    const remove = mutable
+      ? `<form class="queue-remove" action="${action}" method="post" hx-post="${action}" hx-target="#session-panel" hx-swap="innerHTML" hx-disabled-elt="find button">
+          <input type="hidden" name="itemId" value="${id}">
+          <button type="submit" name="operation" value="remove" aria-label="Remove pending message ${index + 1}">Remove</button>
+        </form>`
+      : "";
+    return `<li class="queue-item" data-message-id="${id}"><span class="queue-kind">${label}</span>${edit}${remove}</li>`;
+  }).join("");
+  return `<section id="pending-queue" class="pending-queue" aria-labelledby="pending-queue-heading">
+    <header><h2 id="pending-queue-heading">Pending messages</h2><span>${pending.length}</span></header>
+    <ol>${rows}</ol>
+  </section>`;
 }
 
 function safeTurnFailure(code) {
@@ -286,7 +489,7 @@ export function renderOfferPopup(offer, paths, notice = "") {
   </aside>`;
 }
 
-function renderSlashNotice(notice, paths) {
+function renderSlashNotice(notice, paths, nodes = []) {
   const text = String(notice ?? "").trim();
   if (!text) return "";
   const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
@@ -306,6 +509,10 @@ function renderSlashNotice(notice, paths) {
     if (match[2] === "selected") selected = match[1];
   }
   if (!isList || (names.length === 0 && !unbound)) {
+    const receipt = Array.isArray(nodes)
+      ? nodes.findLast((node) => node?.kind === "command" && String(node.outcome?.text ?? "").trim() === text)
+      : undefined;
+    if (receipt) return "";
     const kind = / selected$/.test(text) || text === "none selected" ? "notice-ok" : "notice";
     return `<p class="${kind}" role="status">${escapeHtml(text)}</p>`;
   }
@@ -360,13 +567,8 @@ function sessionModeChip(mode) {
 }
 
 function composer(paths, running, sessionId = "", findWork = "") {
-  if (findWork === "compile" || findWork === "save" || running) {
-    const label = findWork === "save"
-      ? "Saving…"
-      : findWork === "compile"
-        ? "Finding…"
-        : "The current DSH turn is still running.";
-    const submit = findWork ? "Cancel" : "Interrupt";
+  if (findWork === "compile" || findWork === "save") {
+    const label = findWork === "save" ? "Saving…" : "Finding…";
     return `<form id="interrupt-form" class="composer interrupt-composer" action="${escapeHtml(paths.interrupt)}" method="post"
       data-session-id="${escapeHtml(sessionId)}"
       hx-post="${escapeHtml(paths.interrupt)}"
@@ -376,12 +578,21 @@ function composer(paths, running, sessionId = "", findWork = "") {
       hx-indicator="#interrupt-working">
       <p>${label}</p>
       <div class="composer-actions">
-        <span id="interrupt-working" class="htmx-indicator" aria-live="polite">Interrupting DSH…</span>
-        <button id="interrupt-submit" class="button-danger" type="submit">${submit}</button>
+        <span id="interrupt-working" class="htmx-indicator" aria-live="polite">Cancelling…</span>
+        <button id="interrupt-submit" class="button-danger" type="submit">Cancel</button>
       </div>
     </form>`;
   }
-  return `<form id="composer" class="composer" action="${escapeHtml(paths.prompt)}" method="post"
+  const interrupt = running
+    ? `<form id="interrupt-form" class="interrupt-proxy" action="${escapeHtml(paths.interrupt)}" method="post"
+        data-session-id="${escapeHtml(sessionId)}"
+        hx-post="${escapeHtml(paths.interrupt)}"
+        hx-target="#session-panel"
+        hx-swap="innerHTML"
+        hx-disabled-elt="#interrupt-submit"
+        hx-indicator="#interrupt-working"></form>`
+    : "";
+  return `${interrupt}<form id="composer" class="composer${running ? " composer-running" : ""}" action="${escapeHtml(paths.prompt)}" method="post"
       data-session-id="${escapeHtml(sessionId)}"
       hx-post="${escapeHtml(paths.prompt)}"
       hx-target="#session-panel"
@@ -391,7 +602,7 @@ function composer(paths, running, sessionId = "", findWork = "") {
       hx-indicator="#working">
       <label for="prompt">Message</label>
       <div class="composer-row">
-        <textarea id="prompt" name="prompt" rows="1" maxlength="32768" required autocomplete="off" enterkeyhint="send" placeholder="Message this DSH session"></textarea>
+        <textarea id="prompt" name="prompt" rows="1" maxlength="32768" required autocomplete="off" enterkeyhint="send" placeholder="${running ? "Steer this running turn" : "Message this DSH session"}"></textarea>
         <button id="composer-dictate" type="button" data-state="idle" aria-label="Dictate">
           <svg class="dictate-mic" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
             <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
@@ -403,8 +614,9 @@ function composer(paths, running, sessionId = "", findWork = "") {
         <button id="composer-submit" type="submit">Send</button>
       </div>
       <div class="composer-meta">
-        <span id="working" class="htmx-indicator" aria-live="polite">Waiting for DSH…</span>
-        <span class="key-hint">Enter to send · Shift+Enter for a new line</span>
+        <span id="working" class="htmx-indicator" aria-live="polite">Admitting message…</span>
+        <span class="key-hint">${running ? "Enter steers at the next safe step" : "Enter to send"} · Shift+Enter for a new line</span>
+        ${running ? `<span id="interrupt-working" class="htmx-indicator" aria-live="polite">Interrupting DSH…</span><button id="interrupt-submit" class="button-danger composer-interrupt" type="submit" form="interrupt-form">Interrupt</button>` : ""}
       </div>
     </form>`;
 }
@@ -416,7 +628,8 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   const status = emptyProject
     ? { key: "ready", label: "Ready · no sessions" }
     : deriveStatus(events, snapshot.agentStatus);
-  const transcript = events.map(eventMessage).filter(Boolean).join("\n");
+  const nodes = Array.isArray(snapshot?.conversation?.nodes) ? snapshot.conversation.nodes : [];
+  const transcript = nodes.map(renderConversationNode).filter(Boolean).join("\n");
   const findWork = snapshot.findWork === "save" ? "save" : snapshot.findWork === "compile" ? "compile" : "";
   const face = emptyProject ? (snapshot.project || "project") : liveFace(snapshot);
   return `<div class="session-heading">
@@ -431,10 +644,11 @@ export function renderSessionContent(snapshot, paths, notice = "") {
       ${sessionNavigation(snapshot, paths)}
     </div>
     ${status.detail ? `<p class="notice turn-error" role="alert"><strong>${escapeHtml(status.label)}</strong><span>${escapeHtml(status.detail)}</span>${status.code ? `<code>${escapeHtml(status.code)}</code>` : ""}</p>` : ""}
-    ${renderSlashNotice(notice, paths)}
+    ${renderSlashNotice(notice, paths, nodes)}
     ${emptyProject ? "" : `<div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
       ${transcript || '<p class="empty-transcript">This DSH session has no transcript yet.</p>'}
     </div>`}
+    ${emptyProject ? "" : renderPendingQueue(snapshot, paths)}
     ${emptyProject ? "" : composer(paths, status.key === "running", snapshot.id, findWork)}
     ${renderLoginSheet(snapshot.loginSheet, paths)}
     ${renderOfferPopup(snapshot.offer, paths, notice)}

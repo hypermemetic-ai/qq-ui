@@ -13,6 +13,49 @@
     const transcript = document.querySelector("#transcript");
     if (transcript) transcript.scrollTop = transcript.scrollHeight;
   };
+  let swapDraft = null;
+  const captureDraft = () => {
+    const input = composer();
+    const active = document.activeElement;
+    if (input instanceof HTMLTextAreaElement && input.value) {
+      swapDraft = {
+        kind: "composer",
+        value: input.value,
+        focused: active === input,
+        start: input.selectionStart,
+        end: input.selectionEnd,
+      };
+      return;
+    }
+    if (active instanceof HTMLTextAreaElement && active.classList.contains("queue-edit-text")) {
+      swapDraft = {
+        kind: "queue",
+        id: active.dataset.messageId,
+        value: active.value,
+        focused: true,
+        start: active.selectionStart,
+        end: active.selectionEnd,
+      };
+      return;
+    }
+    swapDraft = null;
+  };
+  const restoreDraft = () => {
+    const draft = swapDraft;
+    swapDraft = null;
+    if (!draft) return;
+    const input = draft.kind === "composer"
+      ? composer()
+      : [...document.querySelectorAll(".queue-edit-text")]
+          .find((candidate) => candidate.dataset.messageId === draft.id);
+    if (!(input instanceof HTMLTextAreaElement)) return;
+    input.value = draft.value;
+    if (draft.kind === "composer") fitComposer(input);
+    if (draft.focused) {
+      input.focus();
+      try { input.setSelectionRange(draft.start, draft.end); } catch {}
+    }
+  };
   const prepareSession = () => {
     showLatest();
     requestAnimationFrame(showLatest);
@@ -324,6 +367,22 @@
     }
     if (key === "h" || key === "H") event.preventDefault();
   });
+
+  document.addEventListener("htmx:beforeRequest", (event) => {
+    const form = event.detail?.elt;
+    if (!(form instanceof HTMLFormElement) || form.id !== "composer") return;
+    const input = composer();
+    // htmx has already captured the request parameters. Empty the admitted
+    // draft now so typing can continue while the short admission is in flight.
+    if (input instanceof HTMLTextAreaElement) {
+      input.value = "";
+      fitComposer(input);
+    }
+  });
+  document.addEventListener("htmx:beforeSwap", captureDraft);
+  document.addEventListener("htmx:sseBeforeMessage", captureDraft);
+  document.addEventListener("htmx:afterSwap", restoreDraft);
+  document.addEventListener("htmx:sseMessage", restoreDraft);
 
   for (const eventName of ["htmx:afterSwap", "htmx:afterSettle", "htmx:sseMessage"]) {
     document.addEventListener(eventName, (event) => {

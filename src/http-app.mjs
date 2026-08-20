@@ -252,6 +252,7 @@ function routes(basePath, sessionId, project) {
       events: sessionId ? `${canonical}/events` : "",
       interrupt: sessionId ? `${canonical}/interrupt` : "",
       prompt: sessionId ? `${canonical}/prompt` : "",
+      queue: sessionId ? `${canonical}/queue` : "",
       offer: sessionId ? `${canonical}/offer` : "",
       overlay: sessionId ? `${canonical}/overlay` : "",
       close: sessionId ? `${canonical}/close` : "",
@@ -265,6 +266,7 @@ function routes(basePath, sessionId, project) {
     events: `${canonical}/events`,
     interrupt: `${canonical}/interrupt`,
     prompt: `${canonical}/prompt`,
+    queue: `${canonical}/queue`,
     offer: `${canonical}/offer`,
     overlay: `${canonical}/overlay`,
     close: `${canonical}/close`,
@@ -450,6 +452,7 @@ export function createConsoleHandler(backend, options = {}) {
       last?.seq,
       last?.type,
       last?.data?.reason?.kind,
+      (snapshot?.conversation?.pending ?? []).map((item) => [item.id, item.target, item.text]),
       sessions.map((session) => [session.id, session.createdAt, session.alias, session.project]),
       snapshot?.alias,
       offer?.id ?? "",
@@ -924,6 +927,60 @@ export function createConsoleHandler(backend, options = {}) {
         }
         const unknownSlash = /unknown slash command/.test(message);
         if (!unknownSlash && isHtmx(req) && errorStatus(error) !== 409) {
+          try {
+            await mutationResponse(req, res, selected.sessionId, message);
+            return;
+          } catch {
+            // Fall through when the DSH session itself cannot be read.
+          }
+        }
+        text(res, errorStatus(error), message);
+      }
+      return;
+    }
+
+    if (selected?.action === "queue") {
+      if (req.method !== "POST") {
+        write(res, 405, { Allow: "POST", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
+        return;
+      }
+      try {
+        if (!sameOrigin(req)) {
+          const error = new Error("Cross-origin form submission refused");
+          error.status = 403;
+          throw error;
+        }
+        const form = await readForm(req);
+        const operation = String(form.get("operation") ?? "");
+        const itemId = String(form.get("itemId") ?? "");
+        if (!itemId) {
+          const error = new Error("Pending message identity is required");
+          error.status = 422;
+          throw error;
+        }
+        if (operation === "edit") {
+          if (typeof backend.editPending !== "function") {
+            const error = new Error("Pending message editing is unavailable");
+            error.status = 501;
+            throw error;
+          }
+          await backend.editPending(selected.sessionId, itemId, String(form.get("text") ?? ""));
+        } else if (operation === "remove") {
+          if (typeof backend.removePending !== "function") {
+            const error = new Error("Pending message removal is unavailable");
+            error.status = 501;
+            throw error;
+          }
+          await backend.removePending(selected.sessionId, itemId);
+        } else {
+          const error = new Error("Unknown pending message operation");
+          error.status = 422;
+          throw error;
+        }
+        await mutationResponse(req, res, selected.sessionId);
+      } catch (error) {
+        const message = errorMessage(error);
+        if (isHtmx(req)) {
           try {
             await mutationResponse(req, res, selected.sessionId, message);
             return;
