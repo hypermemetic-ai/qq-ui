@@ -794,6 +794,13 @@ code {
   color: #ffaaa4;
 }
 
+#composer-dictate[data-state="busy"] {
+  border-color: #4b5962;
+  background: #171d21;
+  color: #8e9ba4;
+  cursor: wait;
+}
+
 #composer-submit {
   position: static;
   width: auto;
@@ -860,6 +867,12 @@ code {
     border-color: #315667;
     background: #101e25;
     color: #80c7ff;
+  }
+
+  .dictation-status[data-state="busy"] {
+    border-color: #46535b;
+    background: #171d21;
+    color: #b7c1c7;
   }
 
   .dictation-status[data-state="failure"] {
