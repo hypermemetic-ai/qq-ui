@@ -615,6 +615,7 @@ function composer(paths, running, sessionId = "", findWork = "") {
       </div>
       <div class="composer-meta">
         <span id="working" class="htmx-indicator" aria-live="polite">Admitting message…</span>
+        <span id="dictation-status" class="dictation-status" data-state="idle" role="status" aria-live="polite" aria-atomic="true" hidden></span>
         <span class="key-hint">${running ? "Enter steers at the next safe step" : "Enter to send"} · Shift+Enter for a new line</span>
         ${running ? `<span id="interrupt-working" class="htmx-indicator" aria-live="polite">Interrupting DSH…</span><button id="interrupt-submit" class="button-danger composer-interrupt" type="submit" form="interrupt-form">Interrupt</button>` : ""}
       </div>

@@ -430,7 +430,7 @@
     }
     if (key === " " || key === "Spacebar") {
       event.preventDefault();
-      clickButton("#composer-dictate");
+      document.dispatchEvent(new CustomEvent("qq:desktop-dictation-toggle"));
       return;
     }
     if (key === "1") {

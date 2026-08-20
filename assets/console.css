@@ -749,6 +749,7 @@ code {
 }
 
 #working { color: #f7ce74; }
+.dictation-status { display: none; }
 
 .composer button {
   min-height: 3.15rem;
@@ -822,6 +823,60 @@ code {
   .site-header, body > footer { display: none; }
   main { width: min(90ch, 100% - 2rem); min-height: 0; }
   .session-panel { border: 0; border-radius: 0; box-shadow: none; }
+
+  .dictation-status:not([hidden]) {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: .38rem;
+    min-height: 1.55rem;
+    padding: .18rem .48rem;
+    border: 1px solid #5d4b2b;
+    border-radius: 999px;
+    background: #201a10;
+    color: #f7ce74;
+    font-size: .72rem;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .dictation-status::before {
+    width: .46rem;
+    height: .46rem;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 14%, transparent);
+    content: "";
+  }
+
+  .dictation-status[data-state="recording"] {
+    border-color: #713a36;
+    background: #2a1715;
+    color: #ffaaa4;
+  }
+
+  .dictation-status[data-state="transcribing"] {
+    border-color: #315667;
+    background: #101e25;
+    color: #80c7ff;
+  }
+
+  .dictation-status[data-state="failure"] {
+    border-color: #8c4741;
+    background: #321918;
+    color: #ffc4bf;
+  }
+
+  .composer[data-dictation-state="starting"] textarea,
+  .composer[data-dictation-state="transcribing"] textarea {
+    border-color: #806b3d;
+  }
+
+  .composer.is-dictating textarea {
+    border-color: #b25851;
+    box-shadow: 0 0 0 3px rgba(255, 141, 134, .1);
+  }
 }
 
 .close-session button,
