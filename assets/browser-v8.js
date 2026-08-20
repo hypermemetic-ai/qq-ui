@@ -527,7 +527,7 @@
   if (serviceWorker && "serviceWorker" in navigator) {
     window.addEventListener(
       "load",
-      () => navigator.serviceWorker.register(serviceWorker).catch(() => {}),
+      () => navigator.serviceWorker.register(serviceWorker, { updateViaCache: "none" }).catch(() => {}),
       { once: true },
     );
   }

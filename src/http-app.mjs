@@ -18,6 +18,18 @@ const SECURITY_HEADERS = Object.freeze({
 });
 
 const root = new URL("../", import.meta.url);
+const SERVICE_WORKER_NAMES = new Set([
+  "sw.js",
+  "sw-v10.js",
+  "sw-v11.js",
+  "sw-v12.js",
+  "sw-v13.js",
+  "sw-v14.js",
+  "sw-v15.js",
+  "sw-v16.js",
+  "sw-v17.js",
+]);
+const serviceWorkerBody = readFileSync(new URL("assets/sw.js", root));
 const bundledAssets = Object.freeze({
   "htmx-2.0.10.min.js": {
     type: "text/javascript; charset=utf-8",
@@ -115,38 +127,12 @@ const bundledAssets = Object.freeze({
     type: "text/html; charset=utf-8",
     body: readFileSync(new URL("assets/offline-v8.html", root)),
   },
-  "sw-v10.js": {
-    type: "text/javascript; charset=utf-8",
-    body: readFileSync(new URL("assets/sw-v10.js", root)),
-  },
-  "sw-v11.js": {
-    type: "text/javascript; charset=utf-8",
-    body: readFileSync(new URL("assets/sw-v11.js", root)),
-  },
-  "sw-v12.js": {
-    type: "text/javascript; charset=utf-8",
-    body: readFileSync(new URL("assets/sw-v12.js", root)),
-  },
-  "sw-v13.js": {
-    type: "text/javascript; charset=utf-8",
-    body: readFileSync(new URL("assets/sw-v13.js", root)),
-  },
-  "sw-v14.js": {
-    type: "text/javascript; charset=utf-8",
-    body: readFileSync(new URL("assets/sw-v14.js", root)),
-  },
-  "sw-v15.js": {
-    type: "text/javascript; charset=utf-8",
-    body: readFileSync(new URL("assets/sw-v15.js", root)),
-  },
-  "sw-v16.js": {
-    type: "text/javascript; charset=utf-8",
-    body: readFileSync(new URL("assets/sw-v16.js", root)),
-  },
-  "sw-v17.js": {
-    type: "text/javascript; charset=utf-8",
-    body: readFileSync(new URL("assets/sw-v17.js", root)),
-  },
+  ...Object.fromEntries(
+    [...SERVICE_WORKER_NAMES].map((name) => [name, {
+      type: "text/javascript; charset=utf-8",
+      body: serviceWorkerBody,
+    }]),
+  ),
 });
 
 const LIVE_ASSET_FILES = Object.freeze({
@@ -431,7 +417,7 @@ export function createConsoleHandler(backend, options = {}) {
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
     manifest: `${assetsPrefix}manifest-v3.webmanifest`,
-    serviceWorker: `${basePath}/sw-v17.js`,
+    serviceWorker: `${basePath}/sw.js`,
   });
   const streams = new Set();
   const findWork = new Map();
@@ -687,12 +673,15 @@ export function createConsoleHandler(backend, options = {}) {
       return;
     }
 
-    if (url.pathname === assetPaths.serviceWorker) {
+    const serviceWorkerName = url.pathname.startsWith(`${basePath}/`)
+      ? url.pathname.slice(basePath.length + 1)
+      : "";
+    if (SERVICE_WORKER_NAMES.has(serviceWorkerName)) {
       if (req.method !== "GET" && !head) {
         write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
         return;
       }
-      const asset = bundledAssets["sw-v17.js"];
+      const asset = bundledAssets[serviceWorkerName];
       write(
         res,
         200,
@@ -733,7 +722,7 @@ export function createConsoleHandler(backend, options = {}) {
         return;
       }
       const asset = resolveAsset(name, liveAssets);
-      if (!asset || name.includes("/") || name === "sw-v10.js" || name === "sw-v11.js" || name === "sw-v12.js" || name === "sw-v13.js" || name === "sw-v14.js" || name === "sw-v15.js" || name === "sw-v16.js" || name === "sw-v17.js") {
+      if (!asset || name.includes("/") || SERVICE_WORKER_NAMES.has(name)) {
         text(res, 404, "Not found", head);
         return;
       }
@@ -1265,6 +1254,7 @@ export const internals = Object.freeze({
   MAX_FORM_BYTES,
   SECURITY_HEADERS,
   LIVE_ASSET_FILES,
+  SERVICE_WORKER_NAMES: [...SERVICE_WORKER_NAMES],
   assetNames: Object.keys(bundledAssets),
   file: fileURLToPath(import.meta.url),
   compilingFindPrompt,
