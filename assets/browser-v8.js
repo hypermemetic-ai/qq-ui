@@ -13,6 +13,25 @@
     const transcript = document.querySelector("#transcript");
     if (transcript) transcript.scrollTop = transcript.scrollHeight;
   };
+  const transcriptBottomGap = 48;
+  let transcriptView = { follow: true, top: 0 };
+  const captureTranscriptView = (transcript = document.querySelector("#transcript")) => {
+    if (!transcript) return;
+    transcriptView = {
+      follow: transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop <= transcriptBottomGap,
+      top: transcript.scrollTop,
+    };
+  };
+  const restoreTranscriptView = () => {
+    const restore = () => {
+      const transcript = document.querySelector("#transcript");
+      if (!transcript) return;
+      if (transcriptView.follow) showLatest();
+      else transcript.scrollTop = transcriptView.top;
+    };
+    restore();
+    requestAnimationFrame(restore);
+  };
   let swapDraft = null;
   const captureDraft = () => {
     const input = composer();
@@ -57,8 +76,7 @@
     }
   };
   const prepareSession = () => {
-    showLatest();
-    requestAnimationFrame(showLatest);
+    restoreTranscriptView();
     fitComposer();
   };
   const submitForm = (selector) => {
@@ -492,8 +510,15 @@
       fitComposer(input);
     }
   });
-  document.addEventListener("htmx:beforeSwap", captureDraft);
-  document.addEventListener("htmx:sseBeforeMessage", captureDraft);
+  document.addEventListener("scroll", (event) => {
+    if (event.target?.id === "transcript") captureTranscriptView(event.target);
+  }, true);
+  for (const eventName of ["htmx:beforeSwap", "htmx:sseBeforeMessage"]) {
+    document.addEventListener(eventName, () => {
+      captureDraft();
+      captureTranscriptView();
+    });
+  }
   document.addEventListener("htmx:afterSwap", restoreDraft);
   document.addEventListener("htmx:sseMessage", restoreDraft);
 
@@ -509,7 +534,7 @@
     });
   }
 
-  window.addEventListener("load", showLatest, { once: true });
+  window.addEventListener("load", restoreTranscriptView, { once: true });
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
