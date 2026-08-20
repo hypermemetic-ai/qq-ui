@@ -250,6 +250,13 @@
     }
   };
 
+  document.addEventListener("pointerdown", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target?.closest("#project-drawer-backdrop") || event.button !== 0 || event.isPrimary === false) return;
+    event.preventDefault();
+    closeDrawer();
+  });
+
   let edgeGesture = null;
   const cancelEdgeGesture = (event) => {
     if (event && edgeGesture?.id !== event.pointerId) return;
