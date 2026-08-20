@@ -1,4 +1,4 @@
-import { escapeHtml, renderMarkdownText, renderMessageText } from "./markdown.mjs";
+import { escapeHtml, renderHighlightedCode, renderMarkdownText, renderMessageText } from "./markdown.mjs";
 
 export { escapeHtml };
 
@@ -717,11 +717,81 @@ export function renderOverlay(overlay, paths, notice = "", findWork = "") {
   </aside>`;
 }
 
-export function renderPage(snapshot, paths, assetPaths, notice = "") {
-  const content = renderSessionContent(snapshot, paths, notice);
-  return `<!doctype html>
-<html lang="en">
-<head>
+function drawerQuery(path) {
+  return `?drawer=${encodeURIComponent(String(path ?? ""))}`;
+}
+
+function drawerEntryHref(entry, drawer, paths) {
+  if (entry.type === "project") {
+    return `${paths.projectsBase}/${encodeURIComponent(entry.project ?? entry.name)}${drawerQuery("")}`;
+  }
+  if (entry.type === "directory") return `${paths.canonical}${drawerQuery(entry.path)}`;
+  const root = entry.kind === "binary" ? paths.fileOpen : paths.fileView;
+  return `${root}${encodeURIComponent(entry.path)}`;
+}
+
+function drawerKind(entry) {
+  if (entry.type === "project") return "project";
+  if (entry.type === "directory") return "dir";
+  if (entry.kind === "markdown") return "md";
+  if (entry.kind === "text") return "txt";
+  if (entry.kind === "code") return "code";
+  if (entry.kind === "binary") return "open";
+  return "file";
+}
+
+/** Render one non-recursive project level. Descendants are never embedded. */
+export function renderProjectDrawer(drawer, paths) {
+  if (!drawer || !Array.isArray(drawer.entries)) return "";
+  const opened = drawer.open === true;
+  const breadcrumbs = Array.isArray(drawer.breadcrumbs) ? drawer.breadcrumbs : [];
+  const breadcrumbHtml = breadcrumbs.map((crumb, index) => {
+    const current = index === breadcrumbs.length - 1;
+    const label = crumb.type === "projects" ? "~/projects" : crumb.name;
+    let href = `${paths.canonical}${drawerQuery("~")}`;
+    if (crumb.type === "project") {
+      href = `${paths.projectsBase}/${encodeURIComponent(drawer.project)}${drawerQuery("")}`;
+    } else if (crumb.type === "directory") {
+      href = `${paths.canonical}${drawerQuery(crumb.path)}`;
+    }
+    return `<li>${current
+      ? `<span aria-current="page" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`
+      : `<a href="${escapeHtml(href)}" title="${escapeHtml(label)}">${escapeHtml(label)}</a>`}</li>`;
+  }).join("");
+  const upPath = drawer.scope === "projects"
+    ? ""
+    : drawer.path ? drawer.parent : "~";
+  const up = drawer.scope === "projects" ? "" : `<a class="drawer-up" href="${escapeHtml(`${paths.canonical}${drawerQuery(upPath)}`)}" aria-label="Up one level">
+      <span aria-hidden="true">↑</span><span>up</span>
+    </a>`;
+  const rows = drawer.entries.map((entry) => {
+    const href = drawerEntryHref(entry, drawer, paths);
+    const action = entry.type === "directory" ? "Open folder" : entry.type === "project" ? "Open project" : entry.kind === "binary" ? "Open file" : "Read file";
+    return `<li><a class="drawer-entry" data-entry-type="${escapeHtml(entry.type)}" data-file-kind="${escapeHtml(entry.kind ?? "")}" href="${escapeHtml(href)}" aria-label="${escapeHtml(`${action} ${entry.name}`)}">
+      <span class="drawer-kind" aria-hidden="true">${drawerKind(entry)}</span>
+      <span class="drawer-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</span>
+    </a></li>`;
+  }).join("");
+  const empty = rows || '<li class="drawer-empty">nothing at this level</li>';
+  return `<button id="project-drawer-toggle" class="drawer-toggle" type="button" aria-controls="project-drawer" aria-expanded="${opened ? "true" : "false"}"${opened ? " inert" : ""}>files</button>
+  <span class="drawer-edge" aria-hidden="true"></span>
+  <button id="project-drawer-backdrop" class="drawer-backdrop" type="button" aria-label="Close files"${opened ? "" : " hidden"}></button>
+  <aside id="project-drawer" class="project-drawer" role="dialog" aria-modal="true" aria-hidden="${opened ? "false" : "true"}" aria-labelledby="project-drawer-title" data-drawer-path="${escapeHtml(drawer.scope === "projects" ? "~" : drawer.path)}"${opened ? "" : " inert"}>
+    <header class="drawer-head">
+      <div>
+        <p class="eyebrow">project files</p>
+        <h2 id="project-drawer-title" tabindex="-1">browse</h2>
+      </div>
+      <button class="drawer-close" type="button" aria-label="Close files">×</button>
+    </header>
+    <nav class="drawer-breadcrumbs" aria-label="File location"><ol>${breadcrumbHtml}</ol></nav>
+    ${up}
+    <ul class="drawer-list">${empty}</ul>
+  </aside>`;
+}
+
+function documentHead(assetPaths, title = "qq") {
+  return `<head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="color-scheme" content="dark">
@@ -731,7 +801,7 @@ export function renderPage(snapshot, paths, assetPaths, notice = "") {
   <meta name="application-name" content="qq">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="htmx-config" content='{"disableInheritance":true,"historyCacheSize":0,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"409","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
-  <title>qq</title>
+  <title>${escapeHtml(title)}</title>
   <link rel="manifest" href="${escapeHtml(assetPaths.manifest)}">
   <link rel="icon" href="${escapeHtml(assetPaths.icon192)}" sizes="192x192">
   <link rel="apple-touch-icon" href="${escapeHtml(assetPaths.icon192)}">
@@ -740,17 +810,73 @@ export function renderPage(snapshot, paths, assetPaths, notice = "") {
   <script defer src="${escapeHtml(assetPaths.sse)}"></script>
   <script defer src="${escapeHtml(assetPaths.browser)}" data-service-worker="${escapeHtml(assetPaths.serviceWorker)}"></script>
   <script defer src="/qq/dictate/client.js"></script>
-</head>
-<body>
-  <header class="site-header">
+</head>`;
+}
+
+function fileError(error) {
+  const status = Number(error?.status);
+  const heading = status === 413
+    ? "File is too large"
+    : status === 415 ? "Preview unavailable" : status === 404 ? "File not found" : "File unavailable";
+  return `<section class="file-error" role="alert">
+    <p class="eyebrow">cannot read</p>
+    <h2>${heading}</h2>
+    <p>${escapeHtml(error?.message ?? "The file could not be opened safely.")}</p>
+  </section>`;
+}
+
+/** Dedicated read-only Markdown, text, or deterministically highlighted view. */
+export function renderFilePage(view, paths, assetPaths) {
+  const file = view?.file;
+  const name = file?.name ?? view?.name ?? "file";
+  let content;
+  if (view?.error) content = fileError(view.error);
+  else if (file?.kind === "markdown") content = renderMarkdownText(file.text, "file-prose");
+  else if (file?.kind === "text") content = `<div class="message-text file-prose file-plain"><pre>${escapeHtml(file.text)}</pre></div>`;
+  else if (file?.kind === "code") content = renderHighlightedCode(file.text, file.language);
+  else content = fileError({ status: 415, message: "qq: unsupported file type" });
+  const drawer = renderProjectDrawer(view?.drawer, paths);
+  const backgroundInert = view?.drawer?.open ? " inert" : "";
+  return `<!doctype html>
+<html lang="en">
+${documentHead(assetPaths, `${name} · qq`)}
+<body class="file-page${view?.drawer?.open ? " drawer-open" : ""}">
+  ${drawer}
+  <main id="file-main" class="file-main"${backgroundInert}>
+    <article class="file-surface" aria-labelledby="file-heading">
+      <header class="file-heading">
+        <div>
+          <p class="eyebrow">read-only file</p>
+          <h1 id="file-heading">${escapeHtml(name)}</h1>
+          <p class="file-path" title="${escapeHtml(file?.path ?? view?.path ?? "")}">${escapeHtml(file?.path ?? view?.path ?? "")}</p>
+        </div>
+        <a class="file-back" href="${escapeHtml(paths.project)}">console</a>
+      </header>
+      <div class="file-document">${content}</div>
+    </article>
+  </main>
+</body>
+</html>`;
+}
+
+export function renderPage(snapshot, paths, assetPaths, notice = "") {
+  const content = renderSessionContent(snapshot, paths, notice);
+  const drawer = renderProjectDrawer(snapshot.drawer, paths);
+  const backgroundInert = snapshot?.drawer?.open ? " inert" : "";
+  return `<!doctype html>
+<html lang="en">
+${documentHead(assetPaths)}
+<body${snapshot?.drawer?.open ? ' class="drawer-open"' : ""}>
+  ${drawer}
+  <header class="site-header"${backgroundInert}>
     <a href="${escapeHtml(paths.canonical)}" aria-label="Reload the selected DSH session">qq / DSH</a>
     <span>Sequential handoff</span>
   </header>
-  <main id="console-stream"${paths.events ? ` hx-ext="sse" sse-connect="${escapeHtml(paths.events)}"` : ""} hx-history="false">
+  <main id="console-stream"${backgroundInert}${paths.events ? ` hx-ext="sse" sse-connect="${escapeHtml(paths.events)}"` : ""} hx-history="false">
     <section id="session-panel" class="session-panel" aria-labelledby="session-heading"${paths.events ? `
       hx-ext="sse" sse-swap="session" hx-swap="innerHTML"` : ""}>${content}</section>
   </main>
-  <footer>DSH owns session identity, transcript order, turn status, and interruption. Browser view state is not shared.</footer>
+  <footer${backgroundInert}>DSH owns session identity, transcript order, turn status, and interruption. Browser view state is not shared.</footer>
 </body>
 </html>`;
 }

@@ -1206,3 +1206,392 @@ body > footer {
   .composer textarea,
   .composer button { min-height: 2.75rem; }
 }
+
+/* Compact project/file drawer. It remains a separate transient navigation
+   surface; the session panel and file document stay visible behind it. */
+.drawer-toggle {
+  position: fixed;
+  z-index: 9;
+  top: max(.65rem, env(safe-area-inset-top));
+  left: max(.65rem, env(safe-area-inset-left));
+  min-width: 3.2rem;
+  min-height: 2.45rem;
+  padding: .4rem .65rem;
+  border: 1px solid #3c4b55;
+  border-radius: .55rem;
+  background: rgba(14, 20, 24, .96);
+  color: #dffbf3;
+  font-size: .74rem;
+  font-weight: 750;
+  letter-spacing: .02em;
+  cursor: pointer;
+  box-shadow: 0 .4rem 1.4rem rgba(0, 0, 0, .28);
+}
+
+.drawer-toggle:focus-visible,
+.drawer-close:focus-visible,
+.drawer-entry:focus-visible,
+.drawer-up:focus-visible,
+.drawer-breadcrumbs a:focus-visible,
+.file-back:focus-visible {
+  outline: 2px solid #72d7c0;
+  outline-offset: 2px;
+}
+
+.drawer-edge {
+  position: fixed;
+  z-index: 8;
+  inset: 0 auto 0 0;
+  width: 1.5rem;
+  pointer-events: none;
+}
+
+.drawer-backdrop {
+  position: fixed;
+  z-index: 10;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: rgba(2, 5, 7, .54);
+  cursor: default;
+}
+
+.project-drawer {
+  position: fixed;
+  z-index: 11;
+  inset: 0 auto 0 0;
+  display: flex;
+  flex-direction: column;
+  width: min(17rem, calc(100vw - 6rem));
+  height: 100%;
+  height: 100dvh;
+  min-width: 0;
+  padding: max(.75rem, env(safe-area-inset-top)) .7rem max(.75rem, env(safe-area-inset-bottom)) max(.7rem, env(safe-area-inset-left));
+  overflow: hidden;
+  border-right: 1px solid #34414b;
+  background: #0d1318;
+  box-shadow: 1.2rem 0 3.5rem rgba(0, 0, 0, .44);
+  transform: translate3d(-105%, 0, 0);
+  transition: transform 180ms cubic-bezier(.2, .75, .25, 1);
+  visibility: hidden;
+}
+
+.drawer-open .project-drawer {
+  transform: translate3d(0, 0, 0);
+  visibility: visible;
+}
+
+.drawer-head {
+  display: flex;
+  flex: none;
+  align-items: start;
+  justify-content: space-between;
+  gap: .7rem;
+  padding: .15rem .1rem .7rem;
+  border-bottom: 1px solid #29343e;
+}
+
+.drawer-head .eyebrow { margin-bottom: .18rem; }
+.drawer-head h2 {
+  margin: 0;
+  color: #edf3f6;
+  font-size: 1.05rem;
+}
+
+.drawer-close {
+  display: grid;
+  place-items: center;
+  min-width: 2.65rem;
+  min-height: 2.65rem;
+  padding: 0;
+  border: 1px solid #34414b;
+  border-radius: .55rem;
+  background: #151d23;
+  color: #dce4e9;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.drawer-breadcrumbs {
+  flex: none;
+  padding: .65rem .1rem .5rem;
+  color: #93a0aa;
+  font-size: .72rem;
+}
+
+.drawer-breadcrumbs ol {
+  display: flex;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+}
+
+.drawer-breadcrumbs li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.drawer-breadcrumbs li + li::before {
+  flex: none;
+  margin-inline: .3rem;
+  color: #53616c;
+  content: "/";
+}
+
+.drawer-breadcrumbs a,
+.drawer-breadcrumbs span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawer-breadcrumbs a { color: #86cfbf; text-decoration: none; }
+.drawer-breadcrumbs li:last-child { flex: 1 1 auto; }
+
+.drawer-up,
+.drawer-entry {
+  display: flex;
+  min-width: 0;
+  min-height: 2.7rem;
+  align-items: center;
+  gap: .6rem;
+  border-radius: .5rem;
+  color: #d8e0e5;
+  text-decoration: none;
+}
+
+.drawer-up {
+  flex: none;
+  margin-bottom: .25rem;
+  padding: .45rem .55rem;
+  color: #9facb5;
+  font-size: .74rem;
+}
+
+.drawer-up:hover,
+.drawer-entry:hover { background: #172128; }
+
+.drawer-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: .12rem;
+  min-height: 0;
+  margin: 0;
+  padding: 0 .05rem .5rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+.drawer-list li { min-width: 0; }
+.drawer-entry { width: 100%; padding: .38rem .5rem; overflow: hidden; }
+.drawer-kind {
+  flex: 0 0 2.65rem;
+  overflow: hidden;
+  color: #75cbb7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .59rem;
+  font-weight: 750;
+  letter-spacing: .04em;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+.drawer-entry[data-entry-type="directory"] .drawer-kind,
+.drawer-entry[data-entry-type="project"] .drawer-kind { color: #f2c96f; }
+.drawer-entry[data-file-kind="unsupported"] .drawer-kind { color: #8d99a3; }
+.drawer-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: .78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drawer-empty {
+  padding: 1.2rem .55rem;
+  color: #74818b;
+  font-size: .76rem;
+  text-align: center;
+}
+
+/* Dedicated file reader. Plain text and Markdown share the same measure,
+   rhythm, and type scale; code uses one deterministic highlighted surface. */
+body.file-page {
+  display: block;
+  height: 100%;
+  overflow: hidden;
+}
+
+.file-main {
+  width: min(100% - 2rem, 90ch);
+  height: 100%;
+  margin-inline: auto;
+  padding-block: 1rem;
+}
+
+.file-surface {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #253039;
+  border-radius: 1rem;
+  background: rgba(15, 20, 25, .98);
+  box-shadow: 0 1.5rem 5rem rgba(0, 0, 0, .3);
+}
+
+.file-heading {
+  display: flex;
+  flex: none;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.15rem 1.35rem 1rem 4.75rem;
+  border-bottom: 1px solid #253039;
+}
+.file-heading > div { min-width: 0; }
+.file-heading h1 {
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  font-size: 1.25rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-path {
+  max-width: 100%;
+  margin: .3rem 0 0;
+  overflow: hidden;
+  color: #8c99a3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-back {
+  flex: none;
+  padding: .55rem .7rem;
+  border: 1px solid #34414b;
+  border-radius: .55rem;
+  background: #151d23;
+  color: #dffbf3;
+  font-size: .74rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+.file-document {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: clamp(1rem, 3vw, 2rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.file-prose,
+.file-code,
+.file-error {
+  width: min(100%, 72ch);
+  margin-inline: auto;
+  color: #e3e9ed;
+  font-size: clamp(.92rem, 2vw, 1.02rem);
+  line-height: 1.68;
+}
+.file-prose.message-markdown p { margin: .75rem 0; }
+.file-prose.message-markdown :where(h1, h2, h3, h4, h5, h6) { margin: 1.45em 0 .55em; }
+.file-prose.message-markdown h1 { font-size: 1.65rem; }
+.file-prose.message-markdown h2 { font-size: 1.35rem; }
+.file-prose.message-markdown h3 { font-size: 1.12rem; }
+.file-plain pre {
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.file-code {
+  max-width: 100%;
+  margin-block: 0;
+  padding: 1rem 1.1rem;
+  overflow: auto;
+  border: 1px solid #222e36;
+  border-radius: .7rem;
+  background: #090d11;
+  color: #d6dee5;
+  font-size: .82rem;
+  line-height: 1.62;
+  tab-size: 2;
+}
+.file-code code { color: inherit; font-size: inherit; white-space: pre; }
+.file-error { padding-block: clamp(2rem, 10vh, 6rem); text-align: center; }
+.file-error h2 { margin: 0 0 .6rem; font-size: 1.3rem; }
+.file-error p:last-child { margin: 0; color: #aab5be; }
+
+.hljs-comment,
+.hljs-quote { color: #778691; font-style: italic; }
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-name { color: #d4b3ff; }
+.hljs-string,
+.hljs-regexp,
+.hljs-attribute { color: #9ed6a9; }
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet { color: #f4c979; }
+.hljs-title,
+.hljs-section,
+.hljs-function .hljs-title { color: #80c7ff; }
+.hljs-variable,
+.hljs-template-variable,
+.hljs-params { color: #e8edf2; }
+.hljs-built_in,
+.hljs-type { color: #70d8c1; }
+.hljs-meta,
+.hljs-doctag { color: #a5b4bf; }
+.hljs-addition { color: #9ed6a9; background: rgba(71, 140, 90, .12); }
+.hljs-deletion { color: #ffaaa4; background: rgba(160, 65, 61, .12); }
+
+@media (max-width: 42rem) {
+  .project-drawer { width: min(15.5rem, calc(100vw - 8rem)); }
+  .session-heading { padding-left: max(4.45rem, calc(env(safe-area-inset-left) + 4rem)); }
+  .drawer-toggle {
+    top: max(.45rem, env(safe-area-inset-top));
+    left: max(.5rem, env(safe-area-inset-left));
+    min-height: 2.55rem;
+  }
+  .file-main { width: 100%; padding: 0; }
+  .file-surface { border: 0; border-radius: 0; box-shadow: none; }
+  .file-heading {
+    padding: max(.55rem, env(safe-area-inset-top)) max(.65rem, env(safe-area-inset-right)) .55rem max(4.45rem, calc(env(safe-area-inset-left) + 4rem));
+  }
+  .file-heading .eyebrow { display: none; }
+  .file-heading h1 { font-size: 1rem; }
+  .file-path { margin-top: .16rem; }
+  .file-document {
+    padding: .9rem max(.8rem, env(safe-area-inset-right)) max(.9rem, env(safe-area-inset-bottom)) max(.8rem, env(safe-area-inset-left));
+  }
+  .file-prose,
+  .file-code { font-size: .88rem; }
+}
+
+@media (max-width: 23rem) {
+  .project-drawer { width: min(15.5rem, calc(100vw - 5.25rem)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-drawer { transition: none; }
+}

@@ -5,8 +5,15 @@ the `qq` logic service plus DSH's public `webServer` carrier and owns HTTP,
 forms, SSE, HTML, CSS, and PWA assets.
 
 It does not own DSH credentials, model adapters, the Agent registry, persistence,
-transcript storage, session-id minting, or a domain database. Dependency is
-one-way: `qq-ui → qq`.
+transcript storage, session-id minting, a project registry, or filesystem
+containment. Dependency is one-way: `qq-ui → qq`.
+
+On phone, `files` and a rightward edge swipe open the compact one-level project
+drawer. Folder and `~/projects` navigation stay URL-addressed; project choices
+only navigate. Readable files use a dedicated read-only view. Markdown-It
+15.0.0 renders Markdown with raw HTML disabled and allowlisted links, while
+highlight.js 11.12.0 deterministically highlights recognized code languages.
+PDFs and other admitted binaries use qq's bounded same-origin open response.
 
 The qq host recipe composes this plugin through `qq/host.patch.yml`; `bin/qq`
 binds it when present. Later extraction to a standalone repository is a package
