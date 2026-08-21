@@ -913,7 +913,7 @@ export function renderFilePage(view, paths, assetPaths) {
   }, {
     mode: "page",
     id: "project-file-viewer",
-    closeHref: paths.project,
+    closeHref: paths.canonical,
     closeLabel: "Back to console",
   });
   return `<!doctype html>
