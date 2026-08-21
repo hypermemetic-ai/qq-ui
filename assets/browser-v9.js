@@ -361,6 +361,141 @@
     }
   };
 
+  const FILE_RETURN_KIND = "qq-file-return";
+  const FILE_RETURN_NAME_PREFIX = `${FILE_RETURN_KIND}:`;
+  const filePageViewer = () => document.querySelector(".document-viewer-page");
+  const currentHref = () => `${location.pathname}${location.search}${location.hash}`;
+  const fileReturnHref = (href) => {
+    try {
+      const url = new URL(href, location.href);
+      if (url.origin !== location.origin) return "";
+      return `${url.pathname}${url.search}${url.hash}`;
+    } catch {
+      return "";
+    }
+  };
+  const sameHref = (left, right) => fileReturnHref(left) === fileReturnHref(right);
+  const mergeHistoryState = (patch) => {
+    const current = history.state && typeof history.state === "object" ? { ...history.state } : {};
+    return { ...current, ...patch };
+  };
+  const readFileReturnPayload = (value) => {
+    const payload = value && typeof value === "object" ? value : null;
+    if (!payload || payload.kind !== FILE_RETURN_KIND) return null;
+    const href = fileReturnHref(payload.href);
+    const fileHref = fileReturnHref(payload.fileHref);
+    const openerPath = String(payload.openerPath ?? "").trim();
+    if (!href || !fileHref || !openerPath || !fileHref.includes("/file/")) return null;
+    return {
+      kind: FILE_RETURN_KIND,
+      href,
+      fileHref,
+      openerPath,
+      transcriptTop: Number.isFinite(payload.transcriptTop) ? payload.transcriptTop : 0,
+      nonce: String(payload.nonce ?? ""),
+    };
+  };
+  const fileReturnState = (state = history.state) => {
+    const owner = state && typeof state === "object" ? state : null;
+    return readFileReturnPayload(owner?.qqFileReturn);
+  };
+  const fileFromState = (state = history.state) => {
+    const owner = state && typeof state === "object" ? state : null;
+    return readFileReturnPayload(owner?.qqFileFrom);
+  };
+  const writeWindowNamePayload = (payload) => {
+    try { window.name = `${FILE_RETURN_NAME_PREFIX}${JSON.stringify(payload)}`; } catch {}
+  };
+  const readWindowNamePayload = () => {
+    const raw = typeof window.name === "string" ? window.name : "";
+    if (!raw.startsWith(FILE_RETURN_NAME_PREFIX)) return null;
+    try {
+      return readFileReturnPayload(JSON.parse(raw.slice(FILE_RETURN_NAME_PREFIX.length)));
+    } catch {
+      return null;
+    }
+  };
+  const clearWindowName = () => {
+    try {
+      if (String(window.name ?? "").startsWith(FILE_RETURN_NAME_PREFIX)) window.name = "";
+    } catch {}
+  };
+  const findFileOpener = (openerPath) => {
+    const drawer = projectDrawer();
+    if (!drawer) return null;
+    return [...drawer.querySelectorAll("a.drawer-entry[data-file-path]")]
+      .find((node) => node.dataset.filePath === openerPath) ?? null;
+  };
+  const recordFileReturnFromLink = (link) => {
+    if (!(link instanceof HTMLElement) || String(link.tagName).toUpperCase() !== "A") return;
+    const openerPath = String(link.dataset.filePath ?? "").trim();
+    if (!openerPath) return;
+    const fileHref = fileReturnHref(link.getAttribute("href") ?? link.href);
+    if (!fileHref || !fileHref.includes("/file/")) return;
+    const transcript = document.querySelector("#transcript");
+    const payload = {
+      kind: FILE_RETURN_KIND,
+      href: currentHref(),
+      fileHref,
+      openerPath,
+      transcriptTop: transcript ? transcript.scrollTop : 0,
+      nonce: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+    };
+    writeWindowNamePayload(payload);
+    try { history.replaceState(mergeHistoryState({ qqFileReturn: payload }), "", currentHref()); } catch {}
+  };
+  const adoptFileReturnFromWindowName = () => {
+    if (!filePageViewer()) return;
+    const named = readWindowNamePayload();
+    clearWindowName();
+    if (!named || !sameHref(named.fileHref, currentHref())) return;
+    if (fileFromState()) return;
+    try { history.replaceState(mergeHistoryState({ qqFileFrom: named }), "", currentHref()); } catch {}
+  };
+  const matchingFileReturnForBack = () => {
+    const payload = fileFromState();
+    if (!payload || !sameHref(payload.fileHref, currentHref())) return null;
+    return payload;
+  };
+  const consumeFileReturn = () => {
+    const current = history.state && typeof history.state === "object" ? { ...history.state } : {};
+    if (!Object.hasOwn(current, "qqFileReturn")) return;
+    delete current.qqFileReturn;
+    try { history.replaceState(Object.keys(current).length ? current : null, "", currentHref()); } catch {}
+  };
+  const pendingFileReturn = () => {
+    const payload = fileReturnState();
+    return Boolean(payload && sameHref(payload.href, currentHref()));
+  };
+  const restoreFileReturnFromHistory = () => {
+    if (filePageViewer()) return;
+    const payload = fileReturnState();
+    if (!payload) return;
+    const matches = sameHref(payload.href, currentHref());
+    if (matches) {
+      if (!drawerIsOpen()) openDrawer({ updateUrl: false, focus: false });
+      const transcript = document.querySelector("#transcript");
+      if (transcript) {
+        transcriptView = { follow: false, top: payload.transcriptTop };
+        transcript.scrollTop = payload.transcriptTop;
+        requestAnimationFrame(() => {
+          const live = document.querySelector("#transcript");
+          if (!live) return;
+          live.scrollTop = payload.transcriptTop;
+        });
+      }
+      const focusOpener = () => {
+        const opener = findFileOpener(payload.openerPath);
+        if (opener instanceof HTMLElement && opener.isConnected && !opener.inert && !opener.closest("[inert]")) {
+          opener.focus({ preventScroll: true });
+        }
+      };
+      focusOpener();
+      requestAnimationFrame(focusOpener);
+    }
+    consumeFileReturn();
+  };
+
   document.addEventListener("pointerdown", (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target?.closest("#project-drawer-backdrop") || event.button !== 0 || event.isPrimary === false) return;
@@ -529,6 +664,18 @@
 
   document.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;
+    const fileLink = target?.closest("a.drawer-entry[data-file-path][href]");
+    if (fileLink instanceof HTMLElement && event.button === 0 && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+      recordFileReturnFromLink(fileLink);
+    }
+    const fileClose = target?.closest("a.document-viewer-close");
+    if (fileClose instanceof HTMLElement && filePageViewer() && event.button === 0 && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+      if (matchingFileReturnForBack() && typeof history.back === "function") {
+        event.preventDefault();
+        history.back();
+        return;
+      }
+    }
     const viewerOpen = target?.closest("[data-document-viewer-open]");
     if (viewerOpen instanceof HTMLElement) {
       event.preventDefault();
@@ -806,17 +953,27 @@
   }
 
   window.addEventListener("load", restoreTranscriptView, { once: true });
+  window.addEventListener("pageshow", () => {
+    adoptFileReturnFromWindowName();
+    restoreFileReturnFromHistory();
+  });
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => {
-      syncDrawerChrome();
-      prepareSession();
-      if (drawerIsOpen()) requestAnimationFrame(() => openDrawer({ updateUrl: false }));
-    }, { once: true });
-  } else {
+  const syncInitialChrome = () => {
+    adoptFileReturnFromWindowName();
+    const keepOpenerFocus = pendingFileReturn();
+    if (keepOpenerFocus) {
+      const payload = fileReturnState();
+      transcriptView = { follow: false, top: payload.transcriptTop };
+    }
     syncDrawerChrome();
     prepareSession();
-    if (drawerIsOpen()) requestAnimationFrame(() => openDrawer({ updateUrl: false }));
+    if (drawerIsOpen()) requestAnimationFrame(() => openDrawer({ updateUrl: false, focus: !keepOpenerFocus }));
+    restoreFileReturnFromHistory();
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", syncInitialChrome, { once: true });
+  } else {
+    syncInitialChrome();
   }
 
   const serviceWorker = ownScript?.dataset.serviceWorker;

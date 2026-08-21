@@ -768,7 +768,10 @@ export function renderProjectDrawer(drawer, paths) {
   const rows = drawer.entries.map((entry) => {
     const href = drawerEntryHref(entry, drawer, paths);
     const action = entry.type === "directory" ? "Open folder" : entry.type === "project" ? "Open project" : entry.kind === "binary" ? "Open file" : "Read file";
-    return `<li><a class="drawer-entry" data-entry-type="${escapeHtml(entry.type)}" data-file-kind="${escapeHtml(entry.kind ?? "")}" href="${escapeHtml(href)}" aria-label="${escapeHtml(`${action} ${entry.name}`)}">
+    const pathAttr = entry.type === "file" && entry.path
+      ? ` data-file-path="${escapeHtml(entry.path)}"`
+      : "";
+    return `<li><a class="drawer-entry" data-entry-type="${escapeHtml(entry.type)}" data-file-kind="${escapeHtml(entry.kind ?? "")}"${pathAttr} href="${escapeHtml(href)}" aria-label="${escapeHtml(`${action} ${entry.name}`)}">
       <span class="drawer-kind" aria-hidden="true">${drawerKind(entry)}</span>
       <span class="drawer-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</span>
     </a></li>`;
