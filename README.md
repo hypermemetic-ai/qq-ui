@@ -8,9 +8,10 @@ It does not own DSH credentials, model adapters, the Agent registry, persistence
 transcript storage, session-id minting, a project registry, or filesystem
 containment. Dependency is one-way: `qq-ui → qq`.
 
-On phone, a deliberate rightward swipe across the ordinary app surface opens
-the compact one-level project drawer. Native vertical scrolling, horizontal file
-panning, and controls keep their own touch gestures. Folder and `~/projects`
+On phone, a deliberate rightward pull across the ordinary app surface directly
+moves the compact one-level project drawer, which settles from release distance
+and velocity. Native vertical scrolling, horizontal file panning, and controls
+keep their own touch gestures. Folder and `~/projects`
 navigation stay URL-addressed; project choices only navigate. Readable files use
 a dedicated read-only view. Markdown-It
 15.0.0 renders Markdown with raw HTML disabled and allowlisted links, while

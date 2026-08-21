@@ -190,24 +190,38 @@
     return [...drawer.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')]
       .filter((node) => node instanceof HTMLElement && !node.hidden);
   };
+  const drawerIsTransient = () => document.body.classList.contains("drawer-drag-active") || document.body.classList.contains("drawer-drag-settling");
   const syncDrawerChrome = () => {
     const drawer = projectDrawer();
     const toggle = drawerToggle();
     const backdrop = drawerBackdrop();
     if (!drawer || !backdrop) return;
     const open = drawerIsOpen();
+    const transient = drawerIsTransient();
     toggle?.setAttribute("aria-expanded", String(open));
     drawer.setAttribute("aria-hidden", String(!open));
     drawer.inert = !open;
-    backdrop.hidden = !open;
+    backdrop.hidden = !open && !transient;
+    backdrop.setAttribute("aria-hidden", String(!open));
+    backdrop.inert = !open;
     for (const node of document.body.children) {
       if (node === drawer || node === backdrop) continue;
       node.inert = open;
     }
   };
-  const openDrawer = ({ updateUrl = true, focus = true } = {}) => {
+  let drawerSettleTimer = null;
+  const clearDrawerTransient = ({ sync = true } = {}) => {
+    if (drawerSettleTimer !== null) clearTimeout(drawerSettleTimer);
+    drawerSettleTimer = null;
+    document.body.classList.remove("drawer-drag-active", "drawer-drag-settling");
+    projectDrawer()?.style.removeProperty("transform");
+    drawerBackdrop()?.style.removeProperty("opacity");
+    if (sync) syncDrawerChrome();
+  };
+  const openDrawer = ({ updateUrl = true, focus = true, preserveTransient = false } = {}) => {
     const drawer = projectDrawer();
     if (!drawer) return;
+    if (!preserveTransient) clearDrawerTransient({ sync: false });
     if (!drawerIsOpen()) {
       const active = document.activeElement;
       drawerReturnFocus = active instanceof HTMLElement && active !== document.body && !drawer.contains(active)
@@ -225,6 +239,7 @@
   const closeDrawer = ({ updateUrl = true, restoreFocus = true } = {}) => {
     const drawer = projectDrawer();
     if (!drawer) return;
+    clearDrawerTransient({ sync: false });
     const returnFocus = drawerReturnFocus;
     drawerReturnFocus = null;
     document.body.classList.remove("drawer-open");
@@ -284,19 +299,73 @@
     document.removeEventListener("touchend", finishSurfaceGesture, true);
     document.removeEventListener("touchcancel", finishSurfaceGesture, true);
   };
-  function finishSurfaceGesture(event) {
-    if (!surfaceGesture || !findTouch(event.changedTouches, surfaceGesture.id)) return;
+  const cancelSurfaceGesture = () => {
+    const hadDrag = Boolean(surfaceGesture?.horizontal) || drawerIsTransient();
     endSurfaceGesture();
+    if (hadDrag) clearDrawerTransient();
+  };
+  const transitionMilliseconds = (node) => {
+    if (!(node instanceof Element)) return 0;
+    const values = getComputedStyle(node).transitionDuration.split(",");
+    return Math.max(0, ...values.map((value) => {
+      const duration = parseFloat(value) || 0;
+      return value.trim().endsWith("ms") ? duration : duration * 1000;
+    }));
+  };
+  const applySurfaceDrag = (gesture, distance) => {
+    const drawer = projectDrawer();
+    const backdrop = drawerBackdrop();
+    if (!drawer || !backdrop) return;
+    gesture.distance = Math.min(gesture.hiddenDistance, Math.max(0, distance));
+    const progress = gesture.distance / gesture.hiddenDistance;
+    drawer.style.transform = `translate3d(calc(-105% + ${gesture.distance}px), 0, 0)`;
+    backdrop.style.opacity = String(progress);
+    if (!document.body.classList.contains("drawer-drag-active")) {
+      document.body.classList.add("drawer-drag-active");
+      syncDrawerChrome();
+    }
+  };
+  const settleSurfaceDrag = (gesture, open) => {
+    const drawer = projectDrawer();
+    const backdrop = drawerBackdrop();
+    if (!drawer || !backdrop) {
+      clearDrawerTransient();
+      return;
+    }
+    document.body.classList.remove("drawer-drag-active");
+    document.body.classList.add("drawer-drag-settling");
+    if (open) openDrawer({ preserveTransient: true });
+    else syncDrawerChrome();
+    drawer.getBoundingClientRect();
+    drawer.style.transform = open ? "translate3d(0, 0, 0)" : "translate3d(-105%, 0, 0)";
+    backdrop.style.opacity = open ? "1" : "0";
+    const settleFor = Math.max(transitionMilliseconds(drawer), transitionMilliseconds(backdrop));
+    drawerSettleTimer = setTimeout(() => clearDrawerTransient(), settleFor ? settleFor + 40 : 0);
+  };
+  function finishSurfaceGesture(event) {
+    const gesture = surfaceGesture;
+    const point = gesture && findTouch(event.changedTouches, gesture.id);
+    if (!gesture || !point) return;
+    endSurfaceGesture();
+    if (!gesture.horizontal || event.type === "touchcancel") {
+      if (gesture.horizontal) clearDrawerTransient();
+      return;
+    }
+    const releaseDelay = performance.now() - gesture.lastAt;
+    const velocity = releaseDelay <= 120 ? Math.max(0, gesture.velocity) : 0;
+    const projectedDistance = gesture.distance + velocity * 320;
+    const open = gesture.distance >= gesture.hiddenDistance * .42 || (gesture.distance >= 12 && projectedDistance >= gesture.hiddenDistance * .42);
+    settleSurfaceDrag(gesture, open);
   }
   function moveSurfaceGesture(event) {
     const gesture = surfaceGesture;
     if (!gesture || event.touches.length !== 1) {
-      endSurfaceGesture();
+      cancelSurfaceGesture();
       return;
     }
     const point = findTouch(event.touches, gesture.id);
     if (!point) {
-      endSurfaceGesture();
+      cancelSurfaceGesture();
       return;
     }
     const now = performance.now();
@@ -311,34 +380,46 @@
       }
       if (dx < 10 || dx <= absoluteY * 1.45) return;
       gesture.horizontal = true;
+      gesture.width = Math.max(1, projectDrawer()?.getBoundingClientRect().width || 1);
+      gesture.hiddenDistance = gesture.width * 1.05;
     }
     if (dx <= 0 || absoluteY > Math.max(18, dx * .68)) {
-      endSurfaceGesture();
+      cancelSurfaceGesture();
       return;
     }
     event.preventDefault();
-    const elapsed = Math.max(1, now - gesture.at);
-    const recentVelocity = (point.clientX - gesture.lastX) / Math.max(1, now - gesture.lastAt);
-    gesture.velocity = Math.max(recentVelocity, gesture.velocity * .72);
-    gesture.lastX = point.clientX;
+    gesture.samples.push({ x: point.clientX, at: now });
+    const cutoff = now - 120;
+    while (gesture.samples.length > 2 && gesture.samples[1].at < cutoff) gesture.samples.shift();
+    const anchor = gesture.samples[0];
+    gesture.velocity = (point.clientX - anchor.x) / Math.max(1, now - anchor.at);
     gesture.lastAt = now;
-    const fastSwipe = dx >= 20 && elapsed <= 450 && Math.max(gesture.velocity, dx / elapsed) >= .22;
-    const deliberateSwipe = dx >= 32 && elapsed <= 650;
-    if (!fastSwipe && !deliberateSwipe) return;
-    endSurfaceGesture();
-    openDrawer();
+    applySurfaceDrag(gesture, dx);
   }
   document.addEventListener("touchstart", (event) => {
-    if (surfaceGesture) endSurfaceGesture();
+    if (surfaceGesture) cancelSurfaceGesture();
+    else if (drawerIsTransient()) clearDrawerTransient();
     const target = event.target instanceof Element ? event.target : null;
     if (!target || event.defaultPrevented || event.touches.length !== 1 || !projectDrawer() || drawerIsOpen() || desktopChair() || surfaceGestureBlocked(target)) return;
     const point = event.touches[0];
     const now = performance.now();
-    surfaceGesture = { id: point.identifier, x: point.clientX, y: point.clientY, at: now, lastX: point.clientX, lastAt: now, velocity: 0, horizontal: false };
+    surfaceGesture = {
+      id: point.identifier,
+      x: point.clientX,
+      y: point.clientY,
+      lastAt: now,
+      distance: 0,
+      velocity: 0,
+      horizontal: false,
+      samples: [{ x: point.clientX, at: now }],
+    };
     document.addEventListener("touchmove", moveSurfaceGesture, activeTouchOptions);
     document.addEventListener("touchend", finishSurfaceGesture, { capture: true, passive: true });
     document.addEventListener("touchcancel", finishSurfaceGesture, { capture: true, passive: true });
   }, { capture: true, passive: true });
+  window.addEventListener("pagehide", cancelSurfaceGesture);
+  window.addEventListener("beforeunload", cancelSurfaceGesture);
+  window.addEventListener("popstate", cancelSurfaceGesture);
 
   let pendingClose = false;
 
