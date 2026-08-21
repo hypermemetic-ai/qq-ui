@@ -1362,6 +1362,7 @@ body > footer {
   color: #edf3f6;
   font-size: 1.05rem;
 }
+#project-drawer-title:focus { outline: none; }
 
 .drawer-close {
   display: grid;
