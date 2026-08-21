@@ -373,6 +373,9 @@
     const dy = point.clientY - gesture.y;
     const absoluteX = Math.abs(dx);
     const absoluteY = Math.abs(dy);
+    gesture.samples.push({ x: point.clientX, at: now });
+    const cutoff = now - 120;
+    while (gesture.samples.length > 1 && gesture.samples[0].at < cutoff) gesture.samples.shift();
     if (!gesture.horizontal) {
       if (dx < -8 || (absoluteY >= 10 && absoluteY > absoluteX * 1.15)) {
         endSurfaceGesture();
@@ -388,9 +391,6 @@
       return;
     }
     event.preventDefault();
-    gesture.samples.push({ x: point.clientX, at: now });
-    const cutoff = now - 120;
-    while (gesture.samples.length > 2 && gesture.samples[1].at < cutoff) gesture.samples.shift();
     const anchor = gesture.samples[0];
     gesture.velocity = (point.clientX - anchor.x) / Math.max(1, now - anchor.at);
     gesture.lastAt = now;
