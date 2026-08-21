@@ -201,7 +201,7 @@
     drawer.inert = !open;
     backdrop.hidden = !open;
     for (const node of document.body.children) {
-      if (node === drawer || node === backdrop || node.classList.contains("drawer-edge")) continue;
+      if (node === drawer || node === backdrop) continue;
       node.inert = open;
     }
   };
@@ -256,40 +256,89 @@
     event.preventDefault();
     closeDrawer();
   });
+  drawerBackdrop()?.addEventListener("touchstart", (event) => {
+    event.preventDefault();
+    if (drawerIsOpen()) closeDrawer();
+  }, { passive: false });
 
-  let edgeGesture = null;
-  const cancelEdgeGesture = (event) => {
-    if (event && edgeGesture?.id !== event.pointerId) return;
-    const gesture = edgeGesture;
-    edgeGesture = null;
-    if (gesture?.target.hasPointerCapture?.(gesture.id)) gesture.target.releasePointerCapture(gesture.id);
-  };
-  document.addEventListener("pointerdown", (event) => {
-    const target = event.target instanceof Element ? event.target.closest(".drawer-edge") : null;
-    if (!target || drawerIsOpen() || desktopChair() || event.button !== 0 || event.isPrimary === false) return;
-    if (event.pointerType && event.pointerType !== "touch" && event.pointerType !== "pen") return;
-    edgeGesture = { id: event.pointerId, target, x: event.clientX, y: event.clientY, at: performance.now(), cancelled: false, captured: false };
-  }, { passive: true });
-  document.addEventListener("pointermove", (event) => {
-    if (!edgeGesture || edgeGesture.id !== event.pointerId) return;
-    const dx = event.clientX - edgeGesture.x;
-    const dy = event.clientY - edgeGesture.y;
-    if (!edgeGesture.captured && dx >= 10 && Math.abs(dx) > Math.abs(dy) * 1.25) {
-      edgeGesture.captured = true;
-      try { edgeGesture.target.setPointerCapture(event.pointerId); } catch {}
+  const surfaceGestureBlocked = (target) => {
+    if (target.closest("#project-drawer, #project-drawer-backdrop, form, a, button, input, textarea, select, option, label, summary, audio, video, [contenteditable]:not([contenteditable=\"false\"]), [role=button], [role=link], [role=textbox], [role=slider], [role=spinbutton], [role=switch], [role=tab], [role=checkbox], [role=radio]")) return true;
+    for (let node = target; node; node = node.parentElement) {
+      if (!(node instanceof HTMLElement)) continue;
+      const overflowX = getComputedStyle(node).overflowX;
+      if ((overflowX === "auto" || overflowX === "scroll") && node.scrollWidth > node.clientWidth + 1) return true;
     }
-    if (dx < -8 || Math.abs(dy) > Math.max(28, Math.abs(dx) * .72)) edgeGesture.cancelled = true;
-  }, { passive: true });
-  document.addEventListener("pointerup", (event) => {
-    if (!edgeGesture || edgeGesture.id !== event.pointerId) return;
-    const gesture = edgeGesture;
-    cancelEdgeGesture(event);
-    const dx = event.clientX - gesture.x;
-    const dy = Math.abs(event.clientY - gesture.y);
-    if (!gesture.cancelled && dx >= 56 && dy <= 42 && performance.now() - gesture.at <= 800) openDrawer();
-  }, { passive: true });
-  document.addEventListener("pointercancel", cancelEdgeGesture, { passive: true });
-  document.addEventListener("lostpointercapture", cancelEdgeGesture, { passive: true });
+    return false;
+  };
+  const findTouch = (touches, id) => {
+    for (let index = 0; index < touches.length; index += 1) {
+      if (touches[index].identifier === id) return touches[index];
+    }
+    return null;
+  };
+  let surfaceGesture = null;
+  const activeTouchOptions = { capture: true, passive: false };
+  const endSurfaceGesture = () => {
+    surfaceGesture = null;
+    document.removeEventListener("touchmove", moveSurfaceGesture, true);
+    document.removeEventListener("touchend", finishSurfaceGesture, true);
+    document.removeEventListener("touchcancel", finishSurfaceGesture, true);
+  };
+  function finishSurfaceGesture(event) {
+    if (!surfaceGesture || !findTouch(event.changedTouches, surfaceGesture.id)) return;
+    endSurfaceGesture();
+  }
+  function moveSurfaceGesture(event) {
+    const gesture = surfaceGesture;
+    if (!gesture || event.touches.length !== 1) {
+      endSurfaceGesture();
+      return;
+    }
+    const point = findTouch(event.touches, gesture.id);
+    if (!point) {
+      endSurfaceGesture();
+      return;
+    }
+    const now = performance.now();
+    const dx = point.clientX - gesture.x;
+    const dy = point.clientY - gesture.y;
+    const absoluteX = Math.abs(dx);
+    const absoluteY = Math.abs(dy);
+    if (!gesture.horizontal) {
+      if (dx < -8 || (absoluteY >= 10 && absoluteY > absoluteX * 1.15)) {
+        endSurfaceGesture();
+        return;
+      }
+      if (dx < 10 || dx <= absoluteY * 1.45) return;
+      gesture.horizontal = true;
+    }
+    if (dx <= 0 || absoluteY > Math.max(18, dx * .68)) {
+      endSurfaceGesture();
+      return;
+    }
+    event.preventDefault();
+    const elapsed = Math.max(1, now - gesture.at);
+    const recentVelocity = (point.clientX - gesture.lastX) / Math.max(1, now - gesture.lastAt);
+    gesture.velocity = Math.max(recentVelocity, gesture.velocity * .72);
+    gesture.lastX = point.clientX;
+    gesture.lastAt = now;
+    const fastSwipe = dx >= 20 && elapsed <= 450 && Math.max(gesture.velocity, dx / elapsed) >= .22;
+    const deliberateSwipe = dx >= 32 && elapsed <= 650;
+    if (!fastSwipe && !deliberateSwipe) return;
+    endSurfaceGesture();
+    openDrawer();
+  }
+  document.addEventListener("touchstart", (event) => {
+    if (surfaceGesture) endSurfaceGesture();
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || event.defaultPrevented || event.touches.length !== 1 || !projectDrawer() || drawerIsOpen() || desktopChair() || surfaceGestureBlocked(target)) return;
+    const point = event.touches[0];
+    const now = performance.now();
+    surfaceGesture = { id: point.identifier, x: point.clientX, y: point.clientY, at: now, lastX: point.clientX, lastAt: now, velocity: 0, horizontal: false };
+    document.addEventListener("touchmove", moveSurfaceGesture, activeTouchOptions);
+    document.addEventListener("touchend", finishSurfaceGesture, { capture: true, passive: true });
+    document.addEventListener("touchcancel", finishSurfaceGesture, { capture: true, passive: true });
+  }, { capture: true, passive: true });
 
   let pendingClose = false;
 
