@@ -178,6 +178,88 @@
   const drawerBackdrop = () => document.querySelector("#project-drawer-backdrop");
   let drawerReturnFocus = null;
   const drawerIsOpen = () => document.body.classList.contains("drawer-open");
+  const openDocumentViewerDialog = () => document.querySelector(".document-viewer-dialog[open]");
+  const documentViewerIsOpen = () => Boolean(openDocumentViewerDialog());
+  let documentViewerReturnFocus = null;
+  let documentViewerHome = null;
+  let documentViewerScroll = [];
+  const syncDocumentViewerChrome = (viewer, open) => {
+    if (!(viewer instanceof Element)) return;
+    for (const node of document.body.children) {
+      if (node === viewer) continue;
+      node.inert = open;
+    }
+  };
+  const captureDocumentViewerScroll = (from) => {
+    const seen = [];
+    for (let node = from instanceof Element ? from : null; node; node = node.parentElement) {
+      if (node.scrollHeight > node.clientHeight + 1 || node.scrollWidth > node.clientWidth + 1) {
+        seen.push({ node, top: node.scrollTop, left: node.scrollLeft });
+      }
+    }
+    documentViewerScroll = seen;
+  };
+  const restoreDocumentViewerScroll = () => {
+    const restore = () => {
+      for (const entry of documentViewerScroll) {
+        if (!entry.node.isConnected) continue;
+        entry.node.scrollTop = entry.top;
+        entry.node.scrollLeft = entry.left;
+      }
+    };
+    restore();
+    requestAnimationFrame(restore);
+  };
+  const parkDocumentViewer = (viewer) => {
+    if (viewer.parentElement === document.body) return;
+    documentViewerHome = { parent: viewer.parentNode, next: viewer.nextSibling };
+    document.body.append(viewer);
+  };
+  const unparkDocumentViewer = (viewer) => {
+    const home = documentViewerHome;
+    documentViewerHome = null;
+    if (!home?.parent?.isConnected) return;
+    home.parent.insertBefore(viewer, home.next);
+  };
+  const restoreDocumentViewerFocus = () => {
+    const opener = documentViewerReturnFocus;
+    documentViewerReturnFocus = null;
+    if (opener instanceof HTMLElement && opener.isConnected && !opener.inert) {
+      opener.focus({ preventScroll: true });
+    }
+    restoreDocumentViewerScroll();
+  };
+  const closeDocumentViewer = (viewer = openDocumentViewerDialog()) => {
+    if (!(viewer instanceof HTMLElement) || !viewer.open) return;
+    viewer.close?.();
+    if (viewer.open) {
+      viewer.removeAttribute("open");
+      syncDocumentViewerChrome(viewer, false);
+      unparkDocumentViewer(viewer);
+      restoreDocumentViewerFocus();
+    }
+  };
+  const openDocumentViewer = (viewer, opener) => {
+    if (!(viewer instanceof HTMLElement) || viewer.tagName !== "DIALOG") return;
+    if (documentViewerIsOpen() && openDocumentViewerDialog() !== viewer) closeDocumentViewer();
+    documentViewerReturnFocus = opener instanceof HTMLElement ? opener : document.activeElement;
+    captureDocumentViewerScroll(documentViewerReturnFocus instanceof Element ? documentViewerReturnFocus : document.querySelector("#transcript, .document-viewer-proof"));
+    parkDocumentViewer(viewer);
+    if (!viewer.open) {
+      if (typeof viewer.showModal === "function") viewer.showModal();
+      else viewer.setAttribute("open", "");
+    }
+    syncDocumentViewerChrome(viewer, true);
+    const heading = viewer.querySelector("h1");
+    if (heading instanceof HTMLElement) heading.focus({ preventScroll: true });
+  };
+  document.addEventListener("close", (event) => {
+    const viewer = event.target;
+    if (!(viewer instanceof HTMLElement) || !viewer.classList.contains("document-viewer-dialog")) return;
+    syncDocumentViewerChrome(viewer, false);
+    unparkDocumentViewer(viewer);
+    restoreDocumentViewerFocus();
+  }, true);
   const updateDrawerUrl = (open) => {
     const url = new URL(location.href);
     if (open) url.searchParams.set("drawer", projectDrawer()?.dataset.drawerPath || "");
@@ -277,7 +359,8 @@
   }, { passive: false });
 
   const surfaceGestureBlocked = (target) => {
-    if (target.closest("#project-drawer, #project-drawer-backdrop, form, a, button, input, textarea, select, option, label, summary, audio, video, [contenteditable]:not([contenteditable=\"false\"]), [role=button], [role=link], [role=textbox], [role=slider], [role=spinbutton], [role=switch], [role=tab], [role=checkbox], [role=radio]")) return true;
+    if (documentViewerIsOpen()) return true;
+    if (target.closest("#project-drawer, #project-drawer-backdrop, .document-viewer, form, a, button, input, textarea, select, option, label, summary, audio, video, [contenteditable]:not([contenteditable=\"false\"]), [role=button], [role=link], [role=textbox], [role=slider], [role=spinbutton], [role=switch], [role=tab], [role=checkbox], [role=radio]")) return true;
     for (let node = target; node; node = node.parentElement) {
       if (!(node instanceof HTMLElement)) continue;
       const overflowX = getComputedStyle(node).overflowX;
@@ -432,6 +515,18 @@
 
   document.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;
+    const viewerOpen = target?.closest("[data-document-viewer-open]");
+    if (viewerOpen instanceof HTMLElement) {
+      event.preventDefault();
+      const viewer = document.getElementById(viewerOpen.getAttribute("data-document-viewer-open") ?? "");
+      if (viewer) openDocumentViewer(viewer, viewerOpen);
+      return;
+    }
+    if (target?.closest("[data-document-viewer-close]")) {
+      event.preventDefault();
+      closeDocumentViewer(target.closest(".document-viewer-dialog") ?? openDocumentViewerDialog());
+      return;
+    }
     if (target?.closest("#project-drawer-toggle")) {
       event.preventDefault();
       if (drawerIsOpen()) closeDrawer();
@@ -481,6 +576,13 @@
 
   document.addEventListener("keydown", (event) => {
     if (event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (documentViewerIsOpen()) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDocumentViewer();
+      }
+      return;
+    }
     if (drawerIsOpen()) {
       if (event.key === "Escape") {
         event.preventDefault();

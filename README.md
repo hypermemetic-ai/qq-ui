@@ -13,7 +13,7 @@ moves the compact one-level project drawer, which settles from release distance
 and velocity. Native vertical scrolling, horizontal file panning, and controls
 keep their own touch gestures. Folder and `~/projects`
 navigation stay URL-addressed; project choices only navigate. Readable files use
-a dedicated read-only view. Markdown-It
+one full-viewport, pitch-black document viewer. Markdown-It
 15.0.0 renders Markdown with raw HTML disabled and allowlisted links, while
 highlight.js 11.12.0 deterministically highlights recognized code languages.
 PDFs and other admitted binaries use qq's bounded same-origin open response.

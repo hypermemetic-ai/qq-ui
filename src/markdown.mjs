@@ -92,7 +92,7 @@ export function renderHighlightedCode(text, language) {
   const name = String(language ?? "").trim().toLocaleLowerCase("en-US");
   const known = name && hljs.getLanguage(name);
   const className = known ? `hljs language-${escapeHtml(name)}` : "hljs language-plaintext";
-  return `<pre class="file-code"><code class="${className}">${known ? highlighted(text, name) : escapeHtml(text)}</code></pre>`;
+  return `<pre class="document-code"><code class="${className}">${known ? highlighted(text, name) : escapeHtml(text)}</code></pre>`;
 }
 
 export const internals = Object.freeze({ safeLink, highlighted, markdown });

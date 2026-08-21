@@ -790,12 +790,13 @@ export function renderProjectDrawer(drawer, paths) {
   </aside>`;
 }
 
-function documentHead(assetPaths, title = "qq") {
+function documentHead(assetPaths, title = "qq", options = {}) {
+  const themeColor = options.themeColor ?? "#0d1216";
   return `<head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#0d1216">
+  <meta name="theme-color" content="${escapeHtml(themeColor)}">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="qq">
   <meta name="application-name" content="qq">
@@ -813,47 +814,211 @@ function documentHead(assetPaths, title = "qq") {
 </head>`;
 }
 
-function fileError(error) {
-  const status = Number(error?.status);
-  const heading = status === 413
-    ? "File is too large"
-    : status === 415 ? "Preview unavailable" : status === 404 ? "File not found" : "File unavailable";
-  return `<section class="file-error" role="alert">
-    <p class="eyebrow">cannot read</p>
-    <h2>${heading}</h2>
-    <p>${escapeHtml(error?.message ?? "The file could not be opened safely.")}</p>
+function documentState(document) {
+  const state = document?.state;
+  if (state !== "loading" && state !== "error" && state !== "empty") return "";
+  const defaultTitle = state === "loading" ? "Loading document" : state === "error" ? "Document unavailable" : "Nothing to display";
+  const title = document?.stateTitle ?? defaultTitle;
+  const message = document?.message ?? (state === "loading" ? "Fetching complete content…" : state === "error" ? "The document could not be opened." : "This document is empty.");
+  const semantics = state === "error" ? ' role="alert"' : state === "loading" ? ' role="status" aria-live="polite"' : "";
+  return `<section class="document-state document-state-${state}"${semantics}>
+    <p class="document-state-label">${state}</p>
+    <h2>${escapeHtml(title)}</h2>
+    <p>${escapeHtml(message)}</p>
   </section>`;
 }
 
-/** Dedicated read-only Markdown, text, or deterministically highlighted view. */
+function renderDocumentContent(document) {
+  const state = documentState(document);
+  if (state) return state;
+  const kind = String(document?.kind ?? "text").toLocaleLowerCase("en-US");
+  const text = String(document?.text ?? "");
+  if (kind === "markdown") return renderMarkdownText(text, "document-prose");
+  if (kind === "code" || kind === "diff") {
+    return renderHighlightedCode(text, kind === "diff" ? "diff" : document?.language);
+  }
+  return `<pre class="document-pre document-${kind === "terminal" ? "terminal" : "text"}">${escapeHtml(text)}</pre>`;
+}
+
+/**
+ * Plugin-blind full-screen reader. Callers provide only identity, state, and a
+ * content kind: markdown, text, code, diff, or terminal.
+ */
+export function renderDocumentViewer(document, options = {}) {
+  const mode = options.mode === "dialog" ? "dialog" : "page";
+  const id = String(options.id ?? "document-viewer");
+  const headingId = `${id}-heading`;
+  const title = document?.title ?? "Document";
+  const path = String(document?.path ?? "").trim();
+  const identity = document?.identity ?? "read-only document";
+  const kind = String(document?.kind ?? "text").toLocaleLowerCase("en-US");
+  const closeLabel = options.closeLabel ?? (mode === "dialog" ? "Close" : "Back");
+  const closeControl = mode === "dialog"
+    ? `<button class="document-viewer-close" type="button" data-document-viewer-close>${escapeHtml(closeLabel)}</button>`
+    : `<a class="document-viewer-close" href="${escapeHtml(options.closeHref ?? "#")}">${escapeHtml(closeLabel)}</a>`;
+  const toolbar = `<header class="document-viewer-toolbar">
+      ${closeControl}
+      <div class="document-viewer-identity">
+        <p class="document-viewer-kind">${escapeHtml(identity)}</p>
+        <h1 id="${escapeHtml(headingId)}" tabindex="-1" title="${escapeHtml(title)}">${escapeHtml(title)}</h1>
+        ${path ? `<p class="document-viewer-path" title="${escapeHtml(path)}">${escapeHtml(path)}</p>` : ""}
+      </div>
+    </header>`;
+  const content = `<div class="document-viewer-content" data-content-kind="${escapeHtml(kind)}">${renderDocumentContent(document)}</div>`;
+  if (mode === "dialog") {
+    return `<dialog id="${escapeHtml(id)}" class="document-viewer document-viewer-dialog" role="dialog" aria-modal="true" aria-labelledby="${escapeHtml(headingId)}" data-document-viewer>
+    ${toolbar}
+    ${content}
+  </dialog>`;
+  }
+  return `<main id="${escapeHtml(id)}" class="document-viewer document-viewer-page" aria-labelledby="${escapeHtml(headingId)}" data-document-viewer>
+    ${toolbar}
+    ${content}
+  </main>`;
+}
+
+/** The only built-in entry affordance; content surfaces are never tap targets. */
+export function renderDocumentViewerTrigger(viewerId, label = "Open full screen") {
+  return `<button class="document-viewer-trigger" type="button" aria-haspopup="dialog" aria-controls="${escapeHtml(viewerId)}" data-document-viewer-open="${escapeHtml(viewerId)}">${escapeHtml(label)}</button>`;
+}
+
+function fileProblem(error) {
+  const status = Number(error?.status);
+  return {
+    state: "error",
+    stateTitle: status === 413
+      ? "File is too large"
+      : status === 415 ? "Preview unavailable" : status === 404 ? "File not found" : "File unavailable",
+    message: error?.message ?? "The file could not be opened safely.",
+  };
+}
+
+/** Dedicated project-file route using the generic full-viewport reader. */
 export function renderFilePage(view, paths, assetPaths) {
   const file = view?.file;
   const name = file?.name ?? view?.name ?? "file";
-  let content;
-  if (view?.error) content = fileError(view.error);
-  else if (file?.kind === "markdown") content = renderMarkdownText(file.text, "file-prose");
-  else if (file?.kind === "text") content = `<div class="message-text file-prose file-plain"><pre>${escapeHtml(file.text)}</pre></div>`;
-  else if (file?.kind === "code") content = renderHighlightedCode(file.text, file.language);
-  else content = fileError({ status: 415, message: "qq: unsupported file type" });
-  const drawer = renderProjectDrawer(view?.drawer, paths);
-  const backgroundInert = view?.drawer?.open ? " inert" : "";
+  const problem = view?.error
+    ? fileProblem(view.error)
+    : file?.kind === "markdown" || file?.kind === "text" || file?.kind === "code"
+      ? {}
+      : fileProblem({ status: 415, message: "qq: unsupported file type" });
+  const viewer = renderDocumentViewer({
+    title: name,
+    path: file?.path ?? view?.path ?? "",
+    identity: "read-only file",
+    kind: file?.kind,
+    text: file?.text,
+    language: file?.language,
+    ...problem,
+  }, {
+    mode: "page",
+    id: "project-file-viewer",
+    closeHref: paths.project,
+    closeLabel: "Back to console",
+  });
   return `<!doctype html>
 <html lang="en">
-${documentHead(assetPaths, `${name} · qq`)}
-<body class="file-page${view?.drawer?.open ? " drawer-open" : ""}">
-  ${drawer}
-  <main id="file-main" class="file-main"${backgroundInert}>
-    <article class="file-surface" aria-labelledby="file-heading">
-      <header class="file-heading">
-        <div>
-          <p class="eyebrow">read-only file</p>
-          <h1 id="file-heading">${escapeHtml(name)}</h1>
-          <p class="file-path" title="${escapeHtml(file?.path ?? view?.path ?? "")}">${escapeHtml(file?.path ?? view?.path ?? "")}</p>
-        </div>
-        <a class="file-back" href="${escapeHtml(paths.project)}">console</a>
+${documentHead(assetPaths, `${name} · qq`, { themeColor: "#000000" })}
+<body class="document-page">
+  ${viewer}
+</body>
+</html>`;
+}
+
+const DOCUMENT_VIEWER_PROOF = Object.freeze({
+  yaml: {
+    title: "config.yaml",
+    path: "config.yaml",
+    identity: "read-only file",
+    kind: "code",
+    language: "yaml",
+    text: "name: proof\nindent:\n  nested: true\n  list:\n    - first\n    - second\n",
+  },
+  line: {
+    title: "unbroken.txt",
+    path: "unbroken.txt",
+    identity: "read-only file",
+    kind: "text",
+    text: `token=${"abcdefghijklmnopqrstuvwxyz0123456789".repeat(12)}\n`,
+  },
+  code: {
+    title: "sample.js",
+    path: "src/sample.js",
+    identity: "read-only file",
+    kind: "code",
+    language: "javascript",
+    text: "export function sample(value) {\n  return value === 42;\n}\n",
+  },
+  diff: {
+    title: "git diff",
+    path: "src/a.js src/b.js",
+    identity: "file changes",
+    kind: "diff",
+    text: [
+      "--- a/src/a.js",
+      "+++ b/src/a.js",
+      "@@ -1,3 +1,3 @@",
+      " export const a = 1;",
+      `-${"old-unbroken-line-".repeat(18)}`,
+      `+${"new-unbroken-line-".repeat(18)}`,
+      "",
+      "--- a/src/b.js",
+      "+++ b/src/b.js",
+      "@@ -1 +1 @@",
+      "-export const b = false;",
+      "+export const b = true;",
+    ].join("\n"),
+  },
+  terminal: {
+    title: "bash",
+    identity: "complete tool output",
+    kind: "terminal",
+    text: Array.from({ length: 80 }, (_, index) => `line ${index + 1} of large terminal output`).join("\n"),
+  },
+  loading: { title: "README.md", identity: "complete tool output", kind: "text", state: "loading" },
+  error: {
+    title: "failed.sh",
+    identity: "complete tool output",
+    kind: "terminal",
+    state: "error",
+    stateTitle: "Tool failed",
+    message: "The command exited with status 2.",
+  },
+  empty: { title: "empty.txt", identity: "complete tool output", kind: "text", state: "empty" },
+});
+
+/** Fixture page that proves the generic content-kind contract T-128 can call. */
+export function renderDocumentViewerProofPage(assetPaths) {
+  const samples = [
+    ["yaml", "YAML"],
+    ["line", "Long line"],
+    ["code", "Highlighted code"],
+    ["diff", "Multi-file diff"],
+    ["terminal", "Terminal output"],
+    ["loading", "Loading"],
+    ["error", "Failure"],
+    ["empty", "Empty"],
+  ];
+  const blocks = samples.map(([key, label]) => {
+    const id = `proof-${key}`;
+    const document = DOCUMENT_VIEWER_PROOF[key];
+    return `<section class="document-viewer-proof-block" data-proof-kind="${key}">
+      <header>
+        <h2>${escapeHtml(label)}</h2>
+        ${renderDocumentViewerTrigger(id)}
       </header>
-      <div class="file-document">${content}</div>
-    </article>
+      <pre class="document-viewer-proof-preview">${escapeHtml(document.text ?? document.message ?? document.stateTitle ?? "")}</pre>
+      ${renderDocumentViewer(document, { mode: "dialog", id, closeLabel: "Close" })}
+    </section>`;
+  }).join("");
+  return `<!doctype html>
+<html lang="en">
+${documentHead(assetPaths, "document viewer proof · qq", { themeColor: "#000000" })}
+<body class="document-page">
+  <main class="document-viewer-proof">
+    <h1>Document viewer proof</h1>
+    <p>Open full screen is the only entry. Scrolling, selecting, or tapping a preview never opens it.</p>
+    ${blocks}
   </main>
 </body>
 </html>`;

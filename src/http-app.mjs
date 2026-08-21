@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  renderDocumentViewerProofPage as bundledRenderDocumentViewerProofPage,
   renderFilePage as bundledRenderFilePage,
   renderPage as bundledRenderPage,
   renderSessionContent as bundledRenderSessionContent,
@@ -626,6 +627,7 @@ export function createConsoleHandler(backend, options = {}) {
   async function loadRender() {
     if (!liveAssets) {
       return {
+        renderDocumentViewerProofPage: bundledRenderDocumentViewerProofPage,
         renderFilePage: bundledRenderFilePage,
         renderPage: bundledRenderPage,
         renderSessionContent: bundledRenderSessionContent,
@@ -799,7 +801,6 @@ export function createConsoleHandler(backend, options = {}) {
           fileError = error;
         }
         try {
-          const drawer = await drawerView(projectRoute.project, url, true);
           const { renderFilePage } = await loadRender();
           const body = renderFilePage({
             project: projectRoute.project,
@@ -807,7 +808,6 @@ export function createConsoleHandler(backend, options = {}) {
             name: String(projectRoute.filePath).split("/").at(-1),
             file,
             error: fileError,
-            drawer,
           }, paths, assetPaths);
           write(
             res,
@@ -1233,6 +1233,22 @@ export function createConsoleHandler(backend, options = {}) {
           }
         }
         text(res, errorStatus(error), errorMessage(error));
+      }
+      return;
+    }
+
+    if (url.pathname === `${basePath}/__document-viewer-proof` && (req.method === "GET" || head)) {
+      try {
+        const { renderDocumentViewerProofPage } = await loadRender();
+        write(
+          res,
+          200,
+          { "Content-Type": "text/html; charset=utf-8" },
+          renderDocumentViewerProofPage(assetPaths),
+          head,
+        );
+      } catch (error) {
+        text(res, errorStatus(error), errorMessage(error), head);
       }
       return;
     }

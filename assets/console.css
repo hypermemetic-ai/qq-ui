@@ -1301,7 +1301,8 @@ body > footer {
 .drawer-entry:focus-visible,
 .drawer-up:focus-visible,
 .drawer-breadcrumbs a:focus-visible,
-.file-back:focus-visible {
+.document-viewer-close:focus-visible,
+.document-viewer-trigger:focus-visible {
   outline: 2px solid #72d7c0;
   outline-offset: 2px;
 }
@@ -1502,120 +1503,205 @@ body > footer {
   text-align: center;
 }
 
-/* Dedicated file reader. Plain text and Markdown share the same measure,
-   rhythm, and type scale; code uses one deterministic highlighted surface. */
-body.file-page {
+/* One full-viewport reading surface shared by files, diffs, and complete tool
+   output. It intentionally has no transcript-card or desktop-window chrome. */
+body.document-page {
   display: block;
+  width: 100%;
   height: 100%;
   overflow: hidden;
+  background: #000;
 }
 
-.file-main {
-  width: min(100% - 2rem, 90ch);
+.document-viewer {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  width: 100%;
+  max-width: none;
   height: 100%;
-  margin-inline: auto;
-  padding-block: 1rem;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: #000;
+  color: #e3e9ed;
+  scrollbar-gutter: stable;
 }
 
-.file-surface {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid #253039;
-  border-radius: 1rem;
-  background: rgba(15, 20, 25, .98);
-  box-shadow: 0 1.5rem 5rem rgba(0, 0, 0, .3);
-}
+.document-viewer-dialog::backdrop { background: #000; }
 
-.file-heading {
-  display: flex;
-  flex: none;
-  min-width: 0;
+.document-viewer-toolbar {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1.15rem 1.35rem 1rem 4.75rem;
-  border-bottom: 1px solid #253039;
+  gap: .8rem;
+  min-width: 0;
+  padding: max(.55rem, env(safe-area-inset-top)) max(.8rem, env(safe-area-inset-right)) .55rem max(.8rem, env(safe-area-inset-left));
+  border-bottom: 1px solid #202020;
+  background: rgba(0, 0, 0, .96);
+  backdrop-filter: blur(.7rem);
 }
-.file-heading > div { min-width: 0; }
-.file-heading h1 {
+
+.document-viewer-close,
+.document-viewer-trigger {
+  min-height: 2.65rem;
+  padding: .55rem .75rem;
+  border: 1px solid #343434;
+  border-radius: .5rem;
+  background: #101010;
+  color: #e6fff8;
+  font-size: .74rem;
+  font-weight: 750;
+  line-height: 1.15;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.document-viewer-trigger { border-color: #3d4f4a; background: #111d19; }
+
+.document-viewer-identity { min-width: 0; }
+.document-viewer-kind {
+  margin: 0 0 .12rem;
+  color: #70d8c1;
+  font-size: .62rem;
+  font-weight: 750;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.document-viewer-identity h1 {
   max-width: 100%;
   margin: 0;
   overflow: hidden;
-  font-size: 1.25rem;
+  color: #f1f4f6;
+  font-size: 1rem;
+  line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.file-path {
+.document-viewer-path {
   max-width: 100%;
-  margin: .3rem 0 0;
+  margin: .16rem 0 0;
   overflow: hidden;
   color: #8c99a3;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: .7rem;
+  font-size: .67rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.file-back {
-  flex: none;
-  padding: .55rem .7rem;
-  border: 1px solid #34414b;
-  border-radius: .55rem;
-  background: #151d23;
-  color: #dffbf3;
-  font-size: .74rem;
-  font-weight: 750;
-  text-decoration: none;
-}
-.file-document {
-  flex: 1 1 auto;
+
+.document-viewer-content {
+  width: 100%;
   min-width: 0;
-  min-height: 0;
-  padding: clamp(1rem, 3vw, 2rem);
+  padding: clamp(.9rem, 2.5vw, 1.8rem) max(clamp(.85rem, 2.5vw, 1.8rem), env(safe-area-inset-right)) max(clamp(1rem, 3vw, 2rem), env(safe-area-inset-bottom)) max(clamp(.85rem, 2.5vw, 1.8rem), env(safe-area-inset-left));
+  overflow-x: hidden;
+}
+
+.document-prose,
+.document-code,
+.document-pre,
+.document-state {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  color: #e3e9ed;
+  font-size: clamp(.84rem, 1.25vw, .98rem);
+  line-height: 1.64;
+}
+.document-prose.message-markdown p { margin: .75rem 0; }
+.document-prose.message-markdown :where(h1, h2, h3, h4, h5, h6) { margin: 1.45em 0 .55em; }
+.document-prose.message-markdown h1 { font-size: 1.65rem; }
+.document-prose.message-markdown h2 { font-size: 1.35rem; }
+.document-prose.message-markdown h3 { font-size: 1.12rem; }
+.document-prose.message-markdown pre {
+  overflow: visible;
+  background: #080808;
+}
+.document-prose.message-markdown pre code,
+.document-code,
+.document-code code,
+.document-pre {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.document-code,
+.document-pre {
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: clamp(.78rem, 1.15vw, .9rem);
+  line-height: 1.58;
+  tab-size: 2;
+}
+.document-code code { color: inherit; font: inherit; }
+.document-state { padding-block: clamp(2rem, 10vh, 6rem); text-align: center; }
+.document-state-label {
+  margin: 0 0 .4rem;
+  color: #70d8c1;
+  font-size: .68rem;
+  font-weight: 750;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.document-state h2 { margin: 0 0 .6rem; font-size: 1.3rem; }
+.document-state p:last-child { margin: 0; color: #aab5be; }
+.document-state-error .document-state-label { color: #ffaaa4; }
+#document-viewer-heading:focus,
+.document-viewer-identity h1:focus { outline: none; }
+
+.document-viewer-proof {
+  height: 100%;
+  min-height: 100%;
+  padding: 1.25rem max(1rem, env(safe-area-inset-right)) max(1.25rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
   overflow: auto;
   overscroll-behavior: contain;
 }
-.file-prose,
-.file-code,
-.file-error {
-  width: min(100%, 72ch);
-  margin-inline: auto;
-  color: #e3e9ed;
-  font-size: clamp(.92rem, 2vw, 1.02rem);
-  line-height: 1.68;
+.document-viewer-content,
+.document-prose,
+.document-code,
+.document-pre {
+  user-select: text;
+  -webkit-user-select: text;
 }
-.file-prose.message-markdown p { margin: .75rem 0; }
-.file-prose.message-markdown :where(h1, h2, h3, h4, h5, h6) { margin: 1.45em 0 .55em; }
-.file-prose.message-markdown h1 { font-size: 1.65rem; }
-.file-prose.message-markdown h2 { font-size: 1.35rem; }
-.file-prose.message-markdown h3 { font-size: 1.12rem; }
-.file-plain pre {
+.document-viewer-proof-block {
+  margin: 1rem 0;
+  padding: .8rem;
+  border: 1px solid #222;
+  border-radius: .6rem;
+  background: #080808;
+}
+.document-viewer-proof-block header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  margin-bottom: .55rem;
+}
+.document-viewer-proof-block h2 { margin: 0; font-size: .95rem; }
+.document-viewer-proof-preview {
+  max-height: 6.5rem;
   margin: 0;
-  color: inherit;
-  font: inherit;
-  line-height: inherit;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-.file-code {
-  max-width: 100%;
-  margin-block: 0;
-  padding: 1rem 1.1rem;
   overflow: auto;
-  border: 1px solid #222e36;
-  border-radius: .7rem;
-  background: #090d11;
-  color: #d6dee5;
-  font-size: .82rem;
-  line-height: 1.62;
-  tab-size: 2;
+  color: #aab5be;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .72rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
-.file-code code { color: inherit; font-size: inherit; white-space: pre; }
-.file-error { padding-block: clamp(2rem, 10vh, 6rem); text-align: center; }
-.file-error h2 { margin: 0 0 .6rem; font-size: 1.3rem; }
-.file-error p:last-child { margin: 0; color: #aab5be; }
 
 .hljs-comment,
 .hljs-quote { color: #778691; font-style: italic; }
@@ -1672,19 +1758,8 @@ body.file-page {
     white-space: normal;
     border: 1px solid #34414b;
   }
-  .file-main { width: 100%; padding: 0; }
-  .file-surface { border: 0; border-radius: 0; box-shadow: none; }
-  .file-heading {
-    padding: max(.55rem, env(safe-area-inset-top)) max(.65rem, env(safe-area-inset-right)) .55rem max(.65rem, env(safe-area-inset-left));
-  }
-  .file-heading .eyebrow { display: none; }
-  .file-heading h1 { font-size: 1rem; }
-  .file-path { margin-top: .16rem; }
-  .file-document {
-    padding: .9rem max(.8rem, env(safe-area-inset-right)) max(.9rem, env(safe-area-inset-bottom)) max(.8rem, env(safe-area-inset-left));
-  }
-  .file-prose,
-  .file-code { font-size: .88rem; }
+  .document-viewer-toolbar { gap: .55rem; }
+  .document-viewer-identity h1 { font-size: .92rem; }
 }
 
 @media (max-width: 23rem) {
