@@ -89,6 +89,7 @@
   const restoreDraft = () => {
     const draft = swapDraft;
     swapDraft = null;
+    if (!draft) return;
     const input = draft?.kind === "queue"
       ? [...document.querySelectorAll(".queue-edit-text")]
           .find((candidate) => candidate.dataset.messageId === draft.id)
