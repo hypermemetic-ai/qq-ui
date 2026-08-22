@@ -21,17 +21,18 @@ const idle = renderSessionContent({
   workflows: ["architect", "iterate", "find", "base"],
 }, paths);
 
+assert.match(idle, /id="session-chrome"[^>]*sse-swap="chrome"/);
 assert.match(idle, /class="session-place"/);
-assert.match(idle, /class="session-mode" data-mode="find">Find/);
+assert.match(idle, /class="workflows-menu" data-mode="find"/);
+assert.match(idle, /<summary aria-label="Choose workflow"[^>]*>find<\/summary>/);
 assert.match(idle, /class="session-project">qq</);
-assert.match(idle, /<summary aria-label="Choose workflow">workflows<\/summary>/);
 assert.match(idle, /class="session-home"[^>]*aria-label="Home"/);
 assert.match(idle, /href="\/qq\/home"/);
 assert.doesNotMatch(idle, /value="\/workflows none"/);
 assert.doesNotMatch(idle, /value="\/workflows base"/);
 assert.doesNotMatch(idle, /Message this DSH session/);
 assert.doesNotMatch(idle, /Enter to send/);
-assert.match(idle, /id="composer-submit"[^>]*>Send/);
+assert.match(idle, /id="composer-submit"[^>]*aria-label="Send"/);
 assert.match(idle, /class="composer-enter"/);
 assert.doesNotMatch(idle, /<label for="prompt">Message<\/label>\s*<div class="composer-row">[\s\S]*placeholder=/);
 
@@ -42,7 +43,7 @@ const running = renderSessionContent({
   sessionMode: "architect",
   project: "qq",
 }, paths);
-assert.match(running, /class="composer-row"[\s\S]*id="interrupt-submit"[^>]*>Interrupt/);
+assert.match(running, /class="composer-row"[\s\S]*id="interrupt-submit"/);
 assert.doesNotMatch(running, /class="composer-meta"/);
 assert.match(running, /class="session-mode" data-mode="architect">Architect/);
 

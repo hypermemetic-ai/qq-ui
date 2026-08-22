@@ -841,19 +841,60 @@ function composer(paths, running, sessionId = "", findWork = "") {
     </form>`;
 }
 
-/** Render only the stable SSE target's children. */
-export function renderSessionContent(snapshot, paths, notice = "") {
-  const emptyProject = !snapshot?.id;
+export const SSE_REGION_NAMES = Object.freeze(["chrome", "transcript", "queue", "composer", "popups"]);
+
+function sessionStatus(snapshot) {
+  if (!snapshot?.id) return { key: "ready", label: "Ready · no sessions" };
   const events = Array.isArray(snapshot.events) ? snapshot.events : [];
-  const status = emptyProject
-    ? { key: "ready", label: "Ready · no sessions" }
-    : deriveStatus(events, snapshot.agentStatus);
-  const nodes = Array.isArray(snapshot?.conversation?.nodes) ? snapshot.conversation.nodes : [];
-  const transcript = nodes.map(renderConversationNode).filter(Boolean).join("\n");
-  const findWork = snapshot.findWork === "save" ? "save" : snapshot.findWork === "compile" ? "compile" : "";
+  return deriveStatus(events, snapshot.agentStatus);
+}
+
+function sessionFindWork(snapshot) {
+  return snapshot?.findWork === "save" ? "save" : snapshot?.findWork === "compile" ? "compile" : "";
+}
+
+function sessionNodes(snapshot) {
+  return Array.isArray(snapshot?.conversation?.nodes) ? snapshot.conversation.nodes : [];
+}
+
+function slashNoticeHtml(snapshot, paths, notice) {
+  return renderSlashNotice(notice, paths, sessionNodes(snapshot));
+}
+
+function isPopupMarkup(html) {
+  return html.includes("offer-popup") || html.includes("workflows-popup");
+}
+
+function nodeFingerprint(node) {
+  if (!node || typeof node !== "object") return "";
+  const blocks = Array.isArray(node.blocks) ? node.blocks : Array.isArray(node.content) ? node.content : [];
+  return [
+    node.seq,
+    node.kind,
+    node.status,
+    node.turn,
+    node.step,
+    node.eventType,
+    node.outcome?.text ?? "",
+    blocks.map((block) => `${block?.type ?? ""}:${block?.text ?? ""}`).join("\n"),
+  ];
+}
+
+function sseSwapAttrs(name, enabled) {
+  return enabled ? ` hx-ext="sse" sse-swap="${escapeHtml(name)}" hx-swap="innerHTML"` : "";
+}
+
+function regionShell(id, className, eventName, inner, enabled) {
+  return `<div id="${escapeHtml(id)}" class="${escapeHtml(className)}"${sseSwapAttrs(eventName, enabled)}>${inner}</div>`;
+}
+
+export function renderChrome(snapshot, paths, notice = "") {
+  const emptyProject = !snapshot?.id;
+  const status = sessionStatus(snapshot);
   const face = emptyProject ? "" : liveFace(snapshot);
-  const progress = renderProgressChip(snapshot.progress);
   const sessions = sessionNavigation(snapshot, paths);
+  const slash = slashNoticeHtml(snapshot, paths, notice);
+  const inlineNotice = slash && !isPopupMarkup(slash) ? slash : "";
   return `<div class="session-heading">
       <div class="session-heading-start">
         ${renderHomeLink(snapshot, paths)}
@@ -871,17 +912,121 @@ export function renderSessionContent(snapshot, paths, notice = "") {
       </div>
     </div>
     ${status.detail ? `<p class="notice turn-error" role="alert"><strong>${escapeHtml(status.label)}</strong><span>${escapeHtml(status.detail)}</span>${status.code ? `<code>${escapeHtml(status.code)}</code>` : ""}</p>` : ""}
-    ${renderSlashNotice(notice, paths, nodes)}
-    ${emptyProject ? "" : `<div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
-      ${transcript || '<p class="empty-transcript">This DSH session has no transcript yet.</p>'}
-    </div>`}
-    ${emptyProject ? "" : renderPendingQueue(snapshot, paths)}
-    ${emptyProject ? "" : composer(paths, status.key === "running", snapshot.id, findWork)}
-    ${progress}
-    ${renderLoginSheet(snapshot.loginSheet, paths)}
-    ${renderOfferPopup(snapshot.offer, paths, notice)}
-    ${renderApprovalPopup(snapshot.approval, paths, notice)}
-    ${renderOverlay(snapshot.overlay, paths, notice, findWork)}`;
+    ${inlineNotice}`;
+}
+
+export function renderTranscript(snapshot) {
+  if (!snapshot?.id) return "";
+  const transcript = sessionNodes(snapshot).map(renderConversationNode).filter(Boolean).join("\n");
+  return transcript || '<p class="empty-transcript">This DSH session has no transcript yet.</p>';
+}
+
+export function renderQueue(snapshot, paths) {
+  if (!snapshot?.id) return "";
+  return renderPendingQueue(snapshot, paths);
+}
+
+export function renderComposer(snapshot, paths) {
+  if (!snapshot?.id) return "";
+  const status = sessionStatus(snapshot);
+  return composer(paths, status.key === "running", snapshot.id, sessionFindWork(snapshot));
+}
+
+export function renderPopups(snapshot, paths, notice = "") {
+  const slash = slashNoticeHtml(snapshot, paths, notice);
+  const popupNotice = slash && isPopupMarkup(slash) ? slash : "";
+  return `${renderProgressChip(snapshot?.progress)}
+    ${renderLoginSheet(snapshot?.loginSheet, paths)}
+    ${renderOfferPopup(snapshot?.offer, paths, notice)}
+    ${renderApprovalPopup(snapshot?.approval, paths, notice)}
+    ${renderOverlay(snapshot?.overlay, paths, notice, sessionFindWork(snapshot))}
+    ${popupNotice}`;
+}
+
+export function renderSessionRegion(name, snapshot, paths, notice = "") {
+  switch (name) {
+    case "chrome":
+      return renderChrome(snapshot, paths, notice);
+    case "transcript":
+      return renderTranscript(snapshot);
+    case "queue":
+      return renderQueue(snapshot, paths);
+    case "composer":
+      return renderComposer(snapshot, paths);
+    case "popups":
+      return renderPopups(snapshot, paths, notice);
+    default:
+      return "";
+  }
+}
+
+/** Compact per-region tokens. SSE emits a named event only when that token changes. */
+export function regionFingerprints(snapshot) {
+  const events = Array.isArray(snapshot?.events) ? snapshot.events : [];
+  const last = events.at(-1);
+  const sessions = Array.isArray(snapshot?.sessions) ? snapshot.sessions : [];
+  const status = sessionStatus(snapshot);
+  const offer = snapshot?.offer;
+  return {
+    chrome: JSON.stringify([
+      snapshot?.id,
+      snapshot?.project,
+      snapshot?.folder,
+      snapshot?.alias,
+      snapshot?.agentStatus,
+      status.key,
+      status.label,
+      status.detail ?? "",
+      status.code ?? "",
+      sessions.map((session) => [session.id, session.createdAt, session.alias, session.project]),
+      (snapshot?.activeProjects ?? []).map((session) => [session.id, session.createdAt, session.alias, session.project, session.folder]),
+      snapshot?.sessionMode ?? "",
+      (snapshot?.workflows ?? []).join(","),
+    ]),
+    transcript: JSON.stringify([
+      snapshot?.id,
+      events.length,
+      last?.seq,
+      last?.type,
+      last?.data?.reason?.kind,
+      sessionNodes(snapshot).map(nodeFingerprint),
+    ]),
+    queue: JSON.stringify((snapshot?.conversation?.pending ?? []).map((item) => [item.id, item.target, item.text])),
+    composer: JSON.stringify([
+      snapshot?.id,
+      snapshot?.agentStatus,
+      status.key === "running",
+      sessionFindWork(snapshot),
+    ]),
+    popups: JSON.stringify([
+      offer?.id ?? "",
+      offer?.brief ?? "",
+      snapshot?.approval?.id ?? "",
+      snapshot?.approval?.toolName ?? "",
+      snapshot?.loginSheet?.action ?? "",
+      (snapshot?.loginSheet?.connectors ?? []).map((connector) => connector.id),
+      snapshot?.overlay?.id ?? "",
+      snapshot?.overlay?.media?.src ?? "",
+      snapshot?.overlay?.chrome === false ? "0" : "1",
+      snapshot?.progress?.title ?? "",
+      sessionFindWork(snapshot),
+    ]),
+  };
+}
+
+/** Render the session panel children, each in a named SSE swap target. */
+export function renderSessionContent(snapshot, paths, notice = "") {
+  const emptyProject = !snapshot?.id;
+  const chrome = regionShell("session-chrome", "session-chrome", "chrome", renderChrome(snapshot, paths, notice), true);
+  const popups = regionShell("session-popups", "session-popups", "popups", renderPopups(snapshot, paths, notice), true);
+  if (emptyProject) return `${chrome}${popups}`;
+  return `${chrome}
+    <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false"${sseSwapAttrs("transcript", true)}>
+      ${renderTranscript(snapshot)}
+    </div>
+    ${regionShell("session-queue", "session-queue", "queue", renderQueue(snapshot, paths), true)}
+    ${regionShell("session-composer", "session-composer", "composer", renderComposer(snapshot, paths), true)}
+    ${popups}`;
 }
 
 export function renderOverlay(overlay, paths, notice = "", findWork = "") {
@@ -1286,8 +1431,7 @@ ${documentHead(assetPaths)}
     <span>Sequential handoff</span>
   </header>
   <main id="console-stream"${backgroundInert}${paths.events ? ` hx-ext="sse" sse-connect="${escapeHtml(paths.events)}"` : ""} hx-history="false">
-    <section id="session-panel" class="session-panel" aria-labelledby="session-heading"${paths.events ? `
-      hx-ext="sse" sse-swap="session" hx-swap="innerHTML"` : ""}>${content}</section>
+    <section id="session-panel" class="session-panel" aria-labelledby="session-heading">${content}</section>
   </main>
   <footer${backgroundInert}>DSH owns session identity, transcript order, turn status, and interruption. Browser view state is not shared.</footer>
 </body>

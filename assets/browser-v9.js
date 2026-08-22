@@ -1402,24 +1402,28 @@
   document.addEventListener("scroll", (event) => {
     if (event.target?.id === "transcript") captureTranscriptView(event.target);
   }, true);
+  const swapTargetId = (event) => event.detail?.target?.id || event.target?.id || "";
+  const touchesComposer = (id) =>
+    id === "session-panel" || id === "session-composer" || id === "session-queue" || id === "pending-queue" || id === "composer";
+  const touchesTranscript = (id) => id === "session-panel" || id === "transcript";
   for (const eventName of ["htmx:beforeSwap", "htmx:sseBeforeMessage"]) {
-    document.addEventListener(eventName, () => {
-      captureDraft();
-      captureTranscriptView();
+    document.addEventListener(eventName, (event) => {
+      const id = swapTargetId(event);
+      if (touchesComposer(id)) captureDraft();
+      if (touchesTranscript(id)) captureTranscriptView();
     });
   }
-  document.addEventListener("htmx:afterSwap", restoreDraft);
-  document.addEventListener("htmx:sseMessage", restoreDraft);
+  for (const eventName of ["htmx:afterSwap", "htmx:sseMessage"]) {
+    document.addEventListener(eventName, (event) => {
+      const id = swapTargetId(event);
+      if (touchesComposer(id)) restoreDraft();
+    });
+  }
 
   for (const eventName of ["htmx:afterSwap", "htmx:afterSettle", "htmx:sseMessage"]) {
     document.addEventListener(eventName, (event) => {
-      if (
-        eventName === "htmx:sseMessage" ||
-        event.detail?.target?.id === "session-panel" ||
-        event.target?.id === "session-panel"
-      ) {
-        prepareSession();
-      }
+      const id = swapTargetId(event);
+      if (touchesTranscript(id) || id === "session-composer") prepareSession();
     });
   }
 

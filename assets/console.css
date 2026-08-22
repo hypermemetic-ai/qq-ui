@@ -79,6 +79,17 @@ main { min-height: 0; }
   box-shadow: none;
 }
 
+.session-chrome,
+.session-composer,
+.session-popups {
+  flex: none;
+  min-width: 0;
+}
+
+.session-queue:empty {
+  display: none;
+}
+
 .session-heading {
   position: relative;
   z-index: 2;

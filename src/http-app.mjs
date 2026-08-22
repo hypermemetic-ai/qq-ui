@@ -1,10 +1,13 @@
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  regionFingerprints,
   renderDocumentViewerProofPage as bundledRenderDocumentViewerProofPage,
   renderFilePage as bundledRenderFilePage,
   renderPage as bundledRenderPage,
   renderSessionContent as bundledRenderSessionContent,
+  renderSessionRegion as bundledRenderSessionRegion,
+  SSE_REGION_NAMES,
 } from "./render.mjs";
 
 const MAX_FORM_BYTES = 524_288;
@@ -89,6 +92,10 @@ const bundledAssets = Object.freeze({
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
   },
+  "console-v20.css": {
+    type: "text/css; charset=utf-8",
+    body: readFileSync(new URL("assets/console.css", root)),
+  },
   "geist-latin-wght-normal-5.3.0.woff2": {
     type: "font/woff2",
     body: readFileSync(new URL("assets/geist-latin-wght-normal-5.3.0.woff2", root)),
@@ -152,6 +159,7 @@ const bundledAssets = Object.freeze({
 const LIVE_ASSET_FILES = Object.freeze({
   "console-v18.css": "assets/console.css",
   "console-v19.css": "assets/console.css",
+  "console-v20.css": "assets/console.css",
   "browser-v9.js": "assets/browser-v9.js",
 });
 const RENDER_FILE = fileURLToPath(new URL("./render.mjs", import.meta.url));
@@ -469,7 +477,7 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v19.css`,
+    css: `${assetsPrefix}console-v20.css`,
     browser: `${assetsPrefix}browser-v9.js`,
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
@@ -551,36 +559,7 @@ export function createConsoleHandler(backend, options = {}) {
   }
 
   function viewFingerprint(snapshot) {
-    const events = Array.isArray(snapshot?.events) ? snapshot.events : [];
-    const last = events.at(-1);
-    const sessions = Array.isArray(snapshot?.sessions) ? snapshot.sessions : [];
-    const offer = snapshot?.offer;
-    return JSON.stringify([
-      snapshot?.id,
-      snapshot?.project,
-      snapshot?.agentStatus,
-      events.length,
-      last?.seq,
-      last?.type,
-      last?.data?.reason?.kind,
-      (snapshot?.conversation?.pending ?? []).map((item) => [item.id, item.target, item.text]),
-      sessions.map((session) => [session.id, session.createdAt, session.alias, session.project]),
-      (snapshot?.activeProjects ?? []).map((session) => [session.id, session.createdAt, session.alias, session.project, session.folder]),
-      snapshot?.alias,
-      offer?.id ?? "",
-      offer?.brief ?? "",
-      snapshot?.approval?.id ?? "",
-      snapshot?.approval?.toolName ?? "",
-      snapshot?.loginSheet?.action ?? "",
-      (snapshot?.loginSheet?.connectors ?? []).map((connector) => connector.id),
-      snapshot?.overlay?.id ?? "",
-      snapshot?.overlay?.media?.src ?? "",
-      snapshot?.overlay?.chrome === false ? "0" : "1",
-      snapshot?.progress?.title ?? "",
-      snapshot?.sessionMode ?? "",
-      (snapshot?.workflows ?? []).join(","),
-      snapshot?.findWork ?? "",
-    ]);
+    return JSON.stringify(regionFingerprints(snapshot));
   }
 
   async function view(sessionId) {
@@ -735,6 +714,7 @@ export function createConsoleHandler(backend, options = {}) {
         renderFilePage: bundledRenderFilePage,
         renderPage: bundledRenderPage,
         renderSessionContent: bundledRenderSessionContent,
+        renderSessionRegion: bundledRenderSessionRegion,
       };
     }
     const stamp = statSync(RENDER_FILE).mtimeMs;
@@ -1151,6 +1131,7 @@ export function createConsoleHandler(backend, options = {}) {
       streams.add(res);
       req.once("close", close);
       res.once("close", close);
+      let fingerprints = {};
       stop = watch(selected.sessionId, async (error, next) => {
         if (closed || res.destroyed || res.writableEnded) {
           close();
@@ -1161,8 +1142,14 @@ export function createConsoleHandler(backend, options = {}) {
           close();
           return;
         }
-        const { renderSessionContent } = await loadRender();
-        res.write(sseEvent("session", renderSessionContent(next, paths)));
+        const nextFp = regionFingerprints(next);
+        const changed = SSE_REGION_NAMES.filter((name) => nextFp[name] !== fingerprints[name]);
+        if (changed.length === 0) return;
+        const { renderSessionRegion } = await loadRender();
+        for (const name of changed) {
+          fingerprints[name] = nextFp[name];
+          res.write(sseEvent(name, renderSessionRegion(name, next, paths)));
+        }
       });
       keepalive = setInterval(() => {
         if (closed || res.destroyed || res.writableEnded) {
@@ -1559,4 +1546,6 @@ export const internals = Object.freeze({
   routes,
   sameOrigin,
   sseEvent,
+  regionFingerprints,
+  SSE_REGION_NAMES,
 });
