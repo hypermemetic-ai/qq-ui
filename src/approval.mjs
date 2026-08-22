@@ -1,10 +1,13 @@
 // qq-ui answerer for DSH `approval/request`.
 //
-// Missing answerers fail closed. This module claims an ask only when the
-// session log already has a matching unmatched `approval/asked` (same pairing
-// the host apiproxy uses). Operator POST may grant `allowed-once` or reject;
-// abort and plugin dispose settle `cancelled`. Grants apply only to the
-// requested action.
+// Missing answerers fail closed. Child chairs (`origin: subagent` / a parent
+// session) are rejected immediately so nested work cannot pop Allow/Reject.
+// Root operator chairs claim an ask only when the session log already has a
+// matching unmatched `approval/asked` (same pairing the host apiproxy uses).
+// Operator POST may grant `allowed-once` or reject; abort and plugin dispose
+// settle `cancelled`. Grants apply only to the requested action.
+
+import { isRootOperatorAgent } from "../../core/src/session.mjs";
 
 const OPERATOR_OUTCOMES = new Set(["allowed-once", "rejected"]);
 
@@ -69,6 +72,7 @@ export function createApprovalAnswerer() {
 
   function handleRequest(req, next) {
     if (req?.signal?.aborted === true) return Promise.resolve("cancelled");
+    if (!isRootOperatorAgent(req?.agent)) return Promise.resolve("rejected");
     const session = req?.agent?.session;
     const claimed = [...pending.values()].map((entry) => entry.approvalId);
     const approvalId = matchAskedId(session?.events, req, claimed);

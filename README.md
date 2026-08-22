@@ -6,7 +6,10 @@ forms, SSE, HTML, CSS, and PWA assets.
 
 It does not own DSH credentials, model adapters, the Agent registry, persistence,
 transcript storage, session-id minting, a project registry, or filesystem
-containment. Dependency is one-way: `qq-ui → qq`.
+containment. Dependency is one-way: `qq-ui → qq`. Child chairs
+(`origin: subagent` / a parent session) never surface Allow/Reject; the
+answerer rejects those asks immediately. Only root operator chairs the
+operator is talking to may ask.
 
 On phone, a deliberate rightward pull across the ordinary app surface directly
 moves the compact one-level project drawer, which settles from release distance
