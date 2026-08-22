@@ -587,7 +587,7 @@ export function createConsoleHandler(backend, options = {}) {
             context: "projects",
             ...(snapshot.alias ? { alias: snapshot.alias } : {}),
           }]
-        : await backend.list(snapshot.project, snapshot.folder);
+        : await backend.list(snapshot.project);
     if (snapshot.id && !available.some((session) => session.id === snapshot.id)) {
       available.unshift({
         id: snapshot.id,

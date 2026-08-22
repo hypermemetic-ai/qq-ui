@@ -93,7 +93,7 @@ main { min-height: 0; }
   min-width: 0;
   align-items: center;
   gap: .55rem;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .session-heading-center {
@@ -615,9 +615,9 @@ code {
   max-width: min(100%, 72ch);
   margin-left: auto;
   padding: .7rem .82rem;
-  border-radius: .55rem;
-  background: #6b56b0;
-  color: #f3eeff;
+  border-radius: 0;
+  background: rgba(107, 86, 176, 0.28);
+  color: #e4ddf4;
 }
 
 .message-assistant {
@@ -639,15 +639,16 @@ code {
 .message-tool {
   padding: .72rem .82rem;
   border: 0;
-  border-radius: .55rem;
-  background: #2d7d90;
-  color: #e8f4f7;
+  border-radius: 0;
+  background: rgba(45, 125, 144, 0.22);
+  color: #d3e2e8;
 }
 
 .message-steering {
   border: 0;
-  background: #624ea0;
-  color: #eee6ff;
+  border-radius: 0;
+  background: rgba(98, 78, 160, 0.22);
+  color: #ddd6f0;
 }
 
 .message-streaming {
@@ -778,8 +779,8 @@ code {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tool-tone-bad { background: #9a454d; }
-.tool-tone-running { background: #7a6424; }
+.tool-tone-bad { background: rgba(154, 69, 77, 0.28); }
+.tool-tone-running { background: rgba(122, 100, 36, 0.28); }
 .tool-output-preview,
 .tool-output-full pre {
   max-width: 100%;
@@ -2162,9 +2163,11 @@ body.document-page {
   .session-traversal {
     display: flex;
     min-width: 0;
-    flex-wrap: wrap;
+    max-width: 100%;
+    flex-wrap: nowrap;
     align-items: center;
     gap: .35rem;
+    overflow-x: auto;
   }
 
   .session-token {

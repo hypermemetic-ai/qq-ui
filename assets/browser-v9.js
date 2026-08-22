@@ -57,7 +57,7 @@
   const captureDraft = () => {
     const input = composer();
     const active = document.activeElement;
-    if (input instanceof HTMLTextAreaElement && input.value) {
+    if (input instanceof HTMLTextAreaElement) {
       swapDraft = {
         kind: "composer",
         value: input.value,
@@ -78,23 +78,28 @@
       };
       return;
     }
-    swapDraft = null;
+    swapDraft = { kind: "none", focused: false };
   };
   const restoreDraft = () => {
     const draft = swapDraft;
     swapDraft = null;
-    if (!draft) return;
-    const input = draft.kind === "composer"
-      ? composer()
-      : [...document.querySelectorAll(".queue-edit-text")]
-          .find((candidate) => candidate.dataset.messageId === draft.id);
-    if (!(input instanceof HTMLTextAreaElement)) return;
-    input.value = draft.value;
-    if (draft.kind === "composer") fitComposer(input);
-    if (draft.focused) {
+    const input = draft?.kind === "queue"
+      ? [...document.querySelectorAll(".queue-edit-text")]
+          .find((candidate) => candidate.dataset.messageId === draft.id)
+      : composer();
+    if (draft?.kind === "composer" && input instanceof HTMLTextAreaElement) {
+      if (draft.value) input.value = draft.value;
+      fitComposer(input);
+    } else if (draft?.kind === "queue" && input instanceof HTMLTextAreaElement) {
+      input.value = draft.value;
+    }
+    if (draft?.focused && input instanceof HTMLTextAreaElement) {
       input.focus();
       try { input.setSelectionRange(draft.start, draft.end); } catch {}
+      return;
     }
+    const prompt = composer();
+    if (prompt instanceof HTMLTextAreaElement && prompt === document.activeElement) prompt.blur();
   };
   const prepareSession = () => {
     restoreTranscriptView();
