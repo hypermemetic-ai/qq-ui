@@ -1149,8 +1149,8 @@
     if (!(menu instanceof HTMLDetailsElement)) return;
     if (menu.classList.contains("session-menu") && !menu.open) disarmClose();
     if (!menu.open) return;
-    if (!menu.classList.contains("session-menu") && !menu.classList.contains("workflows-menu")) return;
-    for (const other of document.querySelectorAll("details.session-menu, details.workflows-menu")) {
+    if (!menu.classList.contains("session-menu") && !menu.classList.contains("workflows-menu") && !menu.classList.contains("projects-menu")) return;
+    for (const other of document.querySelectorAll("details.session-menu, details.workflows-menu, details.projects-menu")) {
       if (other !== menu) other.open = false;
     }
   }, true);

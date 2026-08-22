@@ -416,19 +416,7 @@ function sessionNavigation(snapshot, paths) {
     ? choices.find((session) => session.id === selectedId) ?? snapshot
     : undefined;
   const face = selected ? sessionFace(selected) : "";
-  const picker = selectedId && choices.length > 0
-    ? `<form class="session-picker" action="${escapeHtml(paths.switchSession)}" method="get">
-        <label for="session-choice">sessions <span>${choices.length} live</span></label>
-        <select id="session-choice" name="session" required>
-          ${choices.map((session) => {
-            const current = session.id === selectedId;
-            const optionFace = sessionToken(session);
-            const label = `${current ? "Current · " : ""}${optionFace}`;
-            return `<option value="${escapeHtml(session.id)}"${current ? " selected" : ""}>${escapeHtml(label)}</option>`;
-          }).join("")}
-        </select>
-      </form>`
-    : `<p class="session-empty">no live sessions</p>`;
+  const token = selected ? sessionToken(selected) : "";
   const closeControls = selectedId && paths.close
     ? `<button type="button" class="close-arm" aria-label="Close this session">x</button>
       <div class="close-confirm" hidden role="alertdialog" aria-modal="true" aria-labelledby="close-confirm-title" aria-describedby="close-confirm-copy">
@@ -442,13 +430,23 @@ function sessionNavigation(snapshot, paths) {
         </div>
       </div>`
     : "";
-  const controls = `<div class="session-controls" role="group" aria-label="Session controls">
-      ${picker}
-      <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
-        <button type="submit" aria-label="New session">+</button>
-      </form>
-      ${closeControls}
-    </div>`;
+  const sessionLinks = selectedId && choices.length > 0
+    ? choices.map((session) => {
+        const current = session.id === selectedId;
+        const href = `${paths.switchSession}?session=${encodeURIComponent(session.id)}`;
+        return `<a class="session-choice${current ? " session-choice-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""}>${escapeHtml(sessionToken(session))}</a>`;
+      }).join("")
+    : `<p class="session-empty">no live sessions</p>`;
+  const controls = `<details class="session-menu session-controls">
+      <summary aria-label="Sessions">${escapeHtml(token || "sessions")}</summary>
+      <div class="session-menu-list">
+        ${sessionLinks}
+        <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
+          <button type="submit" aria-label="New session">+</button>
+        </form>
+        ${closeControls}
+      </div>
+    </details>`;
   const links = selectedId && choices.length > 0
     ? choices.map((session) => {
         const current = session.id === selectedId;
@@ -682,6 +680,34 @@ function activeProjectList(snapshot) {
   return projects;
 }
 
+function renderProjectsMenu(snapshot, paths) {
+  if (!paths?.projectsBase) return "";
+  const projects = activeProjectList(snapshot);
+  const currentProject = String(snapshot?.project ?? "");
+  const currentFolder = String(snapshot?.folder ?? "");
+  const current = projects.find((entry) => entry.project === currentProject && entry.folder === currentFolder);
+  const summary = current
+    ? (current.folder ? `${current.projectLabel} / ${current.folderLabel}` : current.projectLabel)
+    : (placeName(snapshot) || "projects");
+  const links = projects.length > 0
+    ? projects.map((entry) => {
+        const isCurrent = entry.project === currentProject && entry.folder === currentFolder;
+        const folderPath = entry.folder ? `/${encodeURIComponent(entry.folder)}` : "";
+        const href = `${paths.projectsBase}/${encodeURIComponent(entry.project)}${folderPath}`;
+        const label = entry.folder
+          ? `${entry.projectLabel} / ${entry.folderLabel}`
+          : entry.projectLabel;
+        return `<a class="projects-choice${isCurrent ? " projects-choice-current" : ""}" href="${escapeHtml(href)}" data-project="${escapeHtml(entry.project)}" data-folder="${escapeHtml(entry.folder)}"${isCurrent ? ' aria-current="page"' : ""}>${escapeHtml(label)}</a>`;
+      }).join("")
+    : `<p class="session-empty">no live projects</p>`;
+  return `<details class="projects-menu">
+    <summary aria-label="Projects">${escapeHtml(summary)}</summary>
+    <div class="projects-menu-list">
+      ${links}
+    </div>
+  </details>`;
+}
+
 function renderProjectRail(snapshot, paths, inert = false) {
   if (!paths?.projectsBase) return "";
   const projects = activeProjectList(snapshot);
@@ -767,10 +793,11 @@ function composer(paths, running, sessionId = "", findWork = "") {
       hx-swap="innerHTML"
       hx-push-url="${escapeHtml(paths.canonical)}"
       hx-disabled-elt="#composer-submit"
-      hx-indicator="#working">
+      hx-indicator="#working"
+      hx-preserve="true">
       <label for="prompt">Message</label>
       <div class="composer-row">
-        <textarea id="prompt" name="prompt" rows="1" maxlength="32768" required autocomplete="off" enterkeyhint="send" hx-preserve="true"></textarea>
+        <textarea id="prompt" name="prompt" rows="1" maxlength="32768" required autocomplete="off" enterkeyhint="send"></textarea>
         <button id="composer-dictate" type="button" data-state="idle" aria-label="Dictate">
           <svg class="dictate-mic" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
             <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
@@ -803,6 +830,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   return `<div class="session-heading">
       <div class="session-heading-start">
         ${renderHomeLink(snapshot, paths)}
+        ${renderProjectsMenu(snapshot, paths)}
         ${sessions.tokens}
       </div>
       <div class="session-heading-center">

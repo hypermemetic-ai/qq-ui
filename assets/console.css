@@ -247,8 +247,8 @@ code {
 }
 
 .session-menu,
-.workflows-menu { flex: none; }
-.workflows-menu { position: relative; }
+.projects-menu,
+.workflows-menu { flex: none; position: relative; }
 .session-heading-center .workflows-menu > summary {
   padding-inline: .4rem;
   color: #e0e0e0;
@@ -260,6 +260,7 @@ code {
 }
 
 .session-menu > summary,
+.projects-menu > summary,
 .workflows-menu > summary {
   display: flex;
   min-height: 2rem;
@@ -279,9 +280,11 @@ code {
 }
 
 .session-menu > summary::-webkit-details-marker,
+.projects-menu > summary::-webkit-details-marker,
 .workflows-menu > summary::-webkit-details-marker { display: none; }
 
 .session-menu > summary::after,
+.projects-menu > summary::after,
 .workflows-menu > summary::after {
   width: .34rem;
   height: .34rem;
@@ -292,13 +295,16 @@ code {
 }
 
 .session-menu[open] > summary,
+.projects-menu[open] > summary,
 .workflows-menu[open] > summary {
   color: #eee;
 }
 
 .session-menu[open] > summary::after,
+.projects-menu[open] > summary::after,
 .workflows-menu[open] > summary::after { transform: translateY(.1rem) rotate(225deg); }
-details.session-menu { display: none; }
+.session-menu:not([open]) > .session-menu-list,
+.projects-menu:not([open]) > .projects-menu-list,
 .workflows-menu:not([open]) > .workflows-menu-list { display: none; }
 
 .session-controls {
@@ -309,6 +315,12 @@ details.session-menu { display: none; }
   gap: .35rem;
 }
 
+details.session-menu.session-controls {
+  display: block;
+}
+
+.session-menu-list,
+.projects-menu-list,
 .workflows-menu-list {
   position: absolute;
   z-index: 4;
@@ -325,7 +337,22 @@ details.session-menu { display: none; }
   transform: translateX(-50%);
 }
 
+.session-menu-list {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.projects-menu-list {
+  left: 0;
+  transform: none;
+}
+
+.session-menu-list .session-choice,
+.projects-menu-list .projects-choice,
 .workflows-menu-list .workflows-choice {
+  display: grid;
+  align-items: center;
   min-height: 2.4rem;
   padding: .4rem .7rem;
   border: 1px solid #2a2a2a;
@@ -335,6 +362,7 @@ details.session-menu { display: none; }
   font: inherit;
   font-weight: 700;
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
 }
 
@@ -374,7 +402,7 @@ details.session-menu { display: none; }
 }
 .close-confirm-actions .close-keep { justify-self: start; }
 .close-confirm-actions .close-session { justify-self: end; }
-.session-controls.close-confirming .session-picker,
+.session-controls.close-confirming .session-choice,
 .session-controls.close-confirming .session-empty,
 .session-controls.close-confirming .new-session,
 .session-controls.close-confirming .close-arm { display: none; }
@@ -460,6 +488,8 @@ details.session-menu { display: none; }
   color: #e8e8e8;
 }
 
+.session-choice-current,
+.projects-choice-current,
 .workflows-current {
   border-color: #555;
   background: #111;
@@ -836,7 +866,7 @@ details.session-menu { display: none; }
   position: relative;
   flex: none;
   padding: .8rem 1.5rem 1rem;
-  border-top: 1px solid #1a1a1a;
+  border-top: 0;
   background: #000;
 }
 
@@ -969,14 +999,15 @@ details.session-menu { display: none; }
 #composer-submit {
   display: grid;
   place-items: center;
-  position: static;
-  width: 2.85rem;
-  min-width: 2.85rem;
-  height: auto;
+  position: absolute;
+  width: 1px;
+  min-width: 0;
+  height: 1px;
   overflow: hidden;
   font-size: 0;
   line-height: 0;
-  clip-path: none;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
   color: #e8e8e8;
 }
 
@@ -1379,7 +1410,9 @@ body > footer {
     margin-top: 0;
     padding: .35rem;
   }
+  .session-heading-start { overflow: visible; }
   .session-menu > summary,
+  .projects-menu > summary,
   .workflows-menu > summary { min-height: 2.45rem; padding-inline: .2rem; }
   .session-home { width: 2.45rem; height: 2.45rem; }
   .session-project { font-size: .62rem; }
@@ -1409,12 +1442,13 @@ body > footer {
   }
   .composer-row { grid-template-columns: minmax(0, 1fr) auto auto; }
   .composer-running .composer-row { grid-template-columns: minmax(0, 1fr) auto auto auto; }
-  #composer-submit {
+  .composer.is-dictating #composer-submit {
     position: static;
     width: 2.75rem;
     min-width: 2.75rem;
     height: auto;
     overflow: visible;
+    clip: auto;
     clip-path: none;
   }
   .notice,
@@ -2176,6 +2210,7 @@ body.document-page {
 
   details.session-menu,
   .session-controls,
+  .projects-menu,
   .session-mobile-id,
   .session-background-actions { display: none; }
 

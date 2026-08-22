@@ -492,8 +492,15 @@ export function createConsoleHandler(backend, options = {}) {
   const completeWorkflows = typeof options.completeWorkflows === "function" ? options.completeWorkflows : null;
 
   async function withSheets(snapshot) {
-    if (!snapshot?.id) return snapshot;
     let next = snapshot;
+    if (typeof backend.list === "function") {
+      try {
+        next = { ...next, activeProjects: await backend.list() };
+      } catch {
+        /* live project list is optional */
+      }
+    }
+    if (!snapshot?.id) return next;
     if (readOffer) {
       try {
         const offer = await readOffer(snapshot.id);
@@ -558,6 +565,7 @@ export function createConsoleHandler(backend, options = {}) {
       last?.data?.reason?.kind,
       (snapshot?.conversation?.pending ?? []).map((item) => [item.id, item.target, item.text]),
       sessions.map((session) => [session.id, session.createdAt, session.alias, session.project]),
+      (snapshot?.activeProjects ?? []).map((session) => [session.id, session.createdAt, session.alias, session.project, session.folder]),
       snapshot?.alias,
       offer?.id ?? "",
       offer?.brief ?? "",
@@ -620,9 +628,18 @@ export function createConsoleHandler(backend, options = {}) {
     if (!isFileAware(backend)) return undefined;
     const requested = !forceClosed && url.searchParams.has("drawer");
     const wanted = requested ? String(url.searchParams.get("drawer") ?? "") : (folder || "");
-    const listing = wanted === "~"
-      ? await backend.listProjectFiles()
-      : await backend.listProjectFiles(project, wanted);
+    let listing;
+    if (requested && (wanted === "" || wanted === "~")) {
+      listing = await backend.listProjectFiles();
+    } else if (wanted.startsWith("~/")) {
+      const rest = wanted.slice(2);
+      const slash = rest.indexOf("/");
+      const name = slash === -1 ? rest : rest.slice(0, slash);
+      const inner = slash === -1 ? "" : rest.slice(slash + 1);
+      listing = await backend.listProjectFiles(name, inner);
+    } else {
+      listing = await backend.listProjectFiles(project, wanted);
+    }
     return { ...listing, open: requested };
   }
 
@@ -1031,6 +1048,18 @@ export function createConsoleHandler(backend, options = {}) {
     if ((rootPage || selected?.action === "page") && (req.method === "GET" || head)) {
       try {
         if (rootPage && isProjectAware(backend)) {
+          const rows = typeof backend.list === "function" ? await backend.list() : [];
+          if (rows.length > 0) {
+            const location = `${routes(basePath, rows[0].id, rows[0].project, rows[0].folder).canonical}${url.search}`;
+            write(
+              res,
+              303,
+              { Location: location, "Content-Type": "text/plain; charset=utf-8" },
+              "See other\n",
+              head,
+            );
+            return;
+          }
           const homeProject = encodeProject(backend.defaultProject);
           const homeFolder = backend.defaultFolder ? `/${encodeProject(backend.defaultFolder)}` : "";
           write(
