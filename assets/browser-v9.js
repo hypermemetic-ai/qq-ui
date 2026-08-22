@@ -271,7 +271,10 @@
 
   const activeProjectItems = () => [...document.querySelectorAll(".active-project-item[href]")];
   const projectIdentity = (entry) => `${String(entry?.project ?? "")}\n${String(entry?.folder ?? "")}`;
-  const projectStorageKey = () => `qq-active-projects:${location.pathname.replace(/\/(?:project|session)\/.*$/, "") || "/"}`;
+  const projectStorageKey = () => {
+    const consolePath = location.pathname.replace(/\/(?:projects|project|session)(?:\/.*)?$/, "") || "/";
+    return `qq-active-projects:${consolePath}`;
+  };
   const activeProjectEntry = (item) => ({
     project: String(item?.dataset?.project ?? ""),
     folder: String(item?.dataset?.folder ?? ""),
@@ -315,14 +318,36 @@
     row.append(link);
     return row;
   };
+  const currentProjectSessionHref = () => {
+    const id = currentSessionId();
+    if (!id || !location.pathname.includes(`/session/${id}`)) return "";
+    return new URL(location.pathname, location.origin).href;
+  };
+  const restoreProjectChoiceDestinations = (remembered, currentKey, currentIsActive) => {
+    const destinations = new Map(remembered.map((entry) => [projectIdentity(entry), entry.href]));
+    const currentHref = currentIsActive ? currentProjectSessionHref() : "";
+    for (const link of document.querySelectorAll(".projects-choice[data-project]")) {
+      const key = projectIdentity({ project: link.dataset.project, folder: link.dataset.folder });
+      const href = key === currentKey && currentHref ? currentHref : destinations.get(key);
+      if (href) link.href = href;
+    }
+  };
   const restoreActiveProjects = () => {
     const rail = document.querySelector("#project-rail");
     const list = rail?.querySelector(".active-projects ol");
     if (!rail || !list) return;
     const currentKey = projectIdentity({ project: rail.dataset.currentProject, folder: rail.dataset.currentFolder });
     const currentIsActive = rail.dataset.currentActive === "true";
+    const rememberedAll = readRememberedProjects();
+    const destinations = new Map(rememberedAll.map((entry) => [projectIdentity(entry), entry.href]));
     const existing = new Map(activeProjectItems().map((item) => [projectIdentity(activeProjectEntry(item)), item.closest("li")]));
-    const remembered = readRememberedProjects().filter((entry) => currentIsActive || projectIdentity(entry) !== currentKey);
+    const currentHref = currentIsActive ? currentProjectSessionHref() : "";
+    for (const [key, row] of existing) {
+      const link = row?.querySelector?.(".active-project-item");
+      const href = key === currentKey && currentHref ? currentHref : destinations.get(key);
+      if (href && link instanceof HTMLElement && link.tagName === "A") link.href = href;
+    }
+    const remembered = rememberedAll.filter((entry) => currentIsActive || projectIdentity(entry) !== currentKey);
     const rows = [];
     const used = new Set();
     for (const entry of remembered) {
@@ -337,6 +362,7 @@
       rows.push(row);
     }
     list.replaceChildren(...rows);
+    restoreProjectChoiceDestinations(rememberedAll, currentKey, currentIsActive);
     rememberActiveProjects();
   };
   const activeProjectKeys = () => new Set(activeProjectItems().map((item) => projectIdentity(activeProjectEntry(item))));
@@ -394,7 +420,7 @@
   };
   const folderEntries = (html, responseUrl) => {
     const parsed = new DOMParser().parseFromString(html, "text/html");
-    return [...parsed.querySelectorAll("#project-drawer .drawer-entry[data-entry-type]")]
+    const entries = [...parsed.querySelectorAll("#project-drawer .drawer-entry[data-entry-type]")]
       .map((link) => {
         const kind = link.dataset.entryType;
         const label = link.querySelector(".drawer-name")?.textContent?.trim() ?? "";
@@ -418,6 +444,13 @@
         };
       })
       .filter((entry) => entry.href && entry.label && ["project", "directory", "file"].includes(entry.kind));
+    const start = parsed.querySelector("#project-drawer .drawer-start-session[action]");
+    if (start instanceof HTMLFormElement) {
+      let href = "";
+      try { href = new URL(start.getAttribute("action") ?? "", responseUrl).href; } catch {}
+      if (href) entries.unshift({ kind: "session", label: "session", href, project: "", folder: "", fileKind: "", action: "create" });
+    }
+    return entries;
   };
   const projectTreeNodes = (column) => [...column.querySelectorAll(".project-tree-node")];
   let treeRequest = 0;
@@ -454,13 +487,23 @@
       button.setAttribute("aria-selected", String(index === 0));
       button.tabIndex = index === 0 ? 0 : -1;
       button.title = entry.label;
-      const mark = document.createElement("span");
-      mark.className = "project-tree-mark";
-      mark.setAttribute("aria-hidden", "true");
       const label = document.createElement("span");
       label.className = "project-tree-label";
       label.textContent = entry.label;
-      button.append(mark, label);
+      if (entry.kind === "file") {
+        button.append(label);
+      } else if (entry.kind === "session") {
+        const add = document.createElement("span");
+        add.className = "project-tree-add";
+        add.setAttribute("aria-hidden", "true");
+        add.textContent = "+";
+        button.append(add, label);
+      } else {
+        const mark = document.createElement("span");
+        mark.className = "project-tree-mark";
+        mark.setAttribute("aria-hidden", "true");
+        button.append(mark, label);
+      }
       if (entry.action === "expand") {
         const branch = document.createElement("span");
         branch.className = "project-tree-branch";
@@ -473,11 +516,7 @@
     columns.append(column);
     return column;
   };
-  const treeChildUrl = (node) => {
-    const url = new URL(node.dataset.href, location.href);
-    if (node.dataset.kind === "project") url.searchParams.set("drawer", "");
-    return url.href;
-  };
+  const treeChildUrl = (node) => new URL(node.dataset.href, location.href).href;
   const loadProjectTreeColumn = async (url, depth, parentNode = null, focusChild = false) => {
     const request = ++treeRequest;
     trimProjectTree(depth);
@@ -515,10 +554,23 @@
     if (!(node instanceof HTMLElement) || !node.dataset.href) return;
     location.assign(node.dataset.href);
   };
+  const createProjectSession = (node) => {
+    if (!(node instanceof HTMLElement) || !node.dataset.href) return;
+    const form = document.createElement("form");
+    form.method = "post";
+    form.action = node.dataset.href;
+    form.hidden = true;
+    document.body.append(form);
+    form.requestSubmit();
+  };
   const activateProjectTreeNode = (node, focusChild = true) => {
     if (!(node instanceof HTMLElement)) return;
     if (node.dataset.action === "expand") {
       void loadProjectTreeColumn(treeChildUrl(node), Number(node.dataset.depth) + 1, node, focusChild);
+      return;
+    }
+    if (node.dataset.action === "create") {
+      createProjectSession(node);
       return;
     }
     if (node.dataset.action === "spawn") {
@@ -653,7 +705,10 @@
   const unparkDocumentViewer = (viewer) => {
     const home = documentViewerHome;
     documentViewerHome = null;
-    if (!home?.parent?.isConnected) return;
+    if (!home?.parent?.isConnected) {
+      viewer.remove();
+      return;
+    }
     home.parent.insertBefore(viewer, home.next);
   };
   const restoreDocumentViewerFocus = () => {

@@ -24,7 +24,10 @@
 
 * { box-sizing: border-box; }
 
-html { height: 100%; }
+html {
+  height: 100%;
+  -webkit-tap-highlight-color: rgba(225, 235, 242, .025);
+}
 
 body {
   display: grid;
@@ -35,7 +38,7 @@ body {
   background: #000;
 }
 
-button, textarea, select { font: inherit; }
+button, input, textarea, select, summary, dialog, pre, code, kbd, samp { font: inherit; }
 
 a { color: inherit; }
 
@@ -210,7 +213,7 @@ h1 {
 
 code {
   color: #9a9a9a;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: inherit;
   font-size: .75rem;
   overflow-wrap: anywhere;
 }
@@ -259,26 +262,38 @@ code {
 
 .session-menu,
 .projects-menu,
-.workflows-menu { flex: none; position: relative; }
+.workflows-menu {
+  --menu-row-height: 2.15rem;
+  position: relative;
+  flex: none;
+  width: max-content;
+  max-width: 100%;
+  font-size: .72rem;
+  font-weight: 650;
+  letter-spacing: .045em;
+  text-transform: lowercase;
+}
 
 .session-menu > summary,
 .projects-menu > summary,
 .workflows-menu > summary {
   display: flex;
-  min-height: 2rem;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--menu-row-height);
   align-items: center;
   gap: .4rem;
   padding: .2rem .15rem;
+  overflow: hidden;
   border: 0;
   border-radius: 0;
   background: transparent;
   color: #9a9a9a;
   cursor: pointer;
-  font-size: .72rem;
-  font-weight: 650;
-  letter-spacing: .06em;
+  font: inherit;
   list-style: none;
-  text-transform: lowercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .session-menu > summary::-webkit-details-marker,
@@ -288,6 +303,7 @@ code {
 .session-menu > summary::after,
 .projects-menu > summary::after,
 .workflows-menu > summary::after {
+  flex: none;
   width: .34rem;
   height: .34rem;
   border-right: 1.5px solid #666;
@@ -326,37 +342,35 @@ details.session-menu.session-controls {
 .workflows-menu-list {
   position: absolute;
   z-index: 4;
-  top: calc(100% + .35rem);
-  left: 50%;
+  top: 100%;
+  left: 0;
   display: grid;
-  min-width: 9.5rem;
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
   gap: 0;
   padding: .2rem 0;
+  overflow: hidden;
   border: 1px solid #1a1a1a;
+  border-top: 0;
   border-radius: 0;
   background: #000;
   box-shadow: 0 .8rem 2rem rgba(0, 0, 0, .55);
-  transform: translateX(-50%);
 }
 
-.session-menu-list {
-  left: auto;
-  right: 0;
-  transform: none;
-}
-
-.projects-menu-list {
-  left: 0;
-  transform: none;
-}
+.session-menu-list,
+.projects-menu-list { transform: none; }
 
 .session-menu-list .session-choice,
 .projects-menu-list .projects-choice,
 .workflows-menu-list .workflows-choice {
   display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--menu-row-height);
   align-items: center;
-  min-height: 2.15rem;
-  padding: .28rem .55rem;
+  padding: .28rem .3rem;
+  overflow: hidden;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -366,8 +380,22 @@ details.session-menu.session-controls {
   letter-spacing: .02em;
   text-align: left;
   text-decoration: none;
+  text-overflow: ellipsis;
   text-transform: lowercase;
+  white-space: nowrap;
   cursor: pointer;
+}
+
+.session-menu-list .new-session,
+.session-menu-list .close-session {
+  width: 100%;
+  min-width: 0;
+}
+
+.session-menu-list .new-session button,
+.session-menu-list > .close-arm {
+  width: 100%;
+  min-width: 0;
 }
 
 .session-menu-list .session-choice:hover,
@@ -386,17 +414,18 @@ details.session-menu.session-controls {
   min-width: 2rem;
 }
 .close-confirm {
-  position: absolute;
-  z-index: 4;
-  top: calc(100% + .35rem);
-  right: 0;
+  position: fixed;
+  z-index: 7;
+  top: calc(max(.45rem, env(safe-area-inset-top)) + 3.25rem);
+  right: max(.65rem, env(safe-area-inset-right));
   display: grid;
-  min-width: 12rem;
+  width: min(13rem, calc(100vw - 1.3rem));
   gap: .45rem;
   padding: .65rem;
   border: 1px solid #2a2a2a;
-  border-radius: 0;
-  background: #000;
+  border-radius: .55rem;
+  background: #080808;
+  box-shadow: 0 .8rem 2rem rgba(0, 0, 0, .58);
 }
 .close-confirm[hidden] { display: none; }
 .close-confirm p {
@@ -411,7 +440,15 @@ details.session-menu.session-controls {
   gap: .65rem;
 }
 .close-confirm-actions .close-keep { justify-self: start; }
-.close-confirm-actions .close-session { justify-self: end; }
+.close-confirm-actions .close-session { width: 100%; justify-self: end; }
+.close-confirm-actions button {
+  width: auto;
+  min-width: 0;
+  height: auto;
+  min-height: 2.35rem;
+  padding: .4rem .55rem;
+}
+.close-confirm-actions .close-session button { width: 100%; }
 .session-controls.close-confirming .session-choice,
 .session-controls.close-confirming .session-empty,
 .session-controls.close-confirming .new-session,
@@ -446,7 +483,7 @@ details.session-menu.session-controls {
   background: #000 url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%23888' d='M1.2 1.2 6 6 10.8 1.2'/></svg>") no-repeat right .4rem center;
   color: #e8e8e8;
   color-scheme: dark;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: inherit;
   font-size: .72rem;
 }
 
@@ -789,7 +826,7 @@ details.session-menu.session-controls {
   padding: .05rem .3rem;
   border-radius: .3rem;
   background: #0a0a0a;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: inherit;
   font-size: .9em;
 }
 .message-markdown pre {
@@ -801,7 +838,7 @@ details.session-menu.session-controls {
   background: #0a0a0a;
 }
 .message-markdown pre code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: inherit;
   font-size: .86em;
   white-space: pre;
 }
@@ -849,8 +886,7 @@ details.session-menu.session-controls {
 }
 .tool-tone-bad { background: rgba(154, 69, 77, 0.28); }
 .tool-tone-running { background: rgba(122, 100, 36, 0.28); }
-.tool-output-preview,
-.tool-output-full pre {
+.tool-output-preview {
   max-width: 100%;
   margin: 0;
   padding: 0;
@@ -862,9 +898,25 @@ details.session-menu.session-controls {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.tool-output-full { margin-top: .55rem; color: #8fa0aa; }
-.tool-output-full summary { cursor: pointer; font-size: .74rem; }
-.tool-output-full[open] summary { margin-bottom: .45rem; }
+.tool-output-truncation {
+  margin: .55rem 0 0;
+  color: #8fa0aa;
+  font-size: .72rem;
+}
+.tool-output-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: .65rem;
+}
+.message-tool .tool-output-actions .document-viewer-trigger {
+  min-height: 2.15rem;
+  padding: .38rem .58rem;
+  border-color: rgba(184, 207, 218, .18);
+  background: rgba(0, 0, 0, .18);
+  color: #c4d5dd;
+  font-size: .7rem;
+  font-weight: 650;
+}
 .tool-empty { margin: 0; color: #8fa0aa; font-style: italic; }
 
 .message-command:not(details),
@@ -1437,9 +1489,15 @@ body > footer {
     padding: .35rem;
   }
   .session-heading-start { overflow: visible; }
+  .projects-menu { max-width: min(10rem, 32vw); }
+  .workflows-menu { max-width: min(8rem, 24vw); }
+  .session-menu { max-width: min(6rem, 20vw); }
   .session-menu > summary,
   .projects-menu > summary,
   .workflows-menu > summary { min-height: 2.45rem; padding-inline: .2rem; }
+  .session-menu-list .session-choice,
+  .projects-menu-list .projects-choice,
+  .workflows-menu-list .workflows-choice { min-height: 2.45rem; }
   .session-home { width: 2.45rem; height: 2.45rem; }
   .session-project { font-size: .62rem; }
   .session-picker select {
@@ -1449,11 +1507,11 @@ body > footer {
   }
   .session-empty { margin: 0; font-size: .68rem; }
   .close-confirm {
-    top: 100%;
-    right: 0;
+    top: calc(max(.45rem, env(safe-area-inset-top)) + 3.25rem);
+    right: max(.65rem, env(safe-area-inset-right));
     left: auto;
-    width: max-content;
-    max-width: min(18rem, calc(100vw - 2rem));
+    width: min(13rem, calc(100vw - 1.3rem));
+    max-width: none;
   }
   .close-confirm-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .close-confirm-actions .close-keep { justify-self: stretch; }
@@ -1714,6 +1772,41 @@ body > footer {
 .drawer-breadcrumbs a { color: #c8c8c8; text-decoration: none; }
 .drawer-breadcrumbs li:last-child { flex: 1 1 auto; }
 
+.drawer-start-session {
+  flex: none;
+  margin: 0 .05rem .35rem;
+  padding: 0 0 .35rem;
+  border-bottom: 1px solid #151515;
+}
+.drawer-start-session button {
+  display: flex;
+  width: 100%;
+  min-height: 2.35rem;
+  align-items: center;
+  gap: .58rem;
+  padding: .32rem .2rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #aeb7bd;
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 580;
+  text-align: left;
+  cursor: pointer;
+}
+.drawer-start-session button:hover,
+.drawer-start-session button:focus-visible { color: #fff; }
+.drawer-start-session button > span:first-child {
+  display: grid;
+  flex: none;
+  width: .58rem;
+  place-items: center;
+  color: #777;
+  font-size: 1rem;
+  line-height: 1;
+}
+
 .drawer-up,
 .drawer-entry {
   display: flex;
@@ -1730,7 +1823,7 @@ body > footer {
   margin-bottom: .1rem;
   padding: .35rem .2rem;
   color: #8a8a8a;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: inherit;
   font-size: .74rem;
 }
 
@@ -1752,11 +1845,28 @@ body > footer {
 }
 
 .drawer-list li { min-width: 0; }
-.drawer-entry { width: 100%; padding: .32rem .2rem; overflow: hidden; }
+.drawer-entry {
+  width: 100%;
+  gap: .58rem;
+  padding: .32rem .2rem;
+  overflow: hidden;
+}
+.drawer-entry[data-entry-type="file"] { padding-left: 1.36rem; }
+.drawer-entry[data-entry-type="projects"]::before,
+.drawer-entry[data-entry-type="directory"]::before,
+.drawer-entry[data-entry-type="project"]::before {
+  flex: none;
+  width: .58rem;
+  height: .58rem;
+  border: 1px solid currentColor;
+  border-radius: 1px;
+  color: #777;
+  content: "";
+}
 .drawer-name {
   min-width: 0;
   overflow: hidden;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: inherit;
   font-size: .78rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1858,7 +1968,7 @@ body.document-page {
   margin: .16rem 0 0;
   overflow: hidden;
   color: #8c99a3;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: inherit;
   font-size: .67rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1906,9 +2016,9 @@ body.document-page {
   background: transparent;
   border: 0;
   border-radius: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: clamp(.78rem, 1.15vw, .9rem);
-  line-height: 1.58;
+  font-family: inherit;
+  font-size: clamp(.86rem, 1.15vw, .94rem);
+  line-height: 1.62;
   tab-size: 2;
 }
 .document-code code { color: inherit; font: inherit; }
@@ -1961,7 +2071,7 @@ body.document-page {
   margin: 0;
   overflow: auto;
   color: #aab5be;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: inherit;
   font-size: .72rem;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -2105,11 +2215,12 @@ body.document-page {
 
   .active-project-mark,
   .project-tree-mark {
-    width: .34rem;
-    height: .34rem;
-    border-radius: 50%;
-    background: currentColor;
-    opacity: .75;
+    width: .42rem;
+    height: .42rem;
+    border: 1px solid currentColor;
+    border-radius: 1px;
+    background: transparent;
+    opacity: .72;
   }
 
   .active-project-current .active-project-mark { opacity: 1; }
@@ -2193,15 +2304,21 @@ body.document-page {
   .project-tree-node:hover,
   .project-tree-node:focus-visible { color: #e8e8e8; opacity: .7; }
   .project-tree-node[aria-selected="true"] { color: #f0f0f0; opacity: 1; }
-  .project-tree-node[data-kind="file"] .project-tree-mark {
-    width: .42rem;
-    height: 1px;
-    border-radius: 0;
+  .project-tree-node[data-kind="file"] {
+    grid-template-columns: minmax(0, 1fr);
+    padding-left: 1.62rem;
   }
-  .project-tree-node[data-action="spawn"] .project-tree-mark {
-    background: transparent;
-    box-shadow: inset 0 0 0 1px currentColor;
+  .project-tree-node[data-kind="session"] {
+    grid-template-columns: .65rem minmax(0, 1fr);
+    color: #aeb7bd;
   }
+  .project-tree-add {
+    color: #777;
+    font-size: 1rem;
+    line-height: 1;
+    text-align: center;
+  }
+  .project-tree-node[aria-selected="true"] .project-tree-add { color: #bbb; }
   .project-tree-branch { color: #555; font-size: 1rem; line-height: 1; }
   .project-tree-node[aria-selected="true"] .project-tree-branch { color: #999; }
 
@@ -2226,6 +2343,7 @@ body.document-page {
   .projects-menu,
   .session-mobile-id,
   .session-background-actions { display: none; }
+  .session-controls-empty { display: flex; }
 
   .session-traversal {
     display: flex;

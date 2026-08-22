@@ -95,10 +95,7 @@ function renderToolText(text) {
   const output = truncateToolOutput(text);
   const preview = `<pre class="tool-output-preview">${escapeHtml(output.preview)}</pre>`;
   if (!output.truncated) return preview;
-  return `${preview}<details class="tool-output-full">
-    <summary>Show full output · ${output.lines} lines · ${formatBytes(output.bytes)}</summary>
-    <pre>${escapeHtml(output.text)}</pre>
-  </details>`;
+  return `${preview}<p class="tool-output-truncation">Preview · ${output.lines} lines · ${formatBytes(output.bytes)}</p>`;
 }
 
 function toolViewBlocks(view) {
@@ -144,10 +141,13 @@ function toolViewBlocks(view) {
   return [];
 }
 
+function toolContentBlocks(node) {
+  const preferred = toolViewBlocks(node?.resultView);
+  return preferred.length > 0 ? preferred : (Array.isArray(node?.content) ? node.content : []);
+}
+
 function renderToolContent(node) {
-  const preferred = toolViewBlocks(node.resultView);
-  const blocks = preferred.length > 0 ? preferred : (Array.isArray(node.content) ? node.content : []);
-  const rendered = blocks.map((block) => {
+  const rendered = toolContentBlocks(node).map((block) => {
     if (block?.type === "text") return renderToolText(block.text ?? "");
     if (block?.type === "image") return attachmentBlock(block);
     return `<p class="empty-content">Unsupported tool output: ${escapeHtml(safeType(block?.type))}</p>`;
@@ -155,6 +155,31 @@ function renderToolContent(node) {
   if (rendered) return rendered;
   if (node.status === "running") return '<p class="tool-empty">Waiting for output</p>';
   return '<p class="tool-empty">No output</p>';
+}
+
+function safeDocumentId(value) {
+  const id = String(value ?? "").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  return id || "output";
+}
+
+function renderToolDocument(node, title, seq) {
+  const text = toolContentBlocks(node)
+    .filter((block) => block?.type === "text")
+    .map((block) => String(block.text ?? ""))
+    .filter(Boolean)
+    .join("\n\n");
+  if (!text) return "";
+  const card = node?.resultView?.card ?? node?.callView?.card ?? "generic";
+  const kind = card === "terminal" ? "terminal" : card === "diff" ? "diff" : card === "read" ? "code" : "text";
+  const id = `tool-output-${safeDocumentId(node?.callId ?? seq)}`;
+  return `<div class="tool-output-actions">${renderDocumentViewerTrigger(id, "Open full output")}</div>
+    ${renderDocumentViewer({
+      title,
+      identity: "complete tool output",
+      kind,
+      language: node?.resultView?.language,
+      text,
+    }, { mode: "dialog", id, closeLabel: "Close" })}`;
 }
 
 function contextLabel(source) {
@@ -232,9 +257,10 @@ function renderConversationNode(node) {
                 ? "Stopped"
                 : "Failed";
     const tone = failed || stopped ? "bad" : node.status === "running" ? "running" : "ok";
+    const document = renderToolDocument(node, title, seq);
     return `<details class="message message-tool tool-${escapeHtml(node.status)} tool-tone-${tone}" data-seq="${seq}" data-call-id="${escapeHtml(node.callId ?? "")}" data-card="${escapeHtml(card)}"${node.expanded ? " open" : ""}>
       <summary><strong>${escapeHtml(title)}</strong><span class="tool-status tool-status-${tone}">${escapeHtml(status)}</span>${argument}</summary>
-      <div class="message-body">${renderToolContent(node)}</div>
+      <div class="message-body">${renderToolContent(node)}${document}</div>
     </details>`;
   }
   if (node?.kind === "command") {
@@ -457,30 +483,29 @@ function sessionNavigation(snapshot, paths) {
         </div>
       </div>`
     : "";
-  const sessionLinks = selectedId && choices.length > 0
-    ? choices.map((session) => {
-        const current = session.id === selectedId;
-        const href = `${paths.switchSession}?session=${encodeURIComponent(session.id)}`;
-        return `<a class="session-choice${current ? " session-choice-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""}>${escapeHtml(sessionToken(session))}</a>`;
-      }).join("")
-    : `<p class="session-empty">no live sessions</p>`;
-  const controls = `<details class="session-menu session-controls">
-      <summary aria-label="Sessions">${escapeHtml(token || "sessions")}</summary>
-      <div class="session-menu-list">
-        ${sessionLinks}
-        <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
-          <button type="submit" aria-label="New session">${bannerMark("add")}</button>
-        </form>
-        ${closeControls}
-      </div>
-    </details>`;
-  const links = selectedId && live.length > 0
-    ? live.map((session) => {
-        const current = session.id === selectedId;
-        const href = `${paths.switchSession}?session=${encodeURIComponent(session.id)}`;
-        return `<a class="session-token${current ? " session-token-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(session.id)}"><span>${escapeHtml(sessionToken(session))}</span></a>`;
-      }).join("")
-    : '<span class="session-empty">no live sessions</span>';
+  const sessionLinks = choices.map((session) => {
+    const current = session.id === selectedId;
+    const href = `${paths.switchSession}?session=${encodeURIComponent(session.id)}`;
+    return `<a class="session-choice${current ? " session-choice-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""}>${escapeHtml(sessionToken(session))}</a>`;
+  }).join("");
+  const newSession = `<form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
+      <button type="submit" aria-label="New session">${bannerMark("add")}</button>
+    </form>`;
+  const controls = choices.length === 0
+    ? `<div class="session-controls session-controls-empty">${newSession}</div>`
+    : `<details class="session-menu session-controls"${!selectedId ? " open" : ""}>
+        <summary aria-label="Sessions">${escapeHtml(token || "sessions")}</summary>
+        <div class="session-menu-list">
+          ${sessionLinks}
+          ${newSession}
+          ${closeControls}
+        </div>
+      </details>`;
+  const links = live.map((session) => {
+    const current = session.id === selectedId;
+    const href = `${paths.switchSession}?session=${encodeURIComponent(session.id)}`;
+    return `<a class="session-token${current ? " session-token-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(session.id)}"><span>${escapeHtml(sessionToken(session))}</span></a>`;
+  }).join("");
   const tokens = `<nav class="session-traversal" aria-label="Sessions" aria-keyshortcuts="ArrowLeft ArrowRight">${links}</nav>`;
   return { controls, tokens };
 }
@@ -940,7 +965,7 @@ function hxMutateAttrs() {
 }
 
 function sessionStatus(snapshot) {
-  if (!snapshot?.id) return { key: "ready", label: "Ready · no sessions" };
+  if (!snapshot?.id) return { key: "ready", label: "Ready" };
   const events = Array.isArray(snapshot.events) ? snapshot.events : [];
   return deriveStatus(events, snapshot.agentStatus);
 }
@@ -1231,17 +1256,20 @@ function drawerQuery(path) {
 
 function drawerEntryHref(entry, drawer, paths) {
   if (entry.type === "project") {
-    if (entry.folder && entry.project) {
-      return `${paths.projectsBase}/${encodeURIComponent(entry.project)}/${encodeURIComponent(entry.folder)}`;
-    }
-    if (!entry.path) {
-      return `${paths.projectsBase}/${encodeURIComponent(entry.project ?? entry.name)}`;
-    }
-    return `${paths.canonical}${drawerQuery(entry.path)}`;
+    const project = String(entry.project ?? entry.name ?? "");
+    const path = String(entry.path ?? "");
+    const qualified = `~/${project}${path ? `/${path}` : ""}`;
+    return `${paths.canonical}${drawerQuery(qualified)}`;
   }
-  if (entry.type === "directory") return `${paths.canonical}${drawerQuery(entry.path)}`;
-  const root = entry.kind === "binary" ? paths.fileOpen : paths.fileView;
-  return `${root}${encodeURIComponent(entry.path)}`;
+  if (entry.type === "directory") {
+    const qualified = drawer.project ? `~/${drawer.project}/${entry.path}` : entry.path;
+    return `${paths.canonical}${drawerQuery(qualified)}`;
+  }
+  const projectBase = drawer.project
+    ? `${paths.projectsBase}/${encodeURIComponent(drawer.project)}`
+    : paths.canonical;
+  const mode = entry.kind === "binary" ? "open" : "file";
+  return `${projectBase}/${mode}/${encodeURIComponent(entry.path)}`;
 }
 
 /** Render one non-recursive project level. Descendants are never embedded. */
@@ -1253,15 +1281,12 @@ export function renderProjectDrawer(drawer, paths, options = {}) {
   const nestedCrumbs = breadcrumbs.filter((crumb) => crumb.type !== "projects");
   const breadcrumbHtml = nestedCrumbs.map((crumb, index) => {
     const current = index === nestedCrumbs.length - 1;
-    const label = crumb.name;
-    let href = `${paths.canonical}${drawerQuery("~")}`;
-    if (crumb.type === "project") {
-      href = crumb.path
-        ? `${paths.projectsBase}/${encodeURIComponent(drawer.project)}/${encodeURIComponent(crumb.path.split("/")[0])}`
-        : `${paths.projectsBase}/${encodeURIComponent(drawer.project)}`;
-    } else if (crumb.type === "directory") {
-      href = `${paths.canonical}${drawerQuery(crumb.path)}`;
-    }
+    const label = String(crumb.name ?? "").replace(/[\\/]+$/, "") || String(crumb.name ?? "");
+    const path = String(crumb.path ?? "");
+    const qualified = drawer.project
+      ? `~/${drawer.project}${path ? `/${path}` : ""}`
+      : "~";
+    const href = `${paths.canonical}${drawerQuery(qualified)}`;
     return `<li>${current
       ? `<span aria-current="page" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`
       : `<a href="${escapeHtml(href)}" title="${escapeHtml(label)}">${escapeHtml(label)}</a>`}</li>`;
@@ -1275,8 +1300,25 @@ export function renderProjectDrawer(drawer, paths, options = {}) {
     : "";
   const upPath = drawer.scope === "projects"
     ? ""
-    : drawer.path ? drawer.parent : "~";
+    : drawer.path
+      ? `~/${drawer.project}${drawer.parent ? `/${drawer.parent}` : ""}`
+      : "~";
   const up = drawer.scope === "projects" ? "" : `<a class="drawer-up" href="${escapeHtml(`${paths.canonical}${drawerQuery(upPath)}`)}" aria-label="Up one level">../</a>`;
+  const latestCrumb = nestedCrumbs.at(-1);
+  const groupedRoot = !drawer.path && drawer.entries.some((entry) => entry.type === "project" && entry.folder);
+  const atProjectDirectory = drawer.scope === "project"
+    && Boolean(drawer.project)
+    && !groupedRoot
+    && (!drawer.path || latestCrumb?.type === "project");
+  const selectedFolder = drawer.path && latestCrumb?.type === "project"
+    ? String(drawer.path).split("/")[0]
+    : "";
+  const startSessionBase = `${paths.projectsBase}/${encodeURIComponent(drawer.project ?? "")}${selectedFolder ? `/${encodeURIComponent(selectedFolder)}` : ""}`;
+  const startSession = atProjectDirectory
+    ? `<form class="drawer-start-session" action="${escapeHtml(`${startSessionBase}/sessions`)}" method="post">
+        <button type="submit"><span aria-hidden="true">+</span><span>session</span></button>
+      </form>`
+    : "";
   const rows = drawer.entries.map((entry) => {
     const href = drawerEntryHref(entry, drawer, paths);
     const action = entry.type === "directory" ? "Open folder" : entry.type === "project" ? "Open project" : entry.kind === "binary" ? "Open file" : "Read file";
@@ -1285,11 +1327,7 @@ export function renderProjectDrawer(drawer, paths, options = {}) {
       : "";
     const projectAttr = entry.project ? ` data-project="${escapeHtml(entry.project)}"` : "";
     const folderAttr = entry.folder ? ` data-folder="${escapeHtml(entry.folder)}"` : "";
-    const treeAction = entry.type === "file"
-      ? "open"
-      : entry.type === "project" && entry.folder
-        ? "spawn"
-        : "expand";
+    const treeAction = entry.type === "file" ? "open" : "expand";
     const suffix = entry.type === "directory" || entry.type === "project" ? "/" : "";
     return `<li><a class="drawer-entry" data-entry-type="${escapeHtml(entry.type)}" data-tree-action="${treeAction}" data-file-kind="${escapeHtml(entry.kind ?? "")}"${projectAttr}${folderAttr}${pathAttr} href="${escapeHtml(href)}" aria-label="${escapeHtml(`${action} ${entry.name}`)}">
       <span class="drawer-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}${suffix}</span>
@@ -1302,15 +1340,19 @@ export function renderProjectDrawer(drawer, paths, options = {}) {
   const title = atRootLevel
     ? "~/projects"
     : (nestedCrumbs.at(-1)?.name ?? drawer.path ?? "files");
+  const drawerBrowserPath = drawer.scope === "projects"
+    ? "~"
+    : `~/${drawer.project}${drawer.path ? `/${drawer.path}` : ""}`;
   return `<button id="project-drawer-toggle" class="drawer-toggle" type="button" aria-controls="project-drawer" aria-expanded="${opened ? "true" : "false"}"${opened ? " inert" : ""}>files</button>
   <div id="project-drawer-backdrop" class="drawer-backdrop"${opened ? "" : " hidden"}></div>
-  <aside id="project-drawer" class="project-drawer" role="dialog" aria-modal="true" aria-hidden="${opened ? "false" : "true"}" aria-labelledby="project-drawer-title" data-drawer-path="${escapeHtml(drawer.scope === "projects" ? "~" : drawer.path)}"${opened ? "" : " inert"}>
+  <aside id="project-drawer" class="project-drawer" role="dialog" aria-modal="true" aria-hidden="${opened ? "false" : "true"}" aria-labelledby="project-drawer-title" data-drawer-path="${escapeHtml(drawerBrowserPath)}"${opened ? "" : " inert"}>
     <header class="drawer-head">
       <h2 id="project-drawer-title" tabindex="-1">${escapeHtml(title)}</h2>
       <button class="drawer-close" type="button" aria-label="Close files">${bannerMark("close")}</button>
     </header>
     ${crumbs}
     ${up}
+    ${startSession}
     <ul class="drawer-list">${empty}</ul>
   </aside>`;
 }
