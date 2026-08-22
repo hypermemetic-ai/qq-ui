@@ -909,30 +909,22 @@ details.session-menu.session-controls {
   white-space: nowrap;
 }
 
-.interrupt-composer {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  justify-content: space-between;
-}
-
-.interrupt-composer p {
-  margin: 0;
-  color: #f7ce74;
-  font-size: .84rem;
-}
-
-.interrupt-composer .composer-actions { margin-top: 0; }
-
 .composer-row {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: end;
   gap: .5rem;
 }
 
-.composer-running .composer-row {
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+.composer-turn-controls { display: contents; }
+
+.composer-work-state {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + .25rem);
+  color: #f7ce74;
+  font-size: .73rem;
 }
 
 .composer textarea {
@@ -1474,8 +1466,7 @@ body > footer {
     min-width: 2.45rem;
     min-height: 2.45rem;
   }
-  .composer-row { grid-template-columns: minmax(0, 1fr) auto auto; }
-  .composer-running .composer-row { grid-template-columns: minmax(0, 1fr) auto auto auto; }
+  .composer-row { grid-template-columns: minmax(0, 1fr) auto auto auto; }
   .composer.is-dictating #composer-submit {
     position: static;
     width: 2.75rem;
@@ -1522,8 +1513,6 @@ body > footer {
   .composer-interrupt { min-height: 2.75rem; }
   .composer-actions { margin-top: .35rem; }
   #working { left: max(.65rem, env(safe-area-inset-left)); }
-  .interrupt-composer { align-items: center; }
-  .interrupt-composer .composer-actions { justify-content: flex-end; }
   .offer-sheet { width: 100%; }
   .offer-actions {
     grid-template-columns: 1fr;

@@ -7,6 +7,8 @@ import {
   renderMutationOob as bundledRenderMutationOob,
   renderSessionContent as bundledRenderSessionContent,
   renderSessionRegion as bundledRenderSessionRegion,
+  renderTranscriptJunction as bundledRenderTranscriptJunction,
+  liveTranscriptUpdate as bundledLiveTranscriptUpdate,
   regionFingerprints as bundledRegionFingerprints,
   SSE_REGION_NAMES as bundledSseRegionNames,
 } from "./render.mjs";
@@ -101,6 +103,10 @@ const bundledAssets = Object.freeze({
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
   },
+  "console-v22.css": {
+    type: "text/css; charset=utf-8",
+    body: readFileSync(new URL("assets/console.css", root)),
+  },
   "geist-latin-wght-normal-5.3.0.woff2": {
     type: "font/woff2",
     body: readFileSync(new URL("assets/geist-latin-wght-normal-5.3.0.woff2", root)),
@@ -130,6 +136,10 @@ const bundledAssets = Object.freeze({
     body: readFileSync(new URL("assets/browser-v8.js", root)),
   },
   "browser-v9.js": {
+    type: "text/javascript; charset=utf-8",
+    body: readFileSync(new URL("assets/browser-v9.js", root)),
+  },
+  "browser-v10.js": {
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("assets/browser-v9.js", root)),
   },
@@ -166,7 +176,9 @@ const LIVE_ASSET_FILES = Object.freeze({
   "console-v19.css": "assets/console.css",
   "console-v20.css": "assets/console.css",
   "console-v21.css": "assets/console.css",
+  "console-v22.css": "assets/console.css",
   "browser-v9.js": "assets/browser-v9.js",
+  "browser-v10.js": "assets/browser-v9.js",
 });
 const RENDER_FILE = fileURLToPath(new URL("./render.mjs", import.meta.url));
 
@@ -483,8 +495,8 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v21.css`,
-    browser: `${assetsPrefix}browser-v9.js`,
+    css: `${assetsPrefix}console-v22.css`,
+    browser: `${assetsPrefix}browser-v10.js`,
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
     manifest: `${assetsPrefix}manifest-v3.webmanifest`,
@@ -721,6 +733,8 @@ export function createConsoleHandler(backend, options = {}) {
         renderPage: bundledRenderPage,
         renderSessionContent: bundledRenderSessionContent,
         renderSessionRegion: bundledRenderSessionRegion,
+        renderTranscriptJunction: bundledRenderTranscriptJunction,
+        liveTranscriptUpdate: bundledLiveTranscriptUpdate,
         renderMutationOob: bundledRenderMutationOob,
         regionFingerprints: bundledRegionFingerprints,
         SSE_REGION_NAMES: bundledSseRegionNames,
@@ -1141,6 +1155,8 @@ export function createConsoleHandler(backend, options = {}) {
       req.once("close", close);
       res.once("close", close);
       let fingerprints = {};
+      let liveState = null;
+      let initialized = false;
       stop = watch(selected.sessionId, async (error, next) => {
         if (closed || res.destroyed || res.writableEnded) {
           close();
@@ -1153,13 +1169,34 @@ export function createConsoleHandler(backend, options = {}) {
         }
         const render = await loadRender();
         const nextFp = render.regionFingerprints(next);
-        const changed = render.SSE_REGION_NAMES.filter((name) => nextFp[name] !== fingerprints[name]);
-        if (changed.length === 0) return;
+        const liveUpdate = render.liveTranscriptUpdate(liveState, next);
+        const initial = !initialized;
+        const transcriptChanged = nextFp.transcript !== fingerprints.transcript;
+        const changed = render.SSE_REGION_NAMES.filter((name) =>
+          name !== "live" && (nextFp[name] !== fingerprints[name] || (name === "transcript" && liveUpdate.junction)));
+        const rebuildLive = initial || transcriptChanged || liveUpdate.junction;
+        const liveFrames = rebuildLive && liveUpdate.state
+          ? [{ event: "live", data: liveUpdate.state.html }]
+          : liveUpdate.frames;
+        if (changed.length === 0 && liveFrames.length === 0) {
+          fingerprints = nextFp;
+          liveState = liveUpdate.state;
+          initialized = true;
+          return;
+        }
         const { renderSessionRegion } = render;
         for (const name of changed) {
-          fingerprints[name] = nextFp[name];
-          res.write(sseEvent(name, renderSessionRegion(name, next, paths)));
+          const body = name === "transcript"
+            ? render.renderTranscriptJunction(next)
+            : renderSessionRegion(name, next, paths);
+          res.write(sseEvent(name, body));
         }
+        for (const frame of liveFrames) {
+          res.write(sseEvent(frame.event, frame.data));
+        }
+        fingerprints = nextFp;
+        liveState = liveUpdate.state;
+        initialized = true;
       });
       keepalive = setInterval(() => {
         if (closed || res.destroyed || res.writableEnded) {

@@ -2,7 +2,7 @@
 
 const CACHE_PREFIX = "qq-static-";
 const LEGACY_CACHE_PREFIX = "qq-dsh-console-static-";
-const CACHE_NAME = `${CACHE_PREFIX}v21`;
+const CACHE_NAME = `${CACHE_PREFIX}v22`;
 const scopePath = new URL(self.registration.scope).pathname.replace(/\/$/, "");
 const staticPaths = [
   `${scopePath}/assets/htmx-2.0.10.min.js`,
@@ -21,6 +21,7 @@ const staticPaths = [
   `${scopePath}/assets/console-v19.css`,
   `${scopePath}/assets/console-v20.css`,
   `${scopePath}/assets/console-v21.css`,
+  `${scopePath}/assets/console-v22.css`,
   `${scopePath}/assets/geist-latin-wght-normal-5.3.0.woff2`,
   `${scopePath}/assets/geist-latin-wght-italic-5.3.0.woff2`,
   `${scopePath}/assets/browser-v4.js`,
@@ -29,6 +30,7 @@ const staticPaths = [
   `${scopePath}/assets/browser-v7.js`,
   `${scopePath}/assets/browser-v8.js`,
   `${scopePath}/assets/browser-v9.js`,
+  `${scopePath}/assets/browser-v10.js`,
   `${scopePath}/assets/reconnect-v1.js`,
   `${scopePath}/assets/icon-v2-192.png`,
   `${scopePath}/assets/icon-v2-512.png`,
@@ -36,8 +38,8 @@ const staticPaths = [
 ];
 const staticPathSet = new Set(staticPaths);
 const livePathSet = new Set([
-  `${scopePath}/assets/console-v21.css`,
-  `${scopePath}/assets/browser-v9.js`,
+  `${scopePath}/assets/console-v22.css`,
+  `${scopePath}/assets/browser-v10.js`,
 ]);
 const offlinePath = `${scopePath}/assets/offline-v8.html`;
 

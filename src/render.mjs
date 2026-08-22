@@ -782,31 +782,23 @@ function renderSessionPlace(snapshot) {
   return name ? `<div class="session-place"><p class="session-project">${escapeHtml(name)}</p></div>` : "";
 }
 
+function composerControls(running, findWork = "") {
+  const active = running || findWork === "compile" || findWork === "save";
+  if (!active) return "";
+  const label = findWork === "save" ? "Saving…" : findWork === "compile" ? "Finding…" : "";
+  return `${label ? `<span class="composer-work-state" role="status">${label}</span>` : ""}
+    <span id="interrupt-working" class="htmx-indicator" aria-live="polite">Stopping…</span>
+    <button id="interrupt-submit" class="composer-interrupt" type="submit" form="interrupt-form" aria-label="Stop current turn" title="Stop"><svg class="composer-stop" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><rect fill="currentColor" x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg></button>`;
+}
+
 function composer(paths, running, sessionId = "", findWork = "") {
-  if (findWork === "compile" || findWork === "save") {
-    const label = findWork === "save" ? "Saving…" : "Finding…";
-    return `<form id="interrupt-form" class="composer interrupt-composer" action="${escapeHtml(paths.interrupt)}" method="post"
+  const interrupt = `<form id="interrupt-form" class="interrupt-proxy" action="${escapeHtml(paths.interrupt)}" method="post"
       data-session-id="${escapeHtml(sessionId)}"
       hx-post="${escapeHtml(paths.interrupt)}"
       ${hxMutateAttrs()}
       hx-disabled-elt="#interrupt-submit"
-      hx-indicator="#interrupt-working">
-      <p>${label}</p>
-      <div class="composer-actions">
-        <span id="interrupt-working" class="htmx-indicator" aria-live="polite">Cancelling…</span>
-        <button id="interrupt-submit" class="button-danger" type="submit">Cancel</button>
-      </div>
-    </form>`;
-  }
-  const interrupt = running
-    ? `<form id="interrupt-form" class="interrupt-proxy" action="${escapeHtml(paths.interrupt)}" method="post"
-        data-session-id="${escapeHtml(sessionId)}"
-        hx-post="${escapeHtml(paths.interrupt)}"
-        ${hxMutateAttrs()}
-        hx-disabled-elt="#interrupt-submit"
-        hx-indicator="#interrupt-working"></form>`
-    : "";
-  return `${interrupt}<form id="composer" class="composer${running ? " composer-running" : ""}" action="${escapeHtml(paths.prompt)}" method="post"
+      hx-indicator="#interrupt-working"></form>`;
+  return `${interrupt}<form id="composer" class="composer" action="${escapeHtml(paths.prompt)}" method="post"
       data-session-id="${escapeHtml(sessionId)}"
       hx-post="${escapeHtml(paths.prompt)}"
       ${hxMutateAttrs()}
@@ -825,7 +817,7 @@ function composer(paths, running, sessionId = "", findWork = "") {
             <path fill="currentColor" d="M18.3 5.71 12 12.01 5.7 5.7 4.29 7.11 10.59 13.4 4.29 19.7 5.7 21.11 12 14.82l6.3 6.29 1.41-1.41-6.29-6.3 6.29-6.29z"/>
           </svg>
         </button>
-        ${running ? `<span id="interrupt-working" class="htmx-indicator" aria-live="polite">Stopping…</span><button id="interrupt-submit" class="composer-interrupt" type="submit" form="interrupt-form" aria-label="Stop current turn" title="Stop"><svg class="composer-stop" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><rect fill="currentColor" x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg></button>` : ""}
+        ${regionShell("composer-turn-controls", "composer-turn-controls", "composer", composerControls(running, findWork), true)}
         <button id="composer-submit" type="submit" aria-label="Send"><svg class="composer-enter" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19 6v5H7.83l2.58-2.59L9 7 4 12l5 5 1.41-1.41L7.83 13H21V6h-2z"/></svg></button>
       </div>
       <span id="working" class="htmx-indicator" aria-live="polite">Admitting message…</span>
@@ -839,20 +831,108 @@ export const SSE_REGION_IDS = Object.freeze({
   transcript: "transcript-log",
   live: "transcript-live",
   queue: "session-queue",
-  composer: "session-composer",
+  composer: "composer-turn-controls",
   popups: "session-popups",
 });
 
 function isLiveNode(node) {
-  return node?.status === "streaming";
+  return (node?.kind === "assistant" && node.status === "streaming")
+    || (node?.kind === "tool" && node.status === "running");
 }
 
-/** Settled prefix stays put. Streaming suffix is the live region. */
+/** A node streams only while it is the active tail. A following tool is a cap. */
 export function splitTranscriptNodes(nodes) {
   const list = Array.isArray(nodes) ? nodes : [];
-  const firstLive = list.findIndex(isLiveNode);
-  if (firstLive < 0) return { settled: list, live: [] };
-  return { settled: list.slice(0, firstLive), live: list.slice(firstLive) };
+  const tail = list.at(-1);
+  if (!isLiveNode(tail)) return { settled: list, live: [] };
+  return { settled: list.slice(0, -1), live: [tail] };
+}
+
+function safeLiveId(value) {
+  const id = String(value ?? "").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  return id || "tail";
+}
+
+function liveNodeKey(node) {
+  if (node?.kind === "tool") return `tool-${node.callId || node.seq || "tail"}`;
+  return `assistant-${node?.turn ?? ""}-${node?.step ?? ""}-${node?.seq ?? "tail"}`;
+}
+
+function liveBlockEvent(key, index, type) {
+  return `live-${safeLiveId(key)}-${index}-${safeLiveId(type)}`;
+}
+
+function renderLiveAssistantBlock(node, block, index, key) {
+  const seq = escapeHtml(node?.seq ?? "");
+  const turn = escapeHtml(node?.turn ?? "");
+  const step = escapeHtml(node?.step ?? "");
+  const time = eventTime(node?.time);
+  const target = liveBlockEvent(key, index, block?.type);
+  const text = String(block?.text ?? "");
+  const stream = `<div id="${escapeHtml(target)}" class="message-text message-live-text" data-live-block="${index}" sse-swap="${escapeHtml(target)}" hx-swap="beforeend">${escapeHtml(text)}</div>`;
+  if (block?.type === "reasoning") {
+    const label = time ? `Reasoning at ${time}` : "Reasoning";
+    return `<section class="assistant-reasoning" aria-label="${escapeHtml(label)}" data-seq="${seq}" data-turn="${turn}" data-step="${step}" aria-busy="true">${stream}</section>`;
+  }
+  if (block?.type === "image") {
+    return `<article class="message message-assistant message-streaming" data-seq="${seq}" data-turn="${turn}" data-step="${step}" aria-busy="true">${attachmentBlock(block)}</article>`;
+  }
+  const label = time ? `Assistant message at ${time}` : "Assistant message";
+  return `<article class="message message-assistant message-streaming" data-seq="${seq}" data-turn="${turn}" data-step="${step}" aria-label="${escapeHtml(label)}" aria-busy="true">${stream}</article>`;
+}
+
+/** Serializable cursor for one open transcript tail. */
+export function liveTranscriptState(snapshot) {
+  const { live } = splitTranscriptNodes(sessionNodes(snapshot));
+  const node = live[0];
+  if (!node) return null;
+  const key = liveNodeKey(node);
+  if (node.kind === "tool") {
+    return { key, kind: "tool", segments: [], html: renderConversationNode(node) };
+  }
+  const segments = (Array.isArray(node.blocks) ? node.blocks : []).map((block, index) => {
+    const type = block?.type === "reasoning" ? "reasoning" : block?.type === "image" ? "image" : "text";
+    return {
+      key: `${key}:${index}:${type}`,
+      event: liveBlockEvent(key, index, type),
+      type,
+      text: type === "image" ? JSON.stringify(block?.attachment ?? null) : String(block?.text ?? ""),
+      html: renderLiveAssistantBlock(node, block, index, key),
+    };
+  });
+  return { key, kind: "assistant", segments, html: segments.map((segment) => segment.html).join("\n") };
+}
+
+/**
+ * Return only append frames for cumulative model chunks. A junction asks the
+ * caller to clean the settled log, clear the live tail, then append `state.html`.
+ */
+export function liveTranscriptUpdate(previous, snapshot) {
+  const state = liveTranscriptState(snapshot);
+  if (!previous) {
+    return { state, junction: false, frames: state ? [{ event: "live", data: state.html }] : [] };
+  }
+  if (!state || previous.key !== state.key || previous.kind !== state.kind) {
+    return { state, junction: true, frames: state ? [{ event: "live", data: state.html }] : [] };
+  }
+  if (state.kind === "tool") return { state, junction: false, frames: [] };
+  if (state.segments.length < previous.segments.length) {
+    return { state, junction: true, frames: [{ event: "live", data: state.html }] };
+  }
+  const frames = [];
+  for (let index = 0; index < previous.segments.length; index += 1) {
+    const before = previous.segments[index];
+    const after = state.segments[index];
+    if (!after || before.key !== after.key || !after.text.startsWith(before.text)) {
+      return { state, junction: true, frames: [{ event: "live", data: state.html }] };
+    }
+    const suffix = after.text.slice(before.text.length);
+    if (suffix) frames.push({ event: after.event, data: escapeHtml(suffix) });
+  }
+  for (const segment of state.segments.slice(previous.segments.length)) {
+    frames.push({ event: "live", data: segment.html });
+  }
+  return { state, junction: false, frames };
 }
 
 function hxMutateAttrs() {
@@ -896,12 +976,12 @@ function nodeFingerprint(node) {
   ];
 }
 
-function sseSwapAttrs(name, enabled) {
-  return enabled ? ` hx-ext="sse" sse-swap="${escapeHtml(name)}" hx-swap="innerHTML"` : "";
+function sseSwapAttrs(name, enabled, swap = "innerHTML") {
+  return enabled ? ` hx-ext="sse" sse-swap="${escapeHtml(name)}" hx-swap="${escapeHtml(swap)}"` : "";
 }
 
-function regionShell(id, className, eventName, inner, enabled) {
-  return `<div id="${escapeHtml(id)}" class="${escapeHtml(className)}"${sseSwapAttrs(eventName, enabled)}>${inner}</div>`;
+function regionShell(id, className, eventName, inner, enabled, swap = "innerHTML") {
+  return `<div id="${escapeHtml(id)}" class="${escapeHtml(className)}"${sseSwapAttrs(eventName, enabled, swap)}>${inner}</div>`;
 }
 
 export function renderChrome(snapshot, paths, notice = "") {
@@ -931,19 +1011,30 @@ export function renderChrome(snapshot, paths, notice = "") {
     ${inlineNotice}`;
 }
 
+function renderSettledConversationNode(node) {
+  if (node?.kind === "assistant" && node.status === "streaming") {
+    return renderConversationNode({ ...node, status: "settled" });
+  }
+  return renderConversationNode(node);
+}
+
 export function renderTranscriptSettled(snapshot) {
   if (!snapshot?.id) return "";
   const { settled, live } = splitTranscriptNodes(sessionNodes(snapshot));
   if (settled.length === 0 && live.length === 0) {
     return '<p class="empty-transcript">This DSH session has no transcript yet.</p>';
   }
-  return settled.map(renderConversationNode).filter(Boolean).join("\n");
+  return settled.map(renderSettledConversationNode).filter(Boolean).join("\n");
+}
+
+/** Clean settled markdown and clear raw live text in the same HTMX junction. */
+export function renderTranscriptJunction(snapshot) {
+  return `${renderTranscriptSettled(snapshot)}\n<div id="transcript-live" hx-swap-oob="innerHTML"></div>`;
 }
 
 export function renderTranscriptLive(snapshot) {
   if (!snapshot?.id) return "";
-  const { live } = splitTranscriptNodes(sessionNodes(snapshot));
-  return live.map(renderConversationNode).filter(Boolean).join("\n");
+  return liveTranscriptState(snapshot)?.html ?? "";
 }
 
 export function renderTranscript(snapshot) {
@@ -955,6 +1046,12 @@ export function renderTranscript(snapshot) {
 export function renderQueue(snapshot, paths) {
   if (!snapshot?.id) return "";
   return renderPendingQueue(snapshot, paths);
+}
+
+export function renderComposerControls(snapshot) {
+  if (!snapshot?.id) return "";
+  const status = sessionStatus(snapshot);
+  return composerControls(status.key === "running", sessionFindWork(snapshot));
 }
 
 export function renderComposer(snapshot, paths) {
@@ -985,7 +1082,7 @@ export function renderSessionRegion(name, snapshot, paths, notice = "") {
     case "queue":
       return renderQueue(snapshot, paths);
     case "composer":
-      return renderComposer(snapshot, paths);
+      return renderComposerControls(snapshot);
     case "popups":
       return renderPopups(snapshot, paths, notice);
     default:
@@ -1026,7 +1123,6 @@ export function regionFingerprints(snapshot) {
     queue: JSON.stringify((snapshot?.conversation?.pending ?? []).map((item) => [item.id, item.target, item.text])),
     composer: JSON.stringify([
       snapshot?.id,
-      snapshot?.agentStatus,
       status.key === "running",
       sessionFindWork(snapshot),
     ]),
@@ -1055,10 +1151,10 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   return `${chrome}
     <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
       ${regionShell("transcript-log", "transcript-log", "transcript", renderTranscriptSettled(snapshot), true)}
-      ${regionShell("transcript-live", "transcript-live", "live", renderTranscriptLive(snapshot), true)}
+      ${regionShell("transcript-live", "transcript-live", "live", renderTranscriptLive(snapshot), true, "beforeend")}
     </div>
     ${regionShell("session-queue", "session-queue", "queue", renderQueue(snapshot, paths), true)}
-    ${regionShell("session-composer", "session-composer", "composer", renderComposer(snapshot, paths), true)}
+    ${regionShell("session-composer", "session-composer", "", renderComposer(snapshot, paths), false)}
     ${popups}`;
 }
 

@@ -1406,7 +1406,8 @@
   const touchesComposer = (id) =>
     id === "session-panel" || id === "session-composer" || id === "session-queue" || id === "pending-queue" || id === "composer";
   const touchesTranscript = (id) =>
-    id === "session-panel" || id === "transcript" || id === "transcript-log" || id === "transcript-live";
+    id === "session-panel" || id === "transcript" || id === "transcript-log" || id === "transcript-live"
+      || id.startsWith("live-assistant-");
   for (const eventName of ["htmx:beforeSwap", "htmx:sseBeforeMessage"]) {
     document.addEventListener(eventName, (event) => {
       const id = swapTargetId(event);
