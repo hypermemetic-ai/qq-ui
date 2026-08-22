@@ -25,10 +25,16 @@
       /* completion is best-effort */
     }
   };
-  const fitComposer = (input = composer()) => {
+  const fitComposer = (input = composer(), { shrink = true } = {}) => {
     if (!(input instanceof HTMLTextAreaElement)) return;
-    input.style.height = "0px";
-    input.style.height = `${input.scrollHeight + input.offsetHeight - input.clientHeight}px`;
+    const extras = input.offsetHeight - input.clientHeight;
+    if (!shrink) {
+      const next = input.scrollHeight + extras;
+      if (next > input.offsetHeight) input.style.height = `${next}px`;
+      return;
+    }
+    input.style.height = "auto";
+    input.style.height = `${input.scrollHeight + extras}px`;
   };
   const showLatest = () => {
     const transcript = document.querySelector("#transcript");
@@ -88,8 +94,12 @@
           .find((candidate) => candidate.dataset.messageId === draft.id)
       : composer();
     if (draft?.kind === "composer" && input instanceof HTMLTextAreaElement) {
+      if (draft.focused && document.activeElement === input) {
+        fitComposer(input, { shrink: false });
+        return;
+      }
       if (draft.value) input.value = draft.value;
-      fitComposer(input);
+      fitComposer(input, { shrink: false });
     } else if (draft?.kind === "queue" && input instanceof HTMLTextAreaElement) {
       input.value = draft.value;
     }
@@ -103,7 +113,10 @@
   };
   const prepareSession = () => {
     restoreTranscriptView();
-    fitComposer();
+    const input = composer();
+    if (input instanceof HTMLTextAreaElement && document.activeElement !== input) {
+      fitComposer(input, { shrink: false });
+    }
   };
   const submitForm = (selector) => {
     const form = document.querySelector(selector);

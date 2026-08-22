@@ -430,7 +430,7 @@ function sessionNavigation(snapshot, paths) {
       </form>`
     : `<p class="session-empty">no live sessions</p>`;
   const closeControls = selectedId && paths.close
-    ? `<button type="button" class="close-arm" aria-label="Close this session">close</button>
+    ? `<button type="button" class="close-arm" aria-label="Close this session">x</button>
       <div class="close-confirm" hidden role="alertdialog" aria-modal="true" aria-labelledby="close-confirm-title" aria-describedby="close-confirm-copy">
         <p id="close-confirm-title">close session ${escapeHtml(face)}?</p>
         <p id="close-confirm-copy">history is kept</p>
@@ -442,17 +442,13 @@ function sessionNavigation(snapshot, paths) {
         </div>
       </div>`
     : "";
-  const menuFace = selectedId ? sessionToken(selected) : "sessions";
-  const menu = `<details class="session-menu">
-    <summary aria-label="Show session controls"><span>${escapeHtml(menuFace)}</span></summary>
-    <div class="session-controls" role="group" aria-label="Session controls">
+  const controls = `<div class="session-controls" role="group" aria-label="Session controls">
       ${picker}
       <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
-        <button type="submit" aria-label="New session">New session</button>
+        <button type="submit" aria-label="New session">+</button>
       </form>
       ${closeControls}
-    </div>
-  </details>`;
+    </div>`;
   const links = selectedId && choices.length > 0
     ? choices.map((session) => {
         const current = session.id === selectedId;
@@ -460,7 +456,8 @@ function sessionNavigation(snapshot, paths) {
         return `<a class="session-token${current ? " session-token-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(session.id)}"><span>${escapeHtml(sessionToken(session))}</span></a>`;
       }).join("")
     : '<span class="session-empty">no live sessions</span>';
-  return `${menu}<nav class="session-traversal" aria-label="Sessions" aria-keyshortcuts="ArrowLeft ArrowRight">${links}</nav>`;
+  const tokens = `<nav class="session-traversal" aria-label="Sessions" aria-keyshortcuts="ArrowLeft ArrowRight">${links}</nav>`;
+  return { controls, tokens };
 }
 
 export function renderLoginSheet(sheet, paths) {
@@ -773,7 +770,7 @@ function composer(paths, running, sessionId = "", findWork = "") {
       hx-indicator="#working">
       <label for="prompt">Message</label>
       <div class="composer-row">
-        <textarea id="prompt" name="prompt" rows="1" maxlength="32768" required autocomplete="off" enterkeyhint="send"></textarea>
+        <textarea id="prompt" name="prompt" rows="1" maxlength="32768" required autocomplete="off" enterkeyhint="send" hx-preserve="true"></textarea>
         <button id="composer-dictate" type="button" data-state="idle" aria-label="Dictate">
           <svg class="dictate-mic" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
             <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
@@ -802,15 +799,17 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   const findWork = snapshot.findWork === "save" ? "save" : snapshot.findWork === "compile" ? "compile" : "";
   const face = emptyProject ? "" : liveFace(snapshot);
   const progress = renderProgressChip(snapshot.progress);
+  const sessions = sessionNavigation(snapshot, paths);
   return `<div class="session-heading">
       <div class="session-heading-start">
         ${renderHomeLink(snapshot, paths)}
-        ${sessionNavigation(snapshot, paths)}
+        ${sessions.tokens}
       </div>
       <div class="session-heading-center">
         ${snapshot?.id ? renderWorkflowMenu(snapshot, paths) || sessionModeChip(snapshot.sessionMode) : ""}
       </div>
       <div class="session-heading-end">
+        ${sessions.controls}
         ${renderSessionPlace(snapshot)}
         <h1 id="session-heading"><span class="session-heading-title">Operator console${face ? ` · ${escapeHtml(face)}` : ""}</span></h1>
         <p class="status status-${escapeHtml(status.key)}" role="status"><span class="status-dot" aria-hidden="true"></span><span class="status-label">${escapeHtml(status.label)}</span></p>

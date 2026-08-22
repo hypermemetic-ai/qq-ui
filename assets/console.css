@@ -104,7 +104,7 @@ main { min-height: 0; }
 
 .session-heading-center {
   min-width: 0;
-  justify-self: center;
+  justify-self: start;
 }
 
 .session-place {
@@ -141,7 +141,8 @@ main { min-height: 0; }
   min-width: 0;
   align-items: center;
   justify-self: end;
-  gap: .55rem;
+  gap: .45rem;
+  overflow: visible;
 }
 
 .session-heading-end h1 {
@@ -297,24 +298,15 @@ code {
 
 .session-menu[open] > summary::after,
 .workflows-menu[open] > summary::after { transform: translateY(.1rem) rotate(225deg); }
-.session-menu:not([open]) > .session-controls { display: none; }
+details.session-menu { display: none; }
 .workflows-menu:not([open]) > .workflows-menu-list { display: none; }
 
 .session-controls {
-  position: absolute;
-  z-index: 4;
-  top: calc(100% + .5rem);
-  right: 1.5rem;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  width: min(40rem, calc(100% - 3rem));
+  position: relative;
+  display: flex;
+  min-width: 0;
   align-items: center;
-  gap: .65rem;
-  padding: .65rem;
-  border: 1px solid #2a2a2a;
-  border-radius: .7rem;
-  background: #000;
-  box-shadow: 0 1rem 3rem rgba(0, 0, 0, .65);
+  gap: .35rem;
 }
 
 .workflows-menu-list {
@@ -353,13 +345,20 @@ code {
   font-size: .75rem;
 }
 .close-arm {
-  min-width: 2.5rem;
+  min-width: 2rem;
 }
 .close-confirm {
-  grid-column: 1 / -1;
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + .35rem);
+  right: 0;
   display: grid;
+  min-width: 12rem;
   gap: .45rem;
-  padding: .15rem .1rem .1rem;
+  padding: .65rem;
+  border: 1px solid #2a2a2a;
+  border-radius: 0;
+  background: #000;
 }
 .close-confirm[hidden] { display: none; }
 .close-confirm p {
@@ -381,38 +380,32 @@ code {
 .session-controls.close-confirming .close-arm { display: none; }
 
 .session-picker {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  display: block;
   min-width: 0;
-  align-items: center;
-  gap: .55rem;
 }
 
 .session-picker label {
-  color: #9a9a9a;
-  font-size: .75rem;
-  font-weight: 750;
-}
-
-.session-picker label span {
-  margin-left: .2rem;
-  color: #666;
-  font-size: .68rem;
-  font-weight: 500;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .session-picker select {
-  width: 100%;
-  max-width: 34rem;
-  min-width: 0;
-  height: 2.5rem;
-  padding: 0 1.6rem 0 .65rem;
+  width: auto;
+  max-width: min(12rem, 36vw);
+  min-width: 4.5rem;
+  height: 2rem;
+  padding: 0 1.4rem 0 .45rem;
   border: 1px solid #2a2a2a;
-  border-radius: .55rem;
+  border-radius: 0;
   outline: 0;
   appearance: none;
   -webkit-appearance: none;
-  background: #000 url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%23888' d='M1.2 1.2 6 6 10.8 1.2'/></svg>") no-repeat right .65rem center;
+  background: #000 url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%23888' d='M1.2 1.2 6 6 10.8 1.2'/></svg>") no-repeat right .4rem center;
   color: #e8e8e8;
   color-scheme: dark;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -425,10 +418,13 @@ code {
 }
 
 .session-controls button {
-  min-height: 2.5rem;
-  padding: .45rem .75rem;
+  display: grid;
+  min-width: 2rem;
+  min-height: 2rem;
+  place-items: center;
+  padding: 0;
   border: 1px solid #2a2a2a;
-  border-radius: .55rem;
+  border-radius: 0;
   background: #0a0a0a;
   color: #e8e8e8;
   font-weight: 750;
@@ -436,7 +432,10 @@ code {
   white-space: nowrap;
 }
 
-.new-session button {
+.new-session button,
+.close-arm {
+  width: 2rem;
+  height: 2rem;
   border-color: #444;
   background: #111;
   color: #fff;
@@ -1355,6 +1354,7 @@ body > footer {
     gap: .45rem;
     padding: max(.45rem, env(safe-area-inset-top)) max(.65rem, env(safe-area-inset-right)) .45rem max(.65rem, env(safe-area-inset-left));
   }
+  .session-heading-center { justify-self: start; }
   .session-place { display: none; }
   .session-heading .session-mode {
     display: block;
@@ -1383,24 +1383,30 @@ body > footer {
   .workflows-menu > summary { min-height: 2.45rem; padding-inline: .2rem; }
   .session-home { width: 2.45rem; height: 2.45rem; }
   .session-project { font-size: .62rem; }
-  .session-controls {
-    top: 100%;
-    right: max(.65rem, env(safe-area-inset-right));
-    width: auto;
-    left: max(.65rem, env(safe-area-inset-left));
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: .5rem;
-    padding: .5rem;
+  .session-picker select {
+    max-width: min(9rem, 30vw);
+    height: 2.45rem;
+    padding-inline: .45rem 1.3rem;
   }
-  .session-picker { grid-column: 1 / -1; gap: .4rem; }
-  .session-picker label span { display: none; }
-  .session-picker select { height: 2.75rem; padding-inline: .5rem; }
-  .session-empty { grid-column: 1 / -1; }
-  .close-confirm { grid-column: 1 / -1; }
+  .session-empty { margin: 0; font-size: .68rem; }
+  .close-confirm {
+    top: 100%;
+    right: 0;
+    left: auto;
+    width: max-content;
+    max-width: min(18rem, calc(100vw - 2rem));
+  }
   .close-confirm-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .close-confirm-actions .close-keep { justify-self: stretch; }
   .close-confirm-actions .close-session { justify-self: stretch; }
-  .session-controls button { min-height: 2.75rem; padding-inline: .65rem; }
+  .session-controls button,
+  .new-session button,
+  .close-arm {
+    width: 2.45rem;
+    height: 2.45rem;
+    min-width: 2.45rem;
+    min-height: 2.45rem;
+  }
   .composer-row { grid-template-columns: minmax(0, 1fr) auto auto; }
   .composer-running .composer-row { grid-template-columns: minmax(0, 1fr) auto auto auto; }
   #composer-submit {
@@ -2169,6 +2175,7 @@ body.document-page {
   }
 
   details.session-menu,
+  .session-controls,
   .session-mobile-id,
   .session-background-actions { display: none; }
 
