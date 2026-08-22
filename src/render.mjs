@@ -442,8 +442,9 @@ function sessionNavigation(snapshot, paths) {
         </div>
       </div>`
     : "";
+  const menuFace = selectedId ? sessionToken(selected) : "sessions";
   const menu = `<details class="session-menu">
-    <summary aria-label="Show session controls"><span>sessions</span></summary>
+    <summary aria-label="Show session controls"><span>${escapeHtml(menuFace)}</span></summary>
     <div class="session-controls" role="group" aria-label="Session controls">
       ${picker}
       <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
