@@ -1,3 +1,4 @@
+import { createApprovalAnswerer } from "./approval.mjs";
 import { createConsoleHandler, createRootRedirectHandler } from "./http-app.mjs";
 
 export const name = "qq-ui";
@@ -14,11 +15,27 @@ export function apply(ctx, config) {
   const modelsOf = () => ctx.get?.("qq-models", false) ?? null;
   const finderOf = () => ctx.get?.("image-finder", false) ?? null;
   const mediaOf = () => ctx.get?.("media-box", false) ?? null;
+  const answerer = createApprovalAnswerer();
+  ctx.effect(() => {
+    const off = ctx.get?.("approval", false)
+      ? ctx.on("approval/request", (req, next) => answerer.handleRequest(req, next))
+      : undefined;
+    return () => {
+      if (typeof off === "function") off();
+      answerer.dispose();
+    };
+  }, "qq-ui: approval answerer");
   const basePath = String(config?.basePath ?? "/qq");
   const handler = createConsoleHandler(qq, {
     basePath,
     ssePollMs: config?.ssePollMs,
     liveAssets: config?.liveAssets === true,
+    approvalFor: (sessionId) => answerer.pendingFor(sessionId),
+    decideApproval: (sessionId, form) => answerer.decide(
+      sessionId,
+      String(form?.get?.("approvalId") ?? ""),
+      String(form?.get?.("outcome") ?? ""),
+    ),
     offerFor: (sessionId) => workflowsOf()?.offer?.(sessionId),
     chooseOffer: (sessionId, choice) => workflowsOf()?.choose?.(sessionId, { choice }),
     loginSheetFor: (sessionId) => modelsOf()?.sheetFor?.(sessionId),

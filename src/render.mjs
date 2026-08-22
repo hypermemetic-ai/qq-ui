@@ -457,6 +457,40 @@ export function renderLoginSheet(sheet, paths) {
   </aside>`;
 }
 
+export function renderApprovalPopup(approval, paths, notice = "") {
+  if (!approval || typeof approval.id !== "string" || !approval.id) return "";
+  const tool = typeof approval.toolName === "string" && approval.toolName.trim()
+    ? approval.toolName.trim()
+    : "tool";
+  const reason = typeof approval.reason === "string" && approval.reason.trim()
+    ? `<p>${escapeHtml(approval.reason.trim())}</p>`
+    : "";
+  const action = escapeHtml(paths.approval ?? "");
+  const refusal = notice ? `<p class="notice" role="alert">${escapeHtml(notice)}</p>` : "";
+  return `<aside class="offer-popup approval-popup" role="dialog" aria-modal="true" aria-labelledby="approval-heading" data-approval-id="${escapeHtml(approval.id)}">
+    <div class="offer-sheet">
+      <header class="offer-head">
+        <p class="eyebrow">Approval needed</p>
+        <h2 id="approval-heading">${escapeHtml(tool)}</h2>
+      </header>
+      <div class="offer-brief" tabindex="0">
+        <p>This action needs your approval. The grant applies only to this request.</p>
+        ${reason}
+      </div>
+      ${refusal}
+      <form class="offer-actions" action="${action}" method="post"
+        hx-post="${action}"
+        hx-target="#session-panel"
+        hx-swap="innerHTML"
+        hx-disabled-elt=".offer-choice">
+        <input type="hidden" name="approvalId" value="${escapeHtml(approval.id)}">
+        <button class="offer-choice offer-handoff" type="submit" name="outcome" value="allowed-once">Allow once</button>
+        <button class="offer-choice offer-ignore" type="submit" name="outcome" value="rejected">Reject</button>
+      </form>
+    </div>
+  </aside>`;
+}
+
 export function renderOfferPopup(offer, paths, notice = "") {
   if (!offer || typeof offer.brief !== "string" || offer.brief.trim().length === 0) return "";
   const runner = typeof offer.runnerBrief === "string" && offer.runnerBrief.trim()
@@ -755,6 +789,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
     ${progress}
     ${renderLoginSheet(snapshot.loginSheet, paths)}
     ${renderOfferPopup(snapshot.offer, paths, notice)}
+    ${renderApprovalPopup(snapshot.approval, paths, notice)}
     ${renderOverlay(snapshot.overlay, paths, notice, findWork)}`;
 }
 

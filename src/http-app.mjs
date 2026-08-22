@@ -281,6 +281,7 @@ function routes(basePath, sessionId, project, folder) {
       prompt: sessionId ? `${canonical}/prompt` : "",
       queue: sessionId ? `${canonical}/queue` : "",
       offer: sessionId ? `${canonical}/offer` : "",
+      approval: sessionId ? `${canonical}/approval` : "",
       overlay: sessionId ? `${canonical}/overlay` : "",
       close: sessionId ? `${canonical}/close` : "",
       createSession: `${projectBase}/sessions`,
@@ -301,6 +302,7 @@ function routes(basePath, sessionId, project, folder) {
     prompt: `${canonical}/prompt`,
     queue: `${canonical}/queue`,
     offer: `${canonical}/offer`,
+    approval: `${canonical}/approval`,
     overlay: `${canonical}/overlay`,
     close: `${canonical}/close`,
     createSession: `${basePath}/sessions`,
@@ -478,6 +480,8 @@ export function createConsoleHandler(backend, options = {}) {
   const findWork = new Map();
   const readOffer = typeof options.offerFor === "function" ? options.offerFor : null;
   const chooseOffer = typeof options.chooseOffer === "function" ? options.chooseOffer : null;
+  const readApproval = typeof options.approvalFor === "function" ? options.approvalFor : null;
+  const decideApproval = typeof options.decideApproval === "function" ? options.decideApproval : null;
   const readLoginSheet = typeof options.loginSheetFor === "function" ? options.loginSheetFor : null;
   const readOverlay = typeof options.overlayFor === "function" ? options.overlayFor : null;
   const chooseOverlay = typeof options.chooseOverlay === "function" ? options.chooseOverlay : null;
@@ -496,6 +500,14 @@ export function createConsoleHandler(backend, options = {}) {
         if (offer) next = { ...next, offer };
       } catch {
         /* leftover offer is optional */
+      }
+    }
+    if (readApproval) {
+      try {
+        const approval = await readApproval(snapshot.id);
+        if (approval) next = { ...next, approval };
+      } catch {
+        /* pending approval is optional */
       }
     }
     if (readLoginSheet) {
@@ -549,6 +561,8 @@ export function createConsoleHandler(backend, options = {}) {
       snapshot?.alias,
       offer?.id ?? "",
       offer?.brief ?? "",
+      snapshot?.approval?.id ?? "",
+      snapshot?.approval?.toolName ?? "",
       snapshot?.loginSheet?.action ?? "",
       (snapshot?.loginSheet?.connectors ?? []).map((connector) => connector.id),
       snapshot?.overlay?.id ?? "",
@@ -1352,6 +1366,39 @@ export function createConsoleHandler(backend, options = {}) {
           interrupted ? "Interrupt requested for the running DSH turn." : "No DSH turn was running.",
         );
       } catch (error) {
+        text(res, errorStatus(error), errorMessage(error));
+      }
+      return;
+    }
+
+    if (selected?.action === "approval") {
+      if (req.method !== "POST") {
+        write(res, 405, { Allow: "POST", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
+        return;
+      }
+      try {
+        if (!sameOrigin(req)) {
+          const error = new Error("Cross-origin form submission refused");
+          error.status = 403;
+          throw error;
+        }
+        if (!decideApproval) {
+          const error = new Error("approval answerer is unavailable");
+          error.status = 503;
+          throw error;
+        }
+        const form = await readForm(req);
+        await decideApproval(selected.sessionId, form);
+        await mutationResponse(req, res, selected.sessionId);
+      } catch (error) {
+        if (String(req.headers["hx-request"] ?? "").toLowerCase() === "true") {
+          try {
+            await mutationResponse(req, res, selected.sessionId, errorMessage(error));
+            return;
+          } catch {
+            // Fall through when the DSH session itself cannot be read.
+          }
+        }
         text(res, errorStatus(error), errorMessage(error));
       }
       return;
