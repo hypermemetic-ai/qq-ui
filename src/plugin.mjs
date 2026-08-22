@@ -41,6 +41,7 @@ export function apply(ctx, config) {
     loginSheetFor: (sessionId) => modelsOf()?.sheetFor?.(sessionId),
     overlayFor: (sessionId) => finderOf()?.overlayFor?.(sessionId),
     chooseOverlay: (sessionId, form) => finderOf()?.chooseOverlay?.(sessionId, form),
+    progressFor: () => mediaOf()?.progressFor?.(),
     inFindMode: (sessionId) => {
       if (finderOf()?.inFindMode?.(sessionId) === true) return true;
       return workflowsOf()?.workflows?.selected?.(sessionId) === "find";
