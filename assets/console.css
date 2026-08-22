@@ -536,6 +536,18 @@ details.session-menu.session-controls {
   scrollbar-gutter: stable;
 }
 
+.transcript-log,
+.transcript-live {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  min-width: 0;
+}
+
+.transcript-live:empty {
+  display: none;
+}
+
 .pending-queue {
   flex: none;
   max-height: 11.25rem;

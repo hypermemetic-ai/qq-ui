@@ -296,7 +296,7 @@ function renderPendingQueue(snapshot, paths) {
     const id = escapeHtml(item.id ?? "");
     const label = item.placement === "steering" ? "Steering" : "Queued";
     const edit = mutable && item.editable
-      ? `<form class="queue-edit" action="${action}" method="post" hx-post="${action}" hx-target="#session-panel" hx-swap="innerHTML" hx-disabled-elt="find button">
+      ? `<form class="queue-edit" action="${action}" method="post" hx-post="${action}" ${hxMutateAttrs()} hx-disabled-elt="find button">
           <input type="hidden" name="operation" value="edit">
           <input type="hidden" name="itemId" value="${id}">
           <label for="queue-text-${index}">Edit pending message ${index + 1}</label>
@@ -305,7 +305,7 @@ function renderPendingQueue(snapshot, paths) {
         </form>`
       : `<p class="queue-preview">${escapeHtml(item.text || "Pending message")}</p>`;
     const remove = mutable
-      ? `<form class="queue-remove" action="${action}" method="post" hx-post="${action}" hx-target="#session-panel" hx-swap="innerHTML" hx-disabled-elt="find button">
+      ? `<form class="queue-remove" action="${action}" method="post" hx-post="${action}" ${hxMutateAttrs()} hx-disabled-elt="find button">
           <input type="hidden" name="itemId" value="${id}">
           <button type="submit" name="operation" value="remove" aria-label="Remove pending message ${index + 1}">Remove</button>
         </form>`
@@ -507,8 +507,7 @@ export function renderLoginSheet(sheet, paths) {
       </header>
       <form class="offer-actions login-actions" action="${promptAction}" method="post"
         hx-post="${promptAction}"
-        hx-target="#session-panel"
-        hx-swap="innerHTML"
+        ${hxMutateAttrs()}
         hx-disabled-elt=".login-choice">
         ${buttons}
       </form>
@@ -539,8 +538,7 @@ export function renderApprovalPopup(approval, paths, notice = "") {
       ${refusal}
       <form class="offer-actions" action="${action}" method="post"
         hx-post="${action}"
-        hx-target="#session-panel"
-        hx-swap="innerHTML"
+        ${hxMutateAttrs()}
         hx-disabled-elt=".offer-choice">
         <input type="hidden" name="approvalId" value="${escapeHtml(approval.id)}">
         <button class="offer-choice offer-handoff" type="submit" name="outcome" value="allowed-once">Allow once</button>
@@ -573,8 +571,7 @@ export function renderOfferPopup(offer, paths, notice = "") {
       ${refusal}
       <form class="offer-actions" action="${action}" method="post"
         hx-post="${action}"
-        hx-target="#session-panel"
-        hx-swap="innerHTML"
+        ${hxMutateAttrs()}
         hx-disabled-elt=".offer-choice">
         <button class="offer-choice offer-handoff" type="submit" name="choice" value="handoff">Hand off</button>
         <button class="offer-choice offer-bank" type="submit" name="choice" value="bank">Bank</button>
@@ -630,8 +627,7 @@ function renderSlashNotice(notice, paths, nodes = []) {
       </header>
       <form class="offer-actions workflows-actions" action="${action}" method="post"
         hx-post="${action}"
-        hx-target="#session-panel"
-        hx-swap="innerHTML"
+        ${hxMutateAttrs()}
         hx-disabled-elt=".workflows-choice">
         ${buttons}
         <button class="offer-choice workflows-choice workflows-dismiss" type="button">Cancel</button>
@@ -774,8 +770,7 @@ function renderWorkflowMenu(snapshot, paths) {
     <summary aria-label="Choose workflow" aria-keyshortcuts="W">${escapeHtml(summary)}</summary>
     <form class="workflows-menu-list" action="${action}" method="post"
       hx-post="${action}"
-      hx-target="#session-panel"
-      hx-swap="innerHTML"
+      ${hxMutateAttrs()}
       hx-disabled-elt=".workflows-choice">
       ${buttons}
     </form>
@@ -793,8 +788,7 @@ function composer(paths, running, sessionId = "", findWork = "") {
     return `<form id="interrupt-form" class="composer interrupt-composer" action="${escapeHtml(paths.interrupt)}" method="post"
       data-session-id="${escapeHtml(sessionId)}"
       hx-post="${escapeHtml(paths.interrupt)}"
-      hx-target="#session-panel"
-      hx-swap="innerHTML"
+      ${hxMutateAttrs()}
       hx-disabled-elt="#interrupt-submit"
       hx-indicator="#interrupt-working">
       <p>${label}</p>
@@ -808,16 +802,14 @@ function composer(paths, running, sessionId = "", findWork = "") {
     ? `<form id="interrupt-form" class="interrupt-proxy" action="${escapeHtml(paths.interrupt)}" method="post"
         data-session-id="${escapeHtml(sessionId)}"
         hx-post="${escapeHtml(paths.interrupt)}"
-        hx-target="#session-panel"
-        hx-swap="innerHTML"
+        ${hxMutateAttrs()}
         hx-disabled-elt="#interrupt-submit"
         hx-indicator="#interrupt-working"></form>`
     : "";
   return `${interrupt}<form id="composer" class="composer${running ? " composer-running" : ""}" action="${escapeHtml(paths.prompt)}" method="post"
       data-session-id="${escapeHtml(sessionId)}"
       hx-post="${escapeHtml(paths.prompt)}"
-      hx-target="#session-panel"
-      hx-swap="innerHTML"
+      ${hxMutateAttrs()}
       hx-push-url="${escapeHtml(paths.canonical)}"
       hx-disabled-elt="#composer-submit"
       hx-indicator="#working"
@@ -841,7 +833,31 @@ function composer(paths, running, sessionId = "", findWork = "") {
     </form>`;
 }
 
-export const SSE_REGION_NAMES = Object.freeze(["chrome", "transcript", "queue", "composer", "popups"]);
+export const SSE_REGION_NAMES = Object.freeze(["chrome", "transcript", "live", "queue", "composer", "popups"]);
+export const SSE_REGION_IDS = Object.freeze({
+  chrome: "session-chrome",
+  transcript: "transcript-log",
+  live: "transcript-live",
+  queue: "session-queue",
+  composer: "session-composer",
+  popups: "session-popups",
+});
+
+function isLiveNode(node) {
+  return node?.status === "streaming";
+}
+
+/** Settled prefix stays put. Streaming suffix is the live region. */
+export function splitTranscriptNodes(nodes) {
+  const list = Array.isArray(nodes) ? nodes : [];
+  const firstLive = list.findIndex(isLiveNode);
+  if (firstLive < 0) return { settled: list, live: [] };
+  return { settled: list.slice(0, firstLive), live: list.slice(firstLive) };
+}
+
+function hxMutateAttrs() {
+  return `hx-swap="none"`;
+}
 
 function sessionStatus(snapshot) {
   if (!snapshot?.id) return { key: "ready", label: "Ready · no sessions" };
@@ -915,10 +931,25 @@ export function renderChrome(snapshot, paths, notice = "") {
     ${inlineNotice}`;
 }
 
-export function renderTranscript(snapshot) {
+export function renderTranscriptSettled(snapshot) {
   if (!snapshot?.id) return "";
-  const transcript = sessionNodes(snapshot).map(renderConversationNode).filter(Boolean).join("\n");
-  return transcript || '<p class="empty-transcript">This DSH session has no transcript yet.</p>';
+  const { settled, live } = splitTranscriptNodes(sessionNodes(snapshot));
+  if (settled.length === 0 && live.length === 0) {
+    return '<p class="empty-transcript">This DSH session has no transcript yet.</p>';
+  }
+  return settled.map(renderConversationNode).filter(Boolean).join("\n");
+}
+
+export function renderTranscriptLive(snapshot) {
+  if (!snapshot?.id) return "";
+  const { live } = splitTranscriptNodes(sessionNodes(snapshot));
+  return live.map(renderConversationNode).filter(Boolean).join("\n");
+}
+
+export function renderTranscript(snapshot) {
+  const settled = renderTranscriptSettled(snapshot);
+  const live = renderTranscriptLive(snapshot);
+  return [settled, live].filter(Boolean).join("\n");
 }
 
 export function renderQueue(snapshot, paths) {
@@ -948,7 +979,9 @@ export function renderSessionRegion(name, snapshot, paths, notice = "") {
     case "chrome":
       return renderChrome(snapshot, paths, notice);
     case "transcript":
-      return renderTranscript(snapshot);
+      return renderTranscriptSettled(snapshot);
+    case "live":
+      return renderTranscriptLive(snapshot);
     case "queue":
       return renderQueue(snapshot, paths);
     case "composer":
@@ -962,11 +995,10 @@ export function renderSessionRegion(name, snapshot, paths, notice = "") {
 
 /** Compact per-region tokens. SSE emits a named event only when that token changes. */
 export function regionFingerprints(snapshot) {
-  const events = Array.isArray(snapshot?.events) ? snapshot.events : [];
-  const last = events.at(-1);
   const sessions = Array.isArray(snapshot?.sessions) ? snapshot.sessions : [];
   const status = sessionStatus(snapshot);
   const offer = snapshot?.offer;
+  const { settled, live } = splitTranscriptNodes(sessionNodes(snapshot));
   return {
     chrome: JSON.stringify([
       snapshot?.id,
@@ -985,11 +1017,11 @@ export function regionFingerprints(snapshot) {
     ]),
     transcript: JSON.stringify([
       snapshot?.id,
-      events.length,
-      last?.seq,
-      last?.type,
-      last?.data?.reason?.kind,
-      sessionNodes(snapshot).map(nodeFingerprint),
+      settled.map(nodeFingerprint),
+    ]),
+    live: JSON.stringify([
+      snapshot?.id,
+      live.map(nodeFingerprint),
     ]),
     queue: JSON.stringify((snapshot?.conversation?.pending ?? []).map((item) => [item.id, item.target, item.text])),
     composer: JSON.stringify([
@@ -1021,12 +1053,22 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   const popups = regionShell("session-popups", "session-popups", "popups", renderPopups(snapshot, paths, notice), true);
   if (emptyProject) return `${chrome}${popups}`;
   return `${chrome}
-    <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false"${sseSwapAttrs("transcript", true)}>
-      ${renderTranscript(snapshot)}
+    <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
+      ${regionShell("transcript-log", "transcript-log", "transcript", renderTranscriptSettled(snapshot), true)}
+      ${regionShell("transcript-live", "transcript-live", "live", renderTranscriptLive(snapshot), true)}
     </div>
     ${regionShell("session-queue", "session-queue", "queue", renderQueue(snapshot, paths), true)}
     ${regionShell("session-composer", "session-composer", "composer", renderComposer(snapshot, paths), true)}
     ${popups}`;
+}
+
+/** HTMX mutation response: out-of-band innerHTML for each named region. */
+export function renderMutationOob(snapshot, paths, notice = "") {
+  return SSE_REGION_NAMES.map((name) => {
+    const id = SSE_REGION_IDS[name];
+    const inner = renderSessionRegion(name, snapshot, paths, notice);
+    return `<div id="${escapeHtml(id)}" hx-swap-oob="innerHTML">${inner}</div>`;
+  }).join("\n");
 }
 
 export function renderOverlay(overlay, paths, notice = "", findWork = "") {
@@ -1049,8 +1091,7 @@ export function renderOverlay(overlay, paths, notice = "", findWork = "") {
     ? `<p class="overlay-saving" aria-live="polite">Saving…</p>
         <form class="overlay-cancel" action="${escapeHtml(paths.interrupt)}" method="post"
           hx-post="${escapeHtml(paths.interrupt)}"
-          hx-target="#session-panel"
-          hx-swap="innerHTML">
+          ${hxMutateAttrs()}>
           <button type="submit">Cancel</button>
         </form>`
     : "";
@@ -1058,8 +1099,7 @@ export function renderOverlay(overlay, paths, notice = "", findWork = "") {
     ? `<div class="overlay-stage"><img src="${src}" alt="${alt}"${fit}></div>`
     : `<form class="overlay-stage overlay-stage-hit" action="${action}" method="post"
         hx-post="${action}"
-        hx-target="#session-panel"
-        hx-swap="innerHTML">
+        ${hxMutateAttrs()}>
         <button type="submit" name="choice" value="chrome" aria-label="Show buttons">
           <img src="${src}" alt="${alt}"${fit}>
         </button>
@@ -1072,8 +1112,7 @@ export function renderOverlay(overlay, paths, notice = "", findWork = "") {
         ${saving}
         <form class="overlay-dismiss" action="${action}" method="post"
           hx-post="${action}"
-          hx-target="#session-panel"
-          hx-swap="innerHTML">
+          ${hxMutateAttrs()}>
           <button type="submit" name="choice" value="dismiss" aria-label="Close">×</button>
         </form>
       </header>
@@ -1081,8 +1120,7 @@ export function renderOverlay(overlay, paths, notice = "", findWork = "") {
       ${refusal}
       <form class="offer-actions overlay-actions" action="${action}" method="post"
         hx-post="${action}"
-        hx-target="#session-panel"
-        hx-swap="innerHTML"
+        ${hxMutateAttrs()}
         hx-disabled-elt=".overlay-choice">
         <button class="offer-choice overlay-choice overlay-chrome-toggle" type="submit" name="choice" value="chrome">Hide buttons</button>
         ${buttons}

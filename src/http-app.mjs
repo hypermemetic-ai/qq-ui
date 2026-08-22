@@ -1,13 +1,14 @@
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  regionFingerprints,
   renderDocumentViewerProofPage as bundledRenderDocumentViewerProofPage,
   renderFilePage as bundledRenderFilePage,
   renderPage as bundledRenderPage,
+  renderMutationOob as bundledRenderMutationOob,
   renderSessionContent as bundledRenderSessionContent,
   renderSessionRegion as bundledRenderSessionRegion,
-  SSE_REGION_NAMES,
+  regionFingerprints as bundledRegionFingerprints,
+  SSE_REGION_NAMES as bundledSseRegionNames,
 } from "./render.mjs";
 
 const MAX_FORM_BYTES = 524_288;
@@ -96,6 +97,10 @@ const bundledAssets = Object.freeze({
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
   },
+  "console-v21.css": {
+    type: "text/css; charset=utf-8",
+    body: readFileSync(new URL("assets/console.css", root)),
+  },
   "geist-latin-wght-normal-5.3.0.woff2": {
     type: "font/woff2",
     body: readFileSync(new URL("assets/geist-latin-wght-normal-5.3.0.woff2", root)),
@@ -160,6 +165,7 @@ const LIVE_ASSET_FILES = Object.freeze({
   "console-v18.css": "assets/console.css",
   "console-v19.css": "assets/console.css",
   "console-v20.css": "assets/console.css",
+  "console-v21.css": "assets/console.css",
   "browser-v9.js": "assets/browser-v9.js",
 });
 const RENDER_FILE = fileURLToPath(new URL("./render.mjs", import.meta.url));
@@ -477,7 +483,7 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v20.css`,
+    css: `${assetsPrefix}console-v21.css`,
     browser: `${assetsPrefix}browser-v9.js`,
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
@@ -559,7 +565,7 @@ export function createConsoleHandler(backend, options = {}) {
   }
 
   function viewFingerprint(snapshot) {
-    return JSON.stringify(regionFingerprints(snapshot));
+    return JSON.stringify(bundledRegionFingerprints(snapshot));
   }
 
   async function view(sessionId) {
@@ -699,8 +705,8 @@ export function createConsoleHandler(backend, options = {}) {
     const snapshot = await view(sessionId);
     const paths = routes(basePath, snapshot.id, snapshot.project, snapshot.folder);
     if (isHtmx(req)) {
-      const { renderSessionContent } = await loadRender();
-      const body = renderSessionContent(snapshot, paths, message);
+      const { renderMutationOob } = await loadRender();
+      const body = renderMutationOob(snapshot, paths, message);
       write(res, 409, { "Content-Type": "text/html; charset=utf-8" }, body);
       return;
     }
@@ -715,6 +721,9 @@ export function createConsoleHandler(backend, options = {}) {
         renderPage: bundledRenderPage,
         renderSessionContent: bundledRenderSessionContent,
         renderSessionRegion: bundledRenderSessionRegion,
+        renderMutationOob: bundledRenderMutationOob,
+        regionFingerprints: bundledRegionFingerprints,
+        SSE_REGION_NAMES: bundledSseRegionNames,
       };
     }
     const stamp = statSync(RENDER_FILE).mtimeMs;
@@ -725,8 +734,8 @@ export function createConsoleHandler(backend, options = {}) {
     const snapshot = await view(sessionId);
     const paths = routes(basePath, snapshot.id, snapshot.project, snapshot.folder);
     if (isHtmx(req)) {
-      const { renderSessionContent } = await loadRender();
-      const body = renderSessionContent(snapshot, paths, notice);
+      const { renderMutationOob } = await loadRender();
+      const body = renderMutationOob(snapshot, paths, notice);
       write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, body);
       return;
     }
@@ -1142,10 +1151,11 @@ export function createConsoleHandler(backend, options = {}) {
           close();
           return;
         }
-        const nextFp = regionFingerprints(next);
-        const changed = SSE_REGION_NAMES.filter((name) => nextFp[name] !== fingerprints[name]);
+        const render = await loadRender();
+        const nextFp = render.regionFingerprints(next);
+        const changed = render.SSE_REGION_NAMES.filter((name) => nextFp[name] !== fingerprints[name]);
         if (changed.length === 0) return;
-        const { renderSessionRegion } = await loadRender();
+        const { renderSessionRegion } = render;
         for (const name of changed) {
           fingerprints[name] = nextFp[name];
           res.write(sseEvent(name, renderSessionRegion(name, next, paths)));
@@ -1546,6 +1556,6 @@ export const internals = Object.freeze({
   routes,
   sameOrigin,
   sseEvent,
-  regionFingerprints,
-  SSE_REGION_NAMES,
+  regionFingerprints: bundledRegionFingerprints,
+  SSE_REGION_NAMES: bundledSseRegionNames,
 });
