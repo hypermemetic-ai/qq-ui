@@ -412,6 +412,46 @@ function sessionToken(session) {
 function sessionNavigation(snapshot, paths) {
   const choices = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
   const selectedId = String(snapshot.id ?? "");
+  const selected = selectedId
+    ? choices.find((session) => session.id === selectedId) ?? snapshot
+    : undefined;
+  const face = selected ? sessionFace(selected) : "";
+  const picker = selectedId && choices.length > 0
+    ? `<form class="session-picker" action="${escapeHtml(paths.switchSession)}" method="get">
+        <label for="session-choice">sessions <span>${choices.length} live</span></label>
+        <select id="session-choice" name="session" required>
+          ${choices.map((session) => {
+            const current = session.id === selectedId;
+            const optionFace = sessionToken(session);
+            const label = `${current ? "Current · " : ""}${optionFace}`;
+            return `<option value="${escapeHtml(session.id)}"${current ? " selected" : ""}>${escapeHtml(label)}</option>`;
+          }).join("")}
+        </select>
+      </form>`
+    : `<p class="session-empty">no live sessions</p>`;
+  const closeControls = selectedId && paths.close
+    ? `<button type="button" class="close-arm" aria-label="Close this session">close</button>
+      <div class="close-confirm" hidden role="alertdialog" aria-modal="true" aria-labelledby="close-confirm-title" aria-describedby="close-confirm-copy">
+        <p id="close-confirm-title">close session ${escapeHtml(face)}?</p>
+        <p id="close-confirm-copy">history is kept</p>
+        <div class="close-confirm-actions">
+          <button type="button" class="close-keep" aria-label="Keep this session">keep</button>
+          <form id="close-session" class="close-session" action="${escapeHtml(paths.close)}" method="post">
+            <button type="submit" class="close-confirm-submit" aria-label="Close this session">Close session</button>
+          </form>
+        </div>
+      </div>`
+    : "";
+  const menu = `<details class="session-menu">
+    <summary aria-label="Show session controls"><span>sessions</span></summary>
+    <div class="session-controls" role="group" aria-label="Session controls">
+      ${picker}
+      <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
+        <button type="submit" aria-label="New session">New session</button>
+      </form>
+      ${closeControls}
+    </div>
+  </details>`;
   const links = selectedId && choices.length > 0
     ? choices.map((session) => {
         const current = session.id === selectedId;
@@ -419,11 +459,7 @@ function sessionNavigation(snapshot, paths) {
         return `<a class="session-token${current ? " session-token-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(session.id)}"><span>${escapeHtml(sessionToken(session))}</span></a>`;
       }).join("")
     : '<span class="session-empty">no live sessions</span>';
-  const backgroundActions = `<div class="session-background-actions session-menu" aria-hidden="true">
-      <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post"><button type="submit" tabindex="-1">New session</button></form>
-      ${selectedId && paths.close ? `<form id="close-session" class="close-session" action="${escapeHtml(paths.close)}" method="post"><button type="submit" tabindex="-1">Close session</button></form>` : ""}
-    </div>`;
-  return `<nav class="session-traversal" aria-label="Sessions" aria-keyshortcuts="ArrowLeft ArrowRight">${links}</nav>${backgroundActions}`;
+  return `${menu}<nav class="session-traversal" aria-label="Sessions" aria-keyshortcuts="ArrowLeft ArrowRight">${links}</nav>`;
 }
 
 export function renderLoginSheet(sheet, paths) {

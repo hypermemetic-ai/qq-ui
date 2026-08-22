@@ -616,8 +616,8 @@ code {
   margin-left: auto;
   padding: .7rem .82rem;
   border-radius: .55rem;
-  background: #211b35;
-  color: #d7ceff;
+  background: #6b56b0;
+  color: #f3eeff;
 }
 
 .message-assistant {
@@ -640,14 +640,14 @@ code {
   padding: .72rem .82rem;
   border: 0;
   border-radius: .55rem;
-  background: #14252e;
-  color: #d8e5ec;
+  background: #2d7d90;
+  color: #e8f4f7;
 }
 
 .message-steering {
   border: 0;
-  background: #28203e;
-  color: #ddd3ff;
+  background: #624ea0;
+  color: #eee6ff;
 }
 
 .message-streaming {
@@ -778,8 +778,8 @@ code {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tool-tone-bad { background: #321e22; }
-.tool-tone-running { background: #2b281a; }
+.tool-tone-bad { background: #9a454d; }
+.tool-tone-running { background: #7a6424; }
 .tool-output-preview,
 .tool-output-full pre {
   max-width: 100%;
@@ -2155,9 +2155,39 @@ body.document-page {
     margin-left: 0;
   }
 
+  details.session-menu,
   .session-mobile-id,
-  .session-traversal,
   .session-background-actions { display: none; }
+
+  .session-traversal {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .35rem;
+  }
+
+  .session-token {
+    display: grid;
+    place-items: center;
+    min-width: 1.8rem;
+    min-height: 1.8rem;
+    padding: .15rem .45rem;
+    border-radius: .4rem;
+    color: #8a8a8a;
+    font-size: .78rem;
+    font-weight: 650;
+    letter-spacing: .02em;
+    text-decoration: none;
+  }
+
+  .session-token:hover,
+  .session-token:focus-visible { color: #eee; }
+
+  .session-token-current {
+    color: #f2f2f2;
+    background: #1a1a1a;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

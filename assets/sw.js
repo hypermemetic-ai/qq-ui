@@ -34,7 +34,6 @@ const staticPaths = [
 ];
 const staticPathSet = new Set(staticPaths);
 const livePathSet = new Set([
-  `${scopePath}/assets/console-v18.css`,
   `${scopePath}/assets/console-v19.css`,
   `${scopePath}/assets/browser-v9.js`,
 ]);

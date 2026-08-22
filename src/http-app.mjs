@@ -469,7 +469,7 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v18.css`,
+    css: `${assetsPrefix}console-v19.css`,
     browser: `${assetsPrefix}browser-v9.js`,
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
@@ -587,7 +587,7 @@ export function createConsoleHandler(backend, options = {}) {
             context: "projects",
             ...(snapshot.alias ? { alias: snapshot.alias } : {}),
           }]
-        : await backend.list(snapshot.project);
+        : await backend.list(snapshot.project, snapshot.folder);
     if (snapshot.id && !available.some((session) => session.id === snapshot.id)) {
       available.unshift({
         id: snapshot.id,

@@ -493,16 +493,8 @@
     }
   };
   const spawnProjectSession = (node) => {
-    const url = new URL(node.dataset.href, location.href);
-    url.search = "";
-    url.hash = "";
-    url.pathname = `${url.pathname.replace(/\/$/, "")}/sessions`;
-    const form = document.createElement("form");
-    form.method = "post";
-    form.action = url.href;
-    form.hidden = true;
-    document.body.append(form);
-    form.requestSubmit();
+    if (!(node instanceof HTMLElement) || !node.dataset.href) return;
+    location.assign(node.dataset.href);
   };
   const activateProjectTreeNode = (node, focusChild = true) => {
     if (!(node instanceof HTMLElement)) return;
