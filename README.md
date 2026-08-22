@@ -13,7 +13,8 @@ operator is talking to may ask.
 
 On phone, a deliberate rightward pull across the ordinary app surface directly
 moves the compact one-level project drawer, which settles from release distance
-and velocity. Native vertical scrolling, horizontal file panning, and controls
+and velocity. An open drawer closes by dragging left; tapping the empty dimmer
+does nothing. Native vertical scrolling, horizontal file panning, and controls
 keep their own touch gestures. Folder and `~/projects`
 navigation stay URL-addressed; project choices only navigate. Readable files use
 one full-viewport, pitch-black document viewer. Markdown-It

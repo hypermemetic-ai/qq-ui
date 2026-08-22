@@ -753,10 +753,10 @@
       if (heading instanceof HTMLElement) heading.focus({ preventScroll: true });
     }
   };
-  const closeDrawer = ({ updateUrl = true, restoreFocus = true } = {}) => {
+  const closeDrawer = ({ updateUrl = true, restoreFocus = true, preserveTransient = false } = {}) => {
     const drawer = projectDrawer();
     if (!drawer) return;
-    clearDrawerTransient({ sync: false });
+    if (!preserveTransient) clearDrawerTransient({ sync: false });
     const returnFocus = drawerReturnFocus;
     drawerReturnFocus = null;
     document.body.classList.remove("drawer-open");
@@ -917,17 +917,6 @@
     consumeFileReturn();
   };
 
-  document.addEventListener("pointerdown", (event) => {
-    const target = event.target instanceof Element ? event.target : null;
-    if (!target?.closest("#project-drawer-backdrop") || event.button !== 0 || event.isPrimary === false) return;
-    event.preventDefault();
-    closeDrawer();
-  });
-  drawerBackdrop()?.addEventListener("touchstart", (event) => {
-    event.preventDefault();
-    if (drawerIsOpen()) closeDrawer();
-  }, { passive: false });
-
   const surfaceGestureBlocked = (target) => {
     if (documentViewerIsOpen()) return true;
     if (target.closest("#project-drawer, #project-drawer-backdrop, .document-viewer, form, a, button, input, textarea, select, option, label, summary, audio, video, [contenteditable]:not([contenteditable=\"false\"]), [role=button], [role=link], [role=textbox], [role=slider], [role=spinbutton], [role=switch], [role=tab], [role=checkbox], [role=radio]")) return true;
@@ -987,7 +976,10 @@
     }
     document.body.classList.remove("drawer-drag-active");
     document.body.classList.add("drawer-drag-settling");
-    if (open) openDrawer({ preserveTransient: true });
+    if (open) {
+      if (drawerIsOpen()) syncDrawerChrome();
+      else openDrawer({ preserveTransient: true });
+    } else if (drawerIsOpen()) closeDrawer({ preserveTransient: true });
     else syncDrawerChrome();
     drawer.getBoundingClientRect();
     drawer.style.transform = open ? "translate3d(0, 0, 0)" : "translate3d(-105%, 0, 0)";
@@ -1001,14 +993,18 @@
     if (!gesture || !point) return;
     endSurfaceGesture();
     if (!gesture.horizontal || event.type === "touchcancel") {
-      if (gesture.horizontal) clearDrawerTransient();
+      if (gesture.horizontal) settleSurfaceDrag(gesture, gesture.mode === "close");
+      return;
+    }
+    const travel = Math.abs(gesture.distance - (gesture.startDistance ?? 0));
+    if (travel < 12) {
+      settleSurfaceDrag(gesture, gesture.mode === "close");
       return;
     }
     const releaseDelay = performance.now() - gesture.lastAt;
-    const velocity = releaseDelay <= 120 ? Math.max(0, gesture.velocity) : 0;
+    const velocity = releaseDelay <= 120 ? gesture.velocity : 0;
     const projectedDistance = gesture.distance + velocity * 320;
-    const open = gesture.distance >= gesture.hiddenDistance * .42 || (gesture.distance >= 12 && projectedDistance >= gesture.hiddenDistance * .42);
-    settleSurfaceDrag(gesture, open);
+    settleSurfaceDrag(gesture, projectedDistance >= gesture.hiddenDistance * .42);
   }
   function moveSurfaceGesture(event) {
     const gesture = surfaceGesture;
@@ -1026,20 +1022,35 @@
     const dy = point.clientY - gesture.y;
     const absoluteX = Math.abs(dx);
     const absoluteY = Math.abs(dy);
+    const closing = gesture.mode === "close";
     gesture.samples.push({ x: point.clientX, at: now });
     const cutoff = now - 120;
     while (gesture.samples.length > 1 && gesture.samples[0].at < cutoff) gesture.samples.shift();
     if (!gesture.horizontal) {
-      if (dx < -8 || (absoluteY >= 10 && absoluteY > absoluteX * 1.15)) {
-        endSurfaceGesture();
-        return;
+      if (closing) {
+        if (dx > 8 || (absoluteY >= 10 && absoluteY > absoluteX * 1.15)) {
+          endSurfaceGesture();
+          return;
+        }
+        if (dx > -10 || absoluteX <= absoluteY * 1.45) return;
+      } else {
+        if (dx < -8 || (absoluteY >= 10 && absoluteY > absoluteX * 1.15)) {
+          endSurfaceGesture();
+          return;
+        }
+        if (dx < 10 || dx <= absoluteY * 1.45) return;
       }
-      if (dx < 10 || dx <= absoluteY * 1.45) return;
       gesture.horizontal = true;
       gesture.width = Math.max(1, projectDrawer()?.getBoundingClientRect().width || 1);
       gesture.hiddenDistance = gesture.width * 1.05;
+      gesture.startDistance = closing ? gesture.hiddenDistance : 0;
     }
-    if (dx <= 0 || absoluteY > Math.max(18, dx * .68)) {
+    if (closing) {
+      if (absoluteY > Math.max(18, absoluteX * .68)) {
+        cancelSurfaceGesture();
+        return;
+      }
+    } else if (dx <= 0 || absoluteY > Math.max(18, dx * .68)) {
       cancelSurfaceGesture();
       return;
     }
@@ -1047,21 +1058,27 @@
     const anchor = gesture.samples[0];
     gesture.velocity = (point.clientX - anchor.x) / Math.max(1, now - anchor.at);
     gesture.lastAt = now;
-    applySurfaceDrag(gesture, dx);
+    applySurfaceDrag(gesture, closing ? gesture.hiddenDistance + dx : dx);
   }
   document.addEventListener("touchstart", (event) => {
     if (surfaceGesture) cancelSurfaceGesture();
     else if (drawerIsTransient()) clearDrawerTransient();
     const target = event.target instanceof Element ? event.target : null;
-    if (!target || event.defaultPrevented || event.touches.length !== 1 || !projectDrawer() || drawerIsOpen() || desktopChair() || surfaceGestureBlocked(target)) return;
+    if (!target || event.defaultPrevented || event.touches.length !== 1 || !projectDrawer() || desktopChair()) return;
+    const closing = drawerIsOpen();
+    if (closing) {
+      if (!target.closest("#project-drawer, #project-drawer-backdrop")) return;
+    } else if (surfaceGestureBlocked(target)) return;
     const point = event.touches[0];
     const now = performance.now();
     surfaceGesture = {
+      mode: closing ? "close" : "open",
       id: point.identifier,
       x: point.clientX,
       y: point.clientY,
       lastAt: now,
       distance: 0,
+      startDistance: 0,
       velocity: 0,
       horizontal: false,
       samples: [{ x: point.clientX, at: now }],
@@ -1115,7 +1132,7 @@
       else openDrawer();
       return;
     }
-    if (target?.closest(".drawer-close, #project-drawer-backdrop")) {
+    if (target?.closest(".drawer-close")) {
       event.preventDefault();
       closeDrawer();
       return;

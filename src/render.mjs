@@ -409,8 +409,35 @@ function sessionToken(session) {
   return uuid?.[1] ?? sessionFace(session);
 }
 
+function bannerMark(kind) {
+  if (kind === "add") {
+    return `<svg class="banner-mark" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`;
+  }
+  return `<svg class="banner-mark" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`;
+}
+
+function pickerSessions(sessions) {
+  return (Array.isArray(sessions) ? sessions : []).filter((session) => session?.origin !== "subagent");
+}
+
+function menuSessions(sessions) {
+  return pickerSessions(sessions).slice().sort((left, right) => {
+    const leftToken = sessionToken(left);
+    const rightToken = sessionToken(right);
+    const leftNumber = /^\d+$/.test(leftToken) ? Number(leftToken) : NaN;
+    const rightNumber = /^\d+$/.test(rightToken) ? Number(rightToken) : NaN;
+    if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+      return leftNumber - rightNumber || leftToken.localeCompare(rightToken);
+    }
+    if (Number.isFinite(leftNumber)) return -1;
+    if (Number.isFinite(rightNumber)) return 1;
+    return leftToken.localeCompare(rightToken) || String(left.id ?? "").localeCompare(String(right.id ?? ""));
+  });
+}
+
 function sessionNavigation(snapshot, paths) {
-  const choices = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
+  const live = pickerSessions(snapshot.sessions);
+  const choices = menuSessions(snapshot.sessions);
   const selectedId = String(snapshot.id ?? "");
   const selected = selectedId
     ? choices.find((session) => session.id === selectedId) ?? snapshot
@@ -418,7 +445,7 @@ function sessionNavigation(snapshot, paths) {
   const face = selected ? sessionFace(selected) : "";
   const token = selected ? sessionToken(selected) : "";
   const closeControls = selectedId && paths.close
-    ? `<button type="button" class="close-arm" aria-label="Close this session">x</button>
+    ? `<button type="button" class="close-arm" aria-label="Close this session">${bannerMark("close")}</button>
       <div class="close-confirm" hidden role="alertdialog" aria-modal="true" aria-labelledby="close-confirm-title" aria-describedby="close-confirm-copy">
         <p id="close-confirm-title">close session ${escapeHtml(face)}?</p>
         <p id="close-confirm-copy">history is kept</p>
@@ -442,13 +469,13 @@ function sessionNavigation(snapshot, paths) {
       <div class="session-menu-list">
         ${sessionLinks}
         <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
-          <button type="submit" aria-label="New session">+</button>
+          <button type="submit" aria-label="New session">${bannerMark("add")}</button>
         </form>
         ${closeControls}
       </div>
     </details>`;
-  const links = selectedId && choices.length > 0
-    ? choices.map((session) => {
+  const links = selectedId && live.length > 0
+    ? live.map((session) => {
         const current = session.id === selectedId;
         const href = `${paths.switchSession}?session=${encodeURIComponent(session.id)}`;
         return `<a class="session-token${current ? " session-token-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(session.id)}"><span>${escapeHtml(sessionToken(session))}</span></a>`;
@@ -740,11 +767,11 @@ function renderWorkflowMenu(snapshot, paths) {
   const action = escapeHtml(paths.prompt);
   const buttons = names.map((name) => {
     const current = name === selected ? " workflows-current" : "";
-    return `<button class="workflows-choice${current}" type="submit" name="prompt" value="/workflows ${escapeHtml(name)}">${escapeHtml(workflowLabel(name))}</button>`;
+    return `<button class="workflows-choice${current}" type="submit" name="prompt" value="/workflows ${escapeHtml(name)}">${escapeHtml(name)}</button>`;
   }).join("");
-  const label = sessionModeChip(selected) || '<span class="workflow-label">Workflows</span>';
+  const summary = selected && selected !== "none" ? selected : "workflow";
   return `<details class="workflows-menu"${selected && selected !== "none" ? ` data-mode="${escapeHtml(selected)}"` : ""}>
-    <summary aria-label="Choose workflow" aria-keyshortcuts="W">${label}</summary>
+    <summary aria-label="Choose workflow" aria-keyshortcuts="W">${escapeHtml(summary)}</summary>
     <form class="workflows-menu-list" action="${action}" method="post"
       hx-post="${action}"
       hx-target="#session-panel"
@@ -938,16 +965,6 @@ function drawerEntryHref(entry, drawer, paths) {
   return `${root}${encodeURIComponent(entry.path)}`;
 }
 
-function drawerKind(entry) {
-  if (entry.type === "project") return "project";
-  if (entry.type === "directory") return "dir";
-  if (entry.kind === "markdown") return "md";
-  if (entry.kind === "text") return "txt";
-  if (entry.kind === "code") return "code";
-  if (entry.kind === "binary") return "open";
-  return "file";
-}
-
 /** Render one non-recursive project level. Descendants are never embedded. */
 export function renderProjectDrawer(drawer, paths, options = {}) {
   if (!drawer || !Array.isArray(drawer.entries)) return "";
@@ -974,15 +991,13 @@ export function renderProjectDrawer(drawer, paths, options = {}) {
   const atRootLevel = drawer.scope === "projects" || !drawer.path;
   const projectsRow = atRootLevel
     ? (onProjectsSession
-      ? `<li><span class="drawer-entry" aria-current="page" title="~/projects"><span class="drawer-kind" aria-hidden="true">root</span><span class="drawer-name">~/projects</span></span></li>`
-      : `<li><a class="drawer-entry" data-entry-type="projects" href="${escapeHtml(projectsHref)}" aria-label="Open the projects session" title="~/projects"><span class="drawer-kind" aria-hidden="true">root</span><span class="drawer-name">~/projects</span></a></li>`)
+      ? `<li><span class="drawer-entry" aria-current="page" title="~/projects"><span class="drawer-name">~/projects</span></span></li>`
+      : `<li><a class="drawer-entry" data-entry-type="projects" href="${escapeHtml(projectsHref)}" aria-label="Open the projects session" title="~/projects"><span class="drawer-name">~/projects</span></a></li>`)
     : "";
   const upPath = drawer.scope === "projects"
     ? ""
     : drawer.path ? drawer.parent : "~";
-  const up = drawer.scope === "projects" ? "" : `<a class="drawer-up" href="${escapeHtml(`${paths.canonical}${drawerQuery(upPath)}`)}" aria-label="Up one level">
-      <span aria-hidden="true">↑</span><span>up</span>
-    </a>`;
+  const up = drawer.scope === "projects" ? "" : `<a class="drawer-up" href="${escapeHtml(`${paths.canonical}${drawerQuery(upPath)}`)}" aria-label="Up one level">../</a>`;
   const rows = drawer.entries.map((entry) => {
     const href = drawerEntryHref(entry, drawer, paths);
     const action = entry.type === "directory" ? "Open folder" : entry.type === "project" ? "Open project" : entry.kind === "binary" ? "Open file" : "Read file";
@@ -996,24 +1011,24 @@ export function renderProjectDrawer(drawer, paths, options = {}) {
       : entry.type === "project" && entry.folder
         ? "spawn"
         : "expand";
+    const suffix = entry.type === "directory" || entry.type === "project" ? "/" : "";
     return `<li><a class="drawer-entry" data-entry-type="${escapeHtml(entry.type)}" data-tree-action="${treeAction}" data-file-kind="${escapeHtml(entry.kind ?? "")}"${projectAttr}${folderAttr}${pathAttr} href="${escapeHtml(href)}" aria-label="${escapeHtml(`${action} ${entry.name}`)}">
-      <span class="drawer-kind" aria-hidden="true">${drawerKind(entry)}</span>
-      <span class="drawer-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</span>
+      <span class="drawer-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}${suffix}</span>
     </a></li>`;
   }).join("");
   const empty = `${projectsRow}${rows}` || '<li class="drawer-empty">nothing at this level</li>';
   const crumbs = breadcrumbHtml
     ? `<nav class="drawer-breadcrumbs" aria-label="File location"><ol>${breadcrumbHtml}</ol></nav>`
     : "";
+  const title = atRootLevel
+    ? "~/projects"
+    : (nestedCrumbs.at(-1)?.name ?? drawer.path ?? "files");
   return `<button id="project-drawer-toggle" class="drawer-toggle" type="button" aria-controls="project-drawer" aria-expanded="${opened ? "true" : "false"}"${opened ? " inert" : ""}>files</button>
-  <button id="project-drawer-backdrop" class="drawer-backdrop" type="button" aria-label="Close files"${opened ? "" : " hidden"}></button>
+  <div id="project-drawer-backdrop" class="drawer-backdrop"${opened ? "" : " hidden"}></div>
   <aside id="project-drawer" class="project-drawer" role="dialog" aria-modal="true" aria-hidden="${opened ? "false" : "true"}" aria-labelledby="project-drawer-title" data-drawer-path="${escapeHtml(drawer.scope === "projects" ? "~" : drawer.path)}"${opened ? "" : " inert"}>
     <header class="drawer-head">
-      <div>
-        <p class="eyebrow">project files</p>
-        <h2 id="project-drawer-title" tabindex="-1">browse</h2>
-      </div>
-      <button class="drawer-close" type="button" aria-label="Close files">×</button>
+      <h2 id="project-drawer-title" tabindex="-1">${escapeHtml(title)}</h2>
+      <button class="drawer-close" type="button" aria-label="Close files">${bannerMark("close")}</button>
     </header>
     ${crumbs}
     ${up}
