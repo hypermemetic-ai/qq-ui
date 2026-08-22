@@ -2,7 +2,7 @@ import { escapeHtml, renderHighlightedCode, renderMarkdownText, renderMessageTex
 
 export { escapeHtml };
 
-/** One-line host-wide download chip. Idle (missing/empty) renders nothing. */
+/** One-line media-workflow download chip. Idle (missing/empty) renders nothing. */
 export function renderProgressChip(progress) {
   if (!progress || typeof progress !== "object") return "";
   const title = String(progress.title ?? "").trim();
@@ -153,14 +153,12 @@ function renderToolContent(node) {
     return `<p class="empty-content">Unsupported tool output: ${escapeHtml(safeType(block?.type))}</p>`;
   }).join("");
   if (rendered) return rendered;
-  if (node.status === "running") return '<p class="tool-empty">Waiting for result</p>';
-  if (node.status === "stopped") return '<p class="tool-empty">Stopped before completion</p>';
-  if (node.status === "error") return '<p class="tool-empty">The tool failed without displayable output</p>';
-  return '<p class="tool-empty">Completed with no output</p>';
+  if (node.status === "running") return '<p class="tool-empty">Waiting for output</p>';
+  return '<p class="tool-empty">No output</p>';
 }
 
 function contextLabel(source) {
-  return `Context · ${source?.plugin ?? source?.kind ?? "unknown"}`;
+  return source?.plugin ?? source?.kind ?? "system";
 }
 
 function renderConversationNode(node) {
@@ -182,24 +180,34 @@ function renderConversationNode(node) {
   }
   if (node?.kind === "assistant") {
     const streaming = node.status === "streaming";
-    const blocks = (Array.isArray(node.blocks) ? node.blocks : []).map((block) => {
-      if (block?.type === "text") return renderMarkdownText(block.text ?? "");
-      if (block?.type === "reasoning" && String(block.text ?? "").trim()) {
-        return `<section class="assistant-reasoning" aria-label="Reasoning">
-          <p class="reasoning-label">Reasoning</p>
-          ${renderMessageText(block.text)}
-        </section>`;
-      }
-      if (block?.type === "image") return attachmentBlock(block);
-      return "";
-    }).join("");
+    const interrupted = node.status === "interrupted";
     const accessibleLabel = time ? `Assistant message at ${time}` : "Assistant message";
-    return `<article class="message message-assistant${streaming ? " message-streaming" : ""}${node.status === "interrupted" ? " message-interrupted" : ""}" data-seq="${seq}" data-turn="${escapeHtml(node.turn ?? "")}" data-step="${escapeHtml(node.step ?? "")}" aria-label="${escapeHtml(accessibleLabel)}"${streaming ? ' aria-busy="true"' : ""}>
-      ${blocks}
-    </article>`;
+    const reasoningLabel = time ? `Reasoning at ${time}` : "Reasoning";
+    const parts = [];
+    let answer = [];
+    const flushAnswer = () => {
+      if (answer.length === 0) return;
+      parts.push(`<article class="message message-assistant${streaming ? " message-streaming" : ""}${interrupted ? " message-interrupted" : ""}" data-seq="${seq}" data-turn="${escapeHtml(node.turn ?? "")}" data-step="${escapeHtml(node.step ?? "")}" aria-label="${escapeHtml(accessibleLabel)}"${streaming ? ' aria-busy="true"' : ""}>
+        ${answer.join("")}
+      </article>`);
+      answer = [];
+    };
+    for (const block of Array.isArray(node.blocks) ? node.blocks : []) {
+      if (block?.type === "reasoning" && String(block.text ?? "").trim()) {
+        flushAnswer();
+        parts.push(`<section class="assistant-reasoning" aria-label="${escapeHtml(reasoningLabel)}" data-seq="${seq}" data-turn="${escapeHtml(node.turn ?? "")}" data-step="${escapeHtml(node.step ?? "")}"${streaming ? ' aria-busy="true"' : ""}>
+          ${renderMessageText(block.text)}
+        </section>`);
+      } else if (block?.type === "text") {
+        answer.push(renderMarkdownText(block.text ?? ""));
+      } else if (block?.type === "image") {
+        answer.push(attachmentBlock(block));
+      }
+    }
+    flushAnswer();
+    return parts.join("\n");
   }
   if (node?.kind === "tool") {
-    const state = node.status === "success" ? "Completed" : node.status === "running" ? "Running" : node.status === "stopped" ? "Stopped" : "Failed";
     const card = node.resultView?.card ?? node.callView?.card ?? "generic";
     const title = node.resultView?.title ?? node.callView?.title ?? node.name ?? "unknown";
     const argument = node.argumentSummary
@@ -207,11 +215,25 @@ function renderConversationNode(node) {
       ? `<span class="tool-argument">${escapeHtml(node.argumentSummary)}</span>`
       : "";
     const terminal = node.resultView?.card === "terminal" ? node.resultView : null;
-    const exit = terminal && Number.isFinite(terminal.exitCode)
-      ? `<span class="tool-exit">exit ${terminal.exitCode}</span>`
-      : terminal?.signal ? `<span class="tool-exit">${escapeHtml(terminal.signal)}</span>` : "";
-    return `<details class="message message-tool tool-${escapeHtml(node.status)}" data-seq="${seq}" data-call-id="${escapeHtml(node.callId ?? "")}" data-card="${escapeHtml(card)}"${node.expanded ? " open" : ""}>
-      <summary><span class="tool-state">${state}</span><strong>${escapeHtml(title)}</strong>${argument}${exit}</summary>
+    const terminalFailed = Number.isFinite(terminal?.exitCode) && terminal.exitCode !== 0;
+    const failed = node.status === "error" || terminalFailed || Boolean(terminal?.signal);
+    const stopped = node.status === "stopped";
+    const status = node.status === "error" && !terminalFailed
+      ? "Failed"
+      : Number.isFinite(terminal?.exitCode)
+        ? `${terminalFailed ? "Failed" : "Done"} · ${terminal.exitCode}`
+        : terminal?.signal
+          ? `Stopped · ${terminal.signal}`
+          : node.status === "success"
+            ? "Done"
+            : node.status === "running"
+              ? "Running"
+              : stopped
+                ? "Stopped"
+                : "Failed";
+    const tone = failed || stopped ? "bad" : node.status === "running" ? "running" : "ok";
+    return `<details class="message message-tool tool-${escapeHtml(node.status)} tool-tone-${tone}" data-seq="${seq}" data-call-id="${escapeHtml(node.callId ?? "")}" data-card="${escapeHtml(card)}"${node.expanded ? " open" : ""}>
+      <summary><strong>${escapeHtml(title)}</strong><span class="tool-status tool-status-${tone}">${escapeHtml(status)}</span>${argument}</summary>
       <div class="message-body">${renderToolContent(node)}</div>
     </details>`;
   }
@@ -379,49 +401,29 @@ function liveFace(snapshot) {
   });
 }
 
+function sessionToken(session) {
+  const alias = typeof session?.alias === "string" ? session.alias.trim() : "";
+  if (alias) return alias;
+  const id = String(session?.id ?? "");
+  const uuid = id.match(/^session-[0-9a-f-]+([0-9a-f]{4})$/i);
+  return uuid?.[1] ?? sessionFace(session);
+}
+
 function sessionNavigation(snapshot, paths) {
   const choices = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
-  const switchAction = escapeHtml(paths.switchSession);
-  const selected = snapshot.id
-    ? choices.find((session) => session.id === snapshot.id) ?? snapshot
-    : undefined;
-  const face = selected ? sessionFace(selected) : "";
-  const picker = snapshot.id && choices.length > 0
-    ? `<form class="session-picker" action="${switchAction}" method="get">
-        <label for="session-choice">sessions <span>${choices.length} live</span></label>
-        <select id="session-choice" name="session" required>
-          ${choices.map((session) => {
-            const current = session.id === snapshot.id;
-            const optionFace = sessionFace(session);
-            const label = `${current ? "Current · " : ""}${optionFace}`;
-            return `<option value="${escapeHtml(session.id)}"${current ? " selected" : ""}>${escapeHtml(label)}</option>`;
-          }).join("")}
-        </select>
-      </form>`
-    : `<p class="session-empty">no live sessions</p>`;
-  const closeControls = snapshot.id && paths.close
-    ? `<button type="button" class="close-arm" aria-label="Close this session">close</button>
-      <div class="close-confirm" hidden role="alertdialog" aria-modal="true" aria-labelledby="close-confirm-title" aria-describedby="close-confirm-copy">
-        <p id="close-confirm-title">close session ${escapeHtml(face)}?</p>
-        <p id="close-confirm-copy">history is kept</p>
-        <div class="close-confirm-actions">
-          <button type="button" class="close-keep" aria-label="Keep this session">keep</button>
-          <form id="close-session" class="close-session" action="${escapeHtml(paths.close)}" method="post">
-            <button type="submit" class="close-confirm-submit" aria-label="Close this session">close</button>
-          </form>
-        </div>
-      </div>`
-    : "";
-  return `<details class="session-menu">
-    <summary aria-label="Show session controls"><span>sessions</span></summary>
-    <div class="session-controls" role="group" aria-label="Session controls">
-      ${picker}
-      <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
-        <button type="submit" aria-label="New session">+</button>
-      </form>
-      ${closeControls}
-    </div>
-  </details>`;
+  const selectedId = String(snapshot.id ?? "");
+  const links = selectedId && choices.length > 0
+    ? choices.map((session) => {
+        const current = session.id === selectedId;
+        const href = `${paths.switchSession}?session=${encodeURIComponent(session.id)}`;
+        return `<a class="session-token${current ? " session-token-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(session.id)}"><span>${escapeHtml(sessionToken(session))}</span></a>`;
+      }).join("")
+    : '<span class="session-empty">no live sessions</span>';
+  const backgroundActions = `<div class="session-background-actions session-menu" aria-hidden="true">
+      <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post"><button type="submit" tabindex="-1">New session</button></form>
+      ${selectedId && paths.close ? `<form id="close-session" class="close-session" action="${escapeHtml(paths.close)}" method="post"><button type="submit" tabindex="-1">Close session</button></form>` : ""}
+    </div>`;
+  return `<nav class="session-traversal" aria-label="Sessions" aria-keyshortcuts="ArrowLeft ArrowRight">${links}</nav>${backgroundActions}`;
 }
 
 export function renderLoginSheet(sheet, paths) {
@@ -560,10 +562,108 @@ function overlayKeysAttr(keys) {
   return ` data-overlay-keys="${escapeHtml(JSON.stringify(allowed))}"`;
 }
 
+function workflowName(value) {
+  return typeof value === "string" && /^[a-z][a-z0-9-]{0,31}$/.test(value) ? value : "";
+}
+
+function workflowLabel(name) {
+  return `${name[0].toUpperCase()}${name.slice(1)}`;
+}
+
 function sessionModeChip(mode) {
-  if (typeof mode !== "string" || mode === "none" || !/^[a-z][a-z0-9-]{0,31}$/.test(mode)) return "";
-  const label = `${mode[0].toUpperCase()}${mode.slice(1)}`;
-  return `<p class="session-mode" data-mode="${mode}">${label}</p>`;
+  const name = workflowName(mode);
+  if (!name || name === "none") return "";
+  return `<span class="session-mode" data-mode="${name}">${escapeHtml(workflowLabel(name))}</span>`;
+}
+
+function placeName(snapshot) {
+  if (snapshot?.scope === "home") return "home";
+  if (snapshot?.scope === "projects") return "projects";
+  return snapshot?.folderLabel || snapshot?.projectLabel || snapshot?.project || "";
+}
+
+function renderHomeLink(snapshot, paths) {
+  if (!paths?.home || snapshot?.scope === "home") return "";
+  return `<a class="session-home" href="${escapeHtml(paths.home)}" aria-label="Home">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+      <path d="m4.5 11.5 7.5-6.3 7.5 6.3M7.5 10.4v7.9h9v-7.9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </a>`;
+}
+
+function activeProjectList(snapshot) {
+  const projects = [];
+  const seen = new Set();
+  const add = (entry) => {
+    const project = String(entry?.project ?? entry?.name ?? "").trim();
+    if (!project) return;
+    const folder = String(entry?.folder ?? "").trim();
+    const key = `${project}\n${folder}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    projects.push({
+      project,
+      folder,
+      projectLabel: String(entry?.projectLabel ?? entry?.label ?? project),
+      folderLabel: String(entry?.folderLabel ?? folder),
+    });
+  };
+  if (snapshot?.id) add(snapshot);
+  for (const entry of Array.isArray(snapshot?.activeProjects) ? snapshot.activeProjects : []) add(entry);
+  for (const entry of Array.isArray(snapshot?.sessions) ? snapshot.sessions : []) add(entry);
+  return projects;
+}
+
+function renderProjectRail(snapshot, paths, inert = false) {
+  if (!paths?.projectsBase) return "";
+  const projects = activeProjectList(snapshot);
+  const currentProject = String(snapshot?.project ?? "");
+  const currentFolder = String(snapshot?.folder ?? "");
+  const rows = projects.map((entry) => {
+    const current = entry.project === currentProject && entry.folder === currentFolder;
+    const folderPath = entry.folder ? `/${encodeURIComponent(entry.folder)}` : "";
+    const href = `${paths.projectsBase}/${encodeURIComponent(entry.project)}${folderPath}`;
+    const label = entry.folder
+      ? `${entry.projectLabel} / ${entry.folderLabel}`
+      : entry.projectLabel;
+    return `<li><a class="active-project-item${current ? " active-project-current" : ""}" href="${escapeHtml(href)}" data-project="${escapeHtml(entry.project)}" data-folder="${escapeHtml(entry.folder)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(label)}"><span class="active-project-mark" aria-hidden="true"></span><span class="active-project-label">${escapeHtml(label)}</span></a></li>`;
+  }).join("");
+  const rootUrl = `${paths.canonical}${paths.canonical.includes("?") ? "&" : "?"}drawer=~`;
+  return `<aside id="project-rail" class="project-rail" aria-label="Projects" data-current-project="${escapeHtml(currentProject)}" data-current-folder="${escapeHtml(currentFolder)}" data-current-active="${snapshot?.id ? "true" : "false"}"${inert ? " inert" : ""}>
+    <nav class="active-projects" aria-label="Active projects" aria-keyshortcuts="ArrowUp ArrowDown"><ol>${rows}</ol></nav>
+    <section id="inactive-project-tree" class="inactive-project-tree" aria-label="Files" aria-keyshortcuts="F" data-root-url="${escapeHtml(rootUrl)}" hidden>
+      <div class="project-tree-columns" role="tree" aria-label="Project files"><span class="project-tree-loading" role="status">···</span></div>
+    </section>
+  </aside>`;
+}
+
+function renderWorkflowMenu(snapshot, paths) {
+  const names = (Array.isArray(snapshot?.workflows) ? snapshot.workflows : [])
+    .map(workflowName)
+    .filter((name) => name && name !== "none" && name !== "base");
+  const selected = workflowName(snapshot?.sessionMode);
+  if (names.length === 0 || !paths.prompt) return "";
+  const action = escapeHtml(paths.prompt);
+  const buttons = names.map((name) => {
+    const current = name === selected ? " workflows-current" : "";
+    return `<button class="workflows-choice${current}" type="submit" name="prompt" value="/workflows ${escapeHtml(name)}">${escapeHtml(workflowLabel(name))}</button>`;
+  }).join("");
+  const label = sessionModeChip(selected) || '<span class="workflow-label">Workflows</span>';
+  return `<details class="workflows-menu"${selected && selected !== "none" ? ` data-mode="${escapeHtml(selected)}"` : ""}>
+    <summary aria-label="Choose workflow" aria-keyshortcuts="W">${label}</summary>
+    <form class="workflows-menu-list" action="${action}" method="post"
+      hx-post="${action}"
+      hx-target="#session-panel"
+      hx-swap="innerHTML"
+      hx-disabled-elt=".workflows-choice">
+      ${buttons}
+    </form>
+  </details>`;
+}
+
+function renderSessionPlace(snapshot) {
+  const name = placeName(snapshot);
+  return name ? `<div class="session-place"><p class="session-project">${escapeHtml(name)}</p></div>` : "";
 }
 
 function composer(paths, running, sessionId = "", findWork = "") {
@@ -602,7 +702,7 @@ function composer(paths, running, sessionId = "", findWork = "") {
       hx-indicator="#working">
       <label for="prompt">Message</label>
       <div class="composer-row">
-        <textarea id="prompt" name="prompt" rows="1" maxlength="32768" required autocomplete="off" enterkeyhint="send" placeholder="${running ? "Steer this running turn" : "Message this DSH session"}"></textarea>
+        <textarea id="prompt" name="prompt" rows="1" maxlength="32768" required autocomplete="off" enterkeyhint="send"></textarea>
         <button id="composer-dictate" type="button" data-state="idle" aria-label="Dictate">
           <svg class="dictate-mic" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
             <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
@@ -611,14 +711,11 @@ function composer(paths, running, sessionId = "", findWork = "") {
             <path fill="currentColor" d="M18.3 5.71 12 12.01 5.7 5.7 4.29 7.11 10.59 13.4 4.29 19.7 5.7 21.11 12 14.82l6.3 6.29 1.41-1.41-6.29-6.3 6.29-6.29z"/>
           </svg>
         </button>
-        <button id="composer-submit" type="submit">Send</button>
+        ${running ? `<span id="interrupt-working" class="htmx-indicator" aria-live="polite">Stopping…</span><button id="interrupt-submit" class="composer-interrupt" type="submit" form="interrupt-form" aria-label="Stop current turn" title="Stop"><svg class="composer-stop" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><rect fill="currentColor" x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg></button>` : ""}
+        <button id="composer-submit" type="submit" aria-label="Send"><svg class="composer-enter" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19 6v5H7.83l2.58-2.59L9 7 4 12l5 5 1.41-1.41L7.83 13H21V6h-2z"/></svg></button>
       </div>
-      <div class="composer-meta">
-        <span id="working" class="htmx-indicator" aria-live="polite">Admitting message…</span>
-        <span id="dictation-status" class="dictation-status" data-state="idle" role="status" aria-live="polite" aria-atomic="true" hidden></span>
-        <span class="key-hint">${running ? "Enter steers at the next safe step" : "Enter to send"} · Shift+Enter for a new line</span>
-        ${running ? `<span id="interrupt-working" class="htmx-indicator" aria-live="polite">Interrupting DSH…</span><button id="interrupt-submit" class="button-danger composer-interrupt" type="submit" form="interrupt-form">Interrupt</button>` : ""}
-      </div>
+      <span id="working" class="htmx-indicator" aria-live="polite">Admitting message…</span>
+      <span id="dictation-status" class="dictation-status" data-state="idle" role="status" aria-live="polite" aria-atomic="true" hidden></span>
     </form>`;
 }
 
@@ -632,17 +729,21 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   const nodes = Array.isArray(snapshot?.conversation?.nodes) ? snapshot.conversation.nodes : [];
   const transcript = nodes.map(renderConversationNode).filter(Boolean).join("\n");
   const findWork = snapshot.findWork === "save" ? "save" : snapshot.findWork === "compile" ? "compile" : "";
-  const face = emptyProject ? (snapshot.project || "project") : liveFace(snapshot);
+  const face = emptyProject ? "" : liveFace(snapshot);
+  const progress = renderProgressChip(snapshot.progress);
   return `<div class="session-heading">
-      <div>
-        <p class="eyebrow">${emptyProject ? "qq project" : "DSH durable session"}</p>
-        ${sessionModeChip(snapshot.sessionMode)}
-        <h1 id="session-heading">Operator console</h1>
-        <code>${escapeHtml(face)}</code>
-        ${renderProgressChip(snapshot.progress)}
+      <div class="session-heading-start">
+        ${renderHomeLink(snapshot, paths)}
+        ${sessionNavigation(snapshot, paths)}
       </div>
-      <p class="status status-${escapeHtml(status.key)}" role="status"><span class="status-dot" aria-hidden="true"></span><span class="status-label">${escapeHtml(status.label)}</span></p>
-      ${sessionNavigation(snapshot, paths)}
+      <div class="session-heading-center">
+        ${snapshot?.id ? renderWorkflowMenu(snapshot, paths) || sessionModeChip(snapshot.sessionMode) : ""}
+      </div>
+      <div class="session-heading-end">
+        ${renderSessionPlace(snapshot)}
+        <h1 id="session-heading"><span class="session-heading-title">Operator console${face ? ` · ${escapeHtml(face)}` : ""}</span></h1>
+        <p class="status status-${escapeHtml(status.key)}" role="status"><span class="status-dot" aria-hidden="true"></span><span class="status-label">${escapeHtml(status.label)}</span></p>
+      </div>
     </div>
     ${status.detail ? `<p class="notice turn-error" role="alert"><strong>${escapeHtml(status.label)}</strong><span>${escapeHtml(status.detail)}</span>${status.code ? `<code>${escapeHtml(status.code)}</code>` : ""}</p>` : ""}
     ${renderSlashNotice(notice, paths, nodes)}
@@ -651,6 +752,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
     </div>`}
     ${emptyProject ? "" : renderPendingQueue(snapshot, paths)}
     ${emptyProject ? "" : composer(paths, status.key === "running", snapshot.id, findWork)}
+    ${progress}
     ${renderLoginSheet(snapshot.loginSheet, paths)}
     ${renderOfferPopup(snapshot.offer, paths, notice)}
     ${renderOverlay(snapshot.overlay, paths, notice, findWork)}`;
@@ -724,7 +826,13 @@ function drawerQuery(path) {
 
 function drawerEntryHref(entry, drawer, paths) {
   if (entry.type === "project") {
-    return `${paths.projectsBase}/${encodeURIComponent(entry.project ?? entry.name)}${drawerQuery("")}`;
+    if (entry.folder && entry.project) {
+      return `${paths.projectsBase}/${encodeURIComponent(entry.project)}/${encodeURIComponent(entry.folder)}`;
+    }
+    if (!entry.path) {
+      return `${paths.projectsBase}/${encodeURIComponent(entry.project ?? entry.name)}`;
+    }
+    return `${paths.canonical}${drawerQuery(entry.path)}`;
   }
   if (entry.type === "directory") return `${paths.canonical}${drawerQuery(entry.path)}`;
   const root = entry.kind === "binary" ? paths.fileOpen : paths.fileView;
@@ -742,16 +850,20 @@ function drawerKind(entry) {
 }
 
 /** Render one non-recursive project level. Descendants are never embedded. */
-export function renderProjectDrawer(drawer, paths) {
+export function renderProjectDrawer(drawer, paths, options = {}) {
   if (!drawer || !Array.isArray(drawer.entries)) return "";
   const opened = drawer.open === true;
+  const onProjectsSession = options.scope === "projects";
   const breadcrumbs = Array.isArray(drawer.breadcrumbs) ? drawer.breadcrumbs : [];
-  const breadcrumbHtml = breadcrumbs.map((crumb, index) => {
-    const current = index === breadcrumbs.length - 1;
-    const label = crumb.type === "projects" ? "~/projects" : crumb.name;
+  const nestedCrumbs = breadcrumbs.filter((crumb) => crumb.type !== "projects");
+  const breadcrumbHtml = nestedCrumbs.map((crumb, index) => {
+    const current = index === nestedCrumbs.length - 1;
+    const label = crumb.name;
     let href = `${paths.canonical}${drawerQuery("~")}`;
     if (crumb.type === "project") {
-      href = `${paths.projectsBase}/${encodeURIComponent(drawer.project)}${drawerQuery("")}`;
+      href = crumb.path
+        ? `${paths.projectsBase}/${encodeURIComponent(drawer.project)}/${encodeURIComponent(crumb.path.split("/")[0])}`
+        : `${paths.projectsBase}/${encodeURIComponent(drawer.project)}`;
     } else if (crumb.type === "directory") {
       href = `${paths.canonical}${drawerQuery(crumb.path)}`;
     }
@@ -759,6 +871,13 @@ export function renderProjectDrawer(drawer, paths) {
       ? `<span aria-current="page" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`
       : `<a href="${escapeHtml(href)}" title="${escapeHtml(label)}">${escapeHtml(label)}</a>`}</li>`;
   }).join("");
+  const projectsHref = paths.projectsSession || "/qq/projects";
+  const atRootLevel = drawer.scope === "projects" || !drawer.path;
+  const projectsRow = atRootLevel
+    ? (onProjectsSession
+      ? `<li><span class="drawer-entry" aria-current="page" title="~/projects"><span class="drawer-kind" aria-hidden="true">root</span><span class="drawer-name">~/projects</span></span></li>`
+      : `<li><a class="drawer-entry" data-entry-type="projects" href="${escapeHtml(projectsHref)}" aria-label="Open the projects session" title="~/projects"><span class="drawer-kind" aria-hidden="true">root</span><span class="drawer-name">~/projects</span></a></li>`)
+    : "";
   const upPath = drawer.scope === "projects"
     ? ""
     : drawer.path ? drawer.parent : "~";
@@ -771,12 +890,22 @@ export function renderProjectDrawer(drawer, paths) {
     const pathAttr = entry.type === "file" && entry.path
       ? ` data-file-path="${escapeHtml(entry.path)}"`
       : "";
-    return `<li><a class="drawer-entry" data-entry-type="${escapeHtml(entry.type)}" data-file-kind="${escapeHtml(entry.kind ?? "")}"${pathAttr} href="${escapeHtml(href)}" aria-label="${escapeHtml(`${action} ${entry.name}`)}">
+    const projectAttr = entry.project ? ` data-project="${escapeHtml(entry.project)}"` : "";
+    const folderAttr = entry.folder ? ` data-folder="${escapeHtml(entry.folder)}"` : "";
+    const treeAction = entry.type === "file"
+      ? "open"
+      : entry.type === "project" && entry.folder
+        ? "spawn"
+        : "expand";
+    return `<li><a class="drawer-entry" data-entry-type="${escapeHtml(entry.type)}" data-tree-action="${treeAction}" data-file-kind="${escapeHtml(entry.kind ?? "")}"${projectAttr}${folderAttr}${pathAttr} href="${escapeHtml(href)}" aria-label="${escapeHtml(`${action} ${entry.name}`)}">
       <span class="drawer-kind" aria-hidden="true">${drawerKind(entry)}</span>
       <span class="drawer-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</span>
     </a></li>`;
   }).join("");
-  const empty = rows || '<li class="drawer-empty">nothing at this level</li>';
+  const empty = `${projectsRow}${rows}` || '<li class="drawer-empty">nothing at this level</li>';
+  const crumbs = breadcrumbHtml
+    ? `<nav class="drawer-breadcrumbs" aria-label="File location"><ol>${breadcrumbHtml}</ol></nav>`
+    : "";
   return `<button id="project-drawer-toggle" class="drawer-toggle" type="button" aria-controls="project-drawer" aria-expanded="${opened ? "true" : "false"}"${opened ? " inert" : ""}>files</button>
   <button id="project-drawer-backdrop" class="drawer-backdrop" type="button" aria-label="Close files"${opened ? "" : " hidden"}></button>
   <aside id="project-drawer" class="project-drawer" role="dialog" aria-modal="true" aria-hidden="${opened ? "false" : "true"}" aria-labelledby="project-drawer-title" data-drawer-path="${escapeHtml(drawer.scope === "projects" ? "~" : drawer.path)}"${opened ? "" : " inert"}>
@@ -787,14 +916,14 @@ export function renderProjectDrawer(drawer, paths) {
       </div>
       <button class="drawer-close" type="button" aria-label="Close files">×</button>
     </header>
-    <nav class="drawer-breadcrumbs" aria-label="File location"><ol>${breadcrumbHtml}</ol></nav>
+    ${crumbs}
     ${up}
     <ul class="drawer-list">${empty}</ul>
   </aside>`;
 }
 
 function documentHead(assetPaths, title = "qq", options = {}) {
-  const themeColor = options.themeColor ?? "#0d1216";
+  const themeColor = options.themeColor ?? "#000000";
   return `<head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
@@ -1029,13 +1158,15 @@ ${documentHead(assetPaths, "document viewer proof · qq", { themeColor: "#000000
 
 export function renderPage(snapshot, paths, assetPaths, notice = "") {
   const content = renderSessionContent(snapshot, paths, notice);
-  const drawer = renderProjectDrawer(snapshot.drawer, paths);
+  const drawer = renderProjectDrawer(snapshot.drawer, paths, { scope: snapshot.scope });
   const backgroundInert = snapshot?.drawer?.open ? " inert" : "";
+  const rail = renderProjectRail(snapshot, paths, Boolean(backgroundInert));
   return `<!doctype html>
 <html lang="en">
 ${documentHead(assetPaths)}
 <body${snapshot?.drawer?.open ? ' class="drawer-open"' : ""}>
   ${drawer}
+  ${rail}
   <header class="site-header"${backgroundInert}>
     <a href="${escapeHtml(paths.canonical)}" aria-label="Reload the selected DSH session">qq / DSH</a>
     <span>Sequential handoff</span>

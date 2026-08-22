@@ -4,6 +4,27 @@
   const ownScript = document.currentScript;
   const desktopChair = () => window.matchMedia("(min-width: 42.01rem)").matches;
   const composer = () => document.querySelector("#prompt");
+  const completeSlash = async (input) => {
+    if (!(input instanceof HTMLTextAreaElement)) return;
+    const line = input.value;
+    if (!line.startsWith("/")) return;
+    const action = input.form?.getAttribute("action") ?? "";
+    if (!action.endsWith("/prompt")) return;
+    const url = new URL(action.replace(/\/prompt$/, "/complete"), location.href);
+    url.searchParams.set("line", line);
+    try {
+      const response = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!response.ok) return;
+      const body = await response.json();
+      if (typeof body.completed !== "string" || body.completed === line) return;
+      input.value = body.completed;
+      const cursor = body.completed.length;
+      input.setSelectionRange(cursor, cursor);
+      fitComposer(input);
+    } catch {
+      /* completion is best-effort */
+    }
+  };
   const fitComposer = (input = composer()) => {
     if (!(input instanceof HTMLTextAreaElement)) return;
     input.style.height = "0px";
@@ -94,8 +115,8 @@
     const match = location.pathname.match(/\/session\/(session-[0-9a-fA-F-]{36})(?:\/|$)/);
     return match ? match[1] : "";
   };
-  const sessionIds = () => [...document.querySelectorAll("#session-choice option")]
-    .map((option) => option.value)
+  const sessionIds = () => [...document.querySelectorAll(".session-token[data-session-id]")]
+    .map((token) => token.dataset.sessionId)
     .filter(Boolean);
   const openSession = (sessionId) => {
     if (!sessionId || sessionId === currentSessionId()) return;
@@ -149,6 +170,61 @@
     if (mode === "home") transcript.scrollTop = 0;
     if (mode === "end") transcript.scrollTop = transcript.scrollHeight;
   };
+  const workflowsMenu = () => document.querySelector(".workflows-menu");
+  const workflowChoices = (menu = workflowsMenu()) => menu
+    ? [...menu.querySelectorAll(".workflows-choice")].filter((choice) => !choice.disabled)
+    : [];
+  const closeWorkflowsMenu = (restoreFocus = false) => {
+    const menu = workflowsMenu();
+    if (menu instanceof HTMLDetailsElement && menu.open) {
+      menu.open = false;
+      if (restoreFocus) menu.querySelector(":scope > summary")?.focus();
+      return true;
+    }
+    return false;
+  };
+  const openWorkflowsMenu = () => {
+    const menu = workflowsMenu();
+    if (!(menu instanceof HTMLDetailsElement)) return false;
+    menu.open = true;
+    const choices = workflowChoices(menu);
+    const choice = choices.find((candidate) => candidate.classList.contains("workflows-current")) ?? choices[0];
+    choice?.focus();
+    return true;
+  };
+  const handleWorkflowMenuKey = (event) => {
+    const menu = workflowsMenu();
+    if (!(menu instanceof HTMLDetailsElement)) return false;
+    const summary = menu.querySelector(":scope > summary");
+    if (event.key === "Enter" && event.target === summary) {
+      event.preventDefault();
+      if (menu.open) closeWorkflowsMenu(true);
+      else openWorkflowsMenu();
+      return true;
+    }
+    if (!menu.open) return false;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeWorkflowsMenu(true);
+      return true;
+    }
+    const choices = workflowChoices(menu);
+    const current = choices.indexOf(document.activeElement);
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      const fallback = choices.findIndex((choice) => choice.classList.contains("workflows-current"));
+      const start = current >= 0 ? current : fallback >= 0 ? fallback : 0;
+      const delta = event.key === "ArrowUp" ? -1 : 1;
+      choices[(start + delta + choices.length) % choices.length]?.focus();
+      return true;
+    }
+    if (event.key === "Enter" && current >= 0) {
+      event.preventDefault();
+      choices[current].click();
+      return true;
+    }
+    return false;
+  };
   const dismissSheet = () => {
     const ignore = document.querySelector(".offer-ignore");
     if (ignore instanceof HTMLElement) {
@@ -160,6 +236,7 @@
       workflows.remove();
       return true;
     }
+    if (closeWorkflowsMenu()) return true;
     return false;
   };
   const editingElsewhere = (node) => {
@@ -172,6 +249,339 @@
     }
     return node.isContentEditable;
   };
+
+  const activeProjectItems = () => [...document.querySelectorAll(".active-project-item[href]")];
+  const projectIdentity = (entry) => `${String(entry?.project ?? "")}\n${String(entry?.folder ?? "")}`;
+  const projectStorageKey = () => `qq-active-projects:${location.pathname.replace(/\/(?:project|session)\/.*$/, "") || "/"}`;
+  const activeProjectEntry = (item) => ({
+    project: String(item?.dataset?.project ?? ""),
+    folder: String(item?.dataset?.folder ?? ""),
+    label: String(item?.title || item?.querySelector?.(".active-project-label")?.textContent || "").trim(),
+    href: String(item?.href ?? ""),
+  });
+  const readRememberedProjects = () => {
+    try {
+      const parsed = JSON.parse(sessionStorage.getItem(projectStorageKey()) || "[]");
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((entry) => {
+        if (!entry || typeof entry !== "object" || !entry.project || !entry.label || !entry.href) return false;
+        try { return new URL(entry.href, location.href).origin === location.origin; } catch { return false; }
+      });
+    } catch {
+      return [];
+    }
+  };
+  const rememberActiveProjects = () => {
+    try {
+      sessionStorage.setItem(projectStorageKey(), JSON.stringify(activeProjectItems().map(activeProjectEntry)));
+    } catch {
+      /* the visible rail still works when browser storage is unavailable */
+    }
+  };
+  const buildActiveProjectItem = (entry) => {
+    const row = document.createElement("li");
+    const link = document.createElement("a");
+    link.className = "active-project-item";
+    link.href = entry.href;
+    link.dataset.project = entry.project;
+    link.dataset.folder = entry.folder || "";
+    link.title = entry.label;
+    const mark = document.createElement("span");
+    mark.className = "active-project-mark";
+    mark.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.className = "active-project-label";
+    label.textContent = entry.label;
+    link.append(mark, label);
+    row.append(link);
+    return row;
+  };
+  const restoreActiveProjects = () => {
+    const rail = document.querySelector("#project-rail");
+    const list = rail?.querySelector(".active-projects ol");
+    if (!rail || !list) return;
+    const currentKey = projectIdentity({ project: rail.dataset.currentProject, folder: rail.dataset.currentFolder });
+    const currentIsActive = rail.dataset.currentActive === "true";
+    const existing = new Map(activeProjectItems().map((item) => [projectIdentity(activeProjectEntry(item)), item.closest("li")]));
+    const remembered = readRememberedProjects().filter((entry) => currentIsActive || projectIdentity(entry) !== currentKey);
+    const rows = [];
+    const used = new Set();
+    for (const entry of remembered) {
+      const key = projectIdentity(entry);
+      if (used.has(key)) continue;
+      used.add(key);
+      rows.push(existing.get(key) ?? buildActiveProjectItem(entry));
+    }
+    for (const [key, row] of existing) {
+      if (used.has(key)) continue;
+      used.add(key);
+      rows.push(row);
+    }
+    list.replaceChildren(...rows);
+    rememberActiveProjects();
+  };
+  const activeProjectKeys = () => new Set(activeProjectItems().map((item) => projectIdentity(activeProjectEntry(item))));
+  const appendActiveProject = (entry) => {
+    if (!entry.project || activeProjectKeys().has(projectIdentity(entry))) return;
+    const list = document.querySelector(".active-projects ol");
+    if (!list) return;
+    list.append(buildActiveProjectItem(entry));
+    rememberActiveProjects();
+  };
+  const removeActiveProject = (entry) => {
+    const key = projectIdentity(entry);
+    const item = activeProjectItems().find((candidate) => projectIdentity(activeProjectEntry(candidate)) === key);
+    item?.closest("li")?.remove();
+    rememberActiveProjects();
+  };
+  const responseHasSession = (response) => response.ok && /\/session\/session-[0-9a-f-]+(?:\/|$)/i.test(new URL(response.url).pathname);
+  const validateRememberedProjects = async () => {
+    const current = activeProjectItems().find((item) => item.matches('[aria-current="page"]'));
+    const candidates = activeProjectItems().filter((item) => item !== current).map(activeProjectEntry);
+    await Promise.all(candidates.map(async (entry) => {
+      try {
+        const response = await fetch(entry.href, { method: "HEAD", headers: { Accept: "text/html" } });
+        if (!responseHasSession(response)) removeActiveProject(entry);
+      } catch {
+        /* retain remembered activity when validation cannot reach the fixture */
+      }
+    }));
+  };
+  const neighborProject = (delta) => {
+    const projects = activeProjectItems();
+    if (projects.length < 2) return;
+    const current = projects.findIndex((project) => project.matches('[aria-current="page"]'));
+    const index = current < 0 ? 0 : current;
+    location.assign(projects[(index + delta + projects.length) % projects.length].href);
+  };
+  const inactiveProjectTree = () => document.querySelector("#inactive-project-tree");
+  const projectTreeColumns = () => inactiveProjectTree()?.querySelector(".project-tree-columns");
+  const projectTreeIsOpen = () => {
+    const tree = inactiveProjectTree();
+    return Boolean(tree && !tree.hidden);
+  };
+  const activeProjectNames = () => new Set(activeProjectItems().map((item) => item.dataset.project).filter(Boolean));
+  const discoverActiveProjects = async (entries) => {
+    const candidates = entries.filter((entry) => entry.kind === "project" && entry.project && !activeProjectNames().has(entry.project));
+    await Promise.all(candidates.map(async (entry) => {
+      try {
+        const response = await fetch(entry.href, { method: "HEAD", headers: { Accept: "text/html" } });
+        if (!responseHasSession(response)) return;
+        appendActiveProject(entry);
+      } catch {
+        /* project activity discovery is best-effort */
+      }
+    }));
+  };
+  const folderEntries = (html, responseUrl) => {
+    const parsed = new DOMParser().parseFromString(html, "text/html");
+    return [...parsed.querySelectorAll("#project-drawer .drawer-entry[data-entry-type]")]
+      .map((link) => {
+        const kind = link.dataset.entryType;
+        const label = link.querySelector(".drawer-name")?.textContent?.trim() ?? "";
+        let href = "";
+        try { href = new URL(link.getAttribute("href") ?? "", responseUrl).href; } catch {}
+        let project = String(link.dataset.project ?? "");
+        if (!project) {
+          try {
+            const match = new URL(href).pathname.match(/\/project\/([^/]+)/);
+            project = match ? decodeURIComponent(match[1]) : "";
+          } catch {}
+        }
+        return {
+          kind,
+          label,
+          href,
+          project,
+          folder: String(link.dataset.folder ?? ""),
+          fileKind: String(link.dataset.fileKind ?? ""),
+          action: String(link.dataset.treeAction ?? (kind === "file" ? "open" : "expand")),
+        };
+      })
+      .filter((entry) => entry.href && entry.label && ["project", "directory", "file"].includes(entry.kind));
+  };
+  const projectTreeNodes = (column) => [...column.querySelectorAll(".project-tree-node")];
+  let treeRequest = 0;
+  const trimProjectTree = (depth) => {
+    const columns = projectTreeColumns();
+    if (!columns) return;
+    for (const column of [...columns.querySelectorAll(".project-tree-column")]) {
+      if (Number(column.dataset.depth) >= depth) column.remove();
+    }
+  };
+  const renderProjectTreeColumn = (entries, depth, parentNode) => {
+    const columns = projectTreeColumns();
+    if (!columns) return null;
+    trimProjectTree(depth);
+    columns.querySelector(".project-tree-loading")?.remove();
+    if (entries.length === 0) return null;
+    const column = document.createElement("div");
+    column.className = "project-tree-column";
+    column.dataset.depth = String(depth);
+    column.setAttribute("role", "group");
+    if (parentNode instanceof HTMLElement) column.dataset.parentHref = parentNode.dataset.href ?? "";
+    for (const [index, entry] of entries.entries()) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "project-tree-node";
+      button.dataset.href = entry.href;
+      button.dataset.kind = entry.kind;
+      button.dataset.action = entry.action;
+      button.dataset.project = entry.project;
+      button.dataset.folder = entry.folder;
+      button.dataset.fileKind = entry.fileKind;
+      button.dataset.depth = String(depth);
+      button.setAttribute("role", "treeitem");
+      button.setAttribute("aria-selected", String(index === 0));
+      button.tabIndex = index === 0 ? 0 : -1;
+      button.title = entry.label;
+      const mark = document.createElement("span");
+      mark.className = "project-tree-mark";
+      mark.setAttribute("aria-hidden", "true");
+      const label = document.createElement("span");
+      label.className = "project-tree-label";
+      label.textContent = entry.label;
+      button.append(mark, label);
+      if (entry.action === "expand") {
+        const branch = document.createElement("span");
+        branch.className = "project-tree-branch";
+        branch.setAttribute("aria-hidden", "true");
+        branch.textContent = "›";
+        button.append(branch);
+      }
+      column.append(button);
+    }
+    columns.append(column);
+    return column;
+  };
+  const treeChildUrl = (node) => {
+    const url = new URL(node.dataset.href, location.href);
+    if (node.dataset.kind === "project") url.searchParams.set("drawer", "");
+    return url.href;
+  };
+  const loadProjectTreeColumn = async (url, depth, parentNode = null, focusChild = false) => {
+    const request = ++treeRequest;
+    trimProjectTree(depth);
+    try {
+      const response = await fetch(url, { headers: { Accept: "text/html" } });
+      if (!response.ok) return null;
+      const html = await response.text();
+      if (request !== treeRequest && depth > 0) return null;
+      const entries = folderEntries(html, response.url);
+      const column = renderProjectTreeColumn(entries, depth, parentNode);
+      if (depth === 0) void discoverActiveProjects(entries);
+      if (focusChild) column?.querySelector(".project-tree-node")?.focus();
+      return column;
+    } catch {
+      return null;
+    }
+  };
+  let projectTreeReady = null;
+  const hydrateProjectTree = () => {
+    const tree = inactiveProjectTree();
+    if (!tree) return Promise.resolve(null);
+    if (!projectTreeReady) projectTreeReady = loadProjectTreeColumn(tree.dataset.rootUrl, 0);
+    return projectTreeReady;
+  };
+  const selectProjectTreeNode = (node) => {
+    if (!(node instanceof HTMLElement)) return;
+    const column = node.closest(".project-tree-column");
+    for (const other of projectTreeNodes(column)) {
+      const selected = other === node;
+      other.setAttribute("aria-selected", String(selected));
+      other.tabIndex = selected ? 0 : -1;
+    }
+  };
+  const spawnProjectSession = (node) => {
+    const url = new URL(node.dataset.href, location.href);
+    url.search = "";
+    url.hash = "";
+    url.pathname = `${url.pathname.replace(/\/$/, "")}/sessions`;
+    const form = document.createElement("form");
+    form.method = "post";
+    form.action = url.href;
+    form.hidden = true;
+    document.body.append(form);
+    form.requestSubmit();
+  };
+  const activateProjectTreeNode = (node, focusChild = true) => {
+    if (!(node instanceof HTMLElement)) return;
+    if (node.dataset.action === "expand") {
+      void loadProjectTreeColumn(treeChildUrl(node), Number(node.dataset.depth) + 1, node, focusChild);
+      return;
+    }
+    if (node.dataset.action === "spawn") {
+      spawnProjectSession(node);
+      return;
+    }
+    location.assign(node.dataset.href);
+  };
+  const setProjectTreeOpen = (open, restoreFocus = false) => {
+    const tree = inactiveProjectTree();
+    if (!tree) return;
+    tree.hidden = !open;
+    document.body.classList.toggle("inactive-projects-open", open);
+    if (!open) {
+      if (restoreFocus) document.querySelector(".active-project-current")?.focus({ preventScroll: true });
+      return;
+    }
+    void hydrateProjectTree().then(() => {
+      const first = tree.querySelector(".project-tree-node");
+      if (first instanceof HTMLElement) first.focus({ preventScroll: true });
+    });
+  };
+  const handleProjectTreeKey = (event) => {
+    if (!projectTreeIsOpen()) return false;
+    const node = event.target instanceof Element ? event.target.closest(".project-tree-node") : null;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setProjectTreeOpen(false, true);
+      return true;
+    }
+    if (!(node instanceof HTMLElement)) return false;
+    const column = node.closest(".project-tree-column");
+    const nodes = projectTreeNodes(column);
+    const index = nodes.indexOf(node);
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      const delta = event.key === "ArrowUp" ? -1 : 1;
+      const next = nodes[(index + delta + nodes.length) % nodes.length];
+      selectProjectTreeNode(next);
+      next.focus();
+      return true;
+    }
+    if (event.key === "ArrowRight") {
+      if (node.dataset.action !== "expand") return false;
+      event.preventDefault();
+      selectProjectTreeNode(node);
+      activateProjectTreeNode(node, true);
+      return true;
+    }
+    if (event.key === "ArrowLeft") {
+      const depth = Number(node.dataset.depth);
+      if (depth <= 0) return false;
+      event.preventDefault();
+      const parentHref = column.dataset.parentHref;
+      trimProjectTree(depth);
+      const parent = [...document.querySelectorAll(".project-tree-node")].find((candidate) => candidate.dataset.href === parentHref);
+      parent?.focus();
+      return true;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      selectProjectTreeNode(node);
+      activateProjectTreeNode(node, true);
+      return true;
+    }
+    return false;
+  };
+  document.addEventListener("click", (event) => {
+    const node = event.target instanceof Element ? event.target.closest(".project-tree-node") : null;
+    if (!(node instanceof HTMLElement)) return;
+    event.preventDefault();
+    selectProjectTreeNode(node);
+    activateProjectTreeNode(node, false);
+  });
 
   const projectDrawer = () => document.querySelector("#project-drawer");
   const drawerToggle = () => document.querySelector("#project-drawer-toggle");
@@ -725,8 +1135,13 @@
 
   document.addEventListener("toggle", (event) => {
     const menu = event.target;
-    if (!(menu instanceof HTMLDetailsElement) || !menu.classList.contains("session-menu")) return;
-    if (!menu.open) disarmClose();
+    if (!(menu instanceof HTMLDetailsElement)) return;
+    if (menu.classList.contains("session-menu") && !menu.open) disarmClose();
+    if (!menu.open) return;
+    if (!menu.classList.contains("session-menu") && !menu.classList.contains("workflows-menu")) return;
+    for (const other of document.querySelectorAll("details.session-menu, details.workflows-menu")) {
+      if (other !== menu) other.open = false;
+    }
   }, true);
 
   document.addEventListener("input", (event) => {
@@ -758,6 +1173,11 @@
 
     if (inComposer) {
       pendingClose = false;
+      if (event.key === "Tab") {
+        event.preventDefault();
+        completeSlash(input);
+        return;
+      }
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
         input.form?.requestSubmit();
@@ -791,6 +1211,8 @@
     if (editingElsewhere(input)) return;
 
     const key = event.key;
+    if (handleWorkflowMenuKey(event)) return;
+    if (handleProjectTreeKey(event)) return;
     if (pendingClose) {
       if (key === "x" || key === "X") {
         event.preventDefault();
@@ -803,6 +1225,7 @@
           document.querySelector(".workflows-popup")?.remove();
           return;
         }
+        if (closeWorkflowsMenu()) return;
         submitForm("#close-session");
         return;
       }
@@ -848,6 +1271,26 @@
         clickButton(`.overlay-${action}`);
         return;
       }
+    }
+    if (key === "f" || key === "F") {
+      event.preventDefault();
+      setProjectTreeOpen(!projectTreeIsOpen(), true);
+      return;
+    }
+    if (key === "w" || key === "W") {
+      event.preventDefault();
+      openWorkflowsMenu();
+      return;
+    }
+    if (key === "ArrowUp") {
+      event.preventDefault();
+      neighborProject(-1);
+      return;
+    }
+    if (key === "ArrowDown") {
+      event.preventDefault();
+      neighborProject(1);
+      return;
     }
     if (key === "ArrowLeft") {
       event.preventDefault();
@@ -967,6 +1410,9 @@
     }
     syncDrawerChrome();
     prepareSession();
+    restoreActiveProjects();
+    void validateRememberedProjects();
+    void hydrateProjectTree();
     if (drawerIsOpen()) requestAnimationFrame(() => openDrawer({ updateUrl: false, focus: !keepOpenerFocus }));
     restoreFileReturnFromHistory();
   };

@@ -26,6 +26,11 @@ export function apply(ctx, config) {
     chooseOverlay: (sessionId, form) => finderOf()?.chooseOverlay?.(sessionId, form),
     progressFor: () => mediaOf()?.progressFor?.(),
     inFindMode: (sessionId) => finderOf()?.inFindMode?.(sessionId) === true,
+    completeWorkflows: (line) => workflowsOf()?.complete?.(line) ?? { completed: line, candidates: [] },
+    workflowsFor: () => {
+      const names = workflowsOf()?.workflows?.names?.();
+      return Array.isArray(names) ? names : [];
+    },
     sessionModeFor: (sessionId) => {
       const facade = workflowsOf()?.workflows;
       const selected = facade?.selected?.(sessionId) ?? null;

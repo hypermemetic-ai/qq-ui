@@ -18,6 +18,6 @@ one full-viewport, pitch-black document viewer. Markdown-It
 highlight.js 11.12.0 deterministically highlights recognized code languages.
 PDFs and other admitted binaries use qq's bounded same-origin open response.
 
-The qq host recipe composes this plugin through `qq/host.patch.yml`; `bin/qq`
+The qq host recipe composes this plugin through `core/host.patch.yml`; `bin/qq`
 binds it when present. Later extraction to a standalone repository is a package
 move of this directory.
