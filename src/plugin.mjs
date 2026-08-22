@@ -41,9 +41,10 @@ export function apply(ctx, config) {
     loginSheetFor: (sessionId) => modelsOf()?.sheetFor?.(sessionId),
     overlayFor: (sessionId) => finderOf()?.overlayFor?.(sessionId),
     chooseOverlay: (sessionId, form) => finderOf()?.chooseOverlay?.(sessionId, form),
-    progressFor: () => mediaOf()?.progressFor?.(),
-    inFindMode: (sessionId) => finderOf()?.inFindMode?.(sessionId) === true,
-    completeWorkflows: (line) => workflowsOf()?.complete?.(line) ?? { completed: line, candidates: [] },
+    inFindMode: (sessionId) => {
+      if (finderOf()?.inFindMode?.(sessionId) === true) return true;
+      return workflowsOf()?.workflows?.selected?.(sessionId) === "find";
+    },
     workflowsFor: () => {
       const names = workflowsOf()?.workflows?.names?.();
       return Array.isArray(names) ? names : [];
