@@ -561,8 +561,8 @@ export function renderOfferPopup(offer, paths, notice = "") {
   return `<aside class="offer-popup" role="dialog" aria-modal="true" aria-labelledby="offer-heading" data-offer-id="${escapeHtml(offer.id ?? "")}">
     <div class="offer-sheet">
       <header class="offer-head">
-        <p class="eyebrow">Ready leftover</p>
-        <h2 id="offer-heading">${escapeHtml(offer.title || "Hand off, bank, or ignore")}</h2>
+        <p class="eyebrow">New conversation</p>
+        <h2 id="offer-heading">${escapeHtml(offer.title || "Start this, abandon previous, or bank this for later")}</h2>
       </header>
       <div class="offer-brief" tabindex="0">
         ${renderMessageText(offer.brief)}
@@ -573,9 +573,9 @@ export function renderOfferPopup(offer, paths, notice = "") {
         hx-post="${action}"
         ${hxMutateAttrs()}
         hx-disabled-elt=".offer-choice">
-        <button class="offer-choice offer-handoff" type="submit" name="choice" value="handoff">Hand off</button>
-        <button class="offer-choice offer-bank" type="submit" name="choice" value="bank">Bank</button>
-        <button class="offer-choice offer-ignore" type="submit" name="choice" value="ignore">Ignore</button>
+        <button class="offer-choice offer-handoff" type="submit" name="choice" value="start">Start this now</button>
+        <button class="offer-choice offer-ignore" type="submit" name="choice" value="abandon">Abandon previous</button>
+        <button class="offer-choice offer-bank" type="submit" name="choice" value="later">Bank this for later</button>
       </form>
     </div>
   </aside>`;
