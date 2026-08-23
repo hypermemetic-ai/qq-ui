@@ -20,6 +20,27 @@ import {
 
 const MAX_FORM_BYTES = 524_288;
 const DEFAULT_SSE_POLL_MS = 100;
+/** Console chat is the architect fold floor: current operator pair plus previous. */
+export const CONSOLE_PAIRS = 2;
+
+export function consoleFoldWindow(snapshot) {
+  const nodes = Array.isArray(snapshot?.conversation?.nodes) ? snapshot.conversation.nodes : [];
+  const operatorStarts = [];
+  for (let index = 0; index < nodes.length; index += 1) {
+    if (nodes[index]?.kind !== "user") continue;
+    operatorStarts.push(index);
+  }
+  const start = operatorStarts.length > CONSOLE_PAIRS ? operatorStarts.at(-CONSOLE_PAIRS) : 0;
+  if (start === 0) return snapshot;
+  return {
+    ...snapshot,
+    conversation: {
+      ...(snapshot.conversation ?? {}),
+      nodes: nodes.slice(start),
+    },
+  };
+}
+
 const SECURITY_HEADERS = Object.freeze({
   "Cache-Control": "no-store",
   "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
@@ -1195,7 +1216,7 @@ export function createConsoleHandler(backend, options = {}) {
           const paths = routes(basePath, "", projectRoute.project, projectRoute.folder);
           const drawer = await drawerView(projectRoute.project, url, false, projectRoute.folder);
           const { renderPage } = await loadRender();
-          const body = renderPage({ ...snapshot, drawer }, paths, pageAssetPaths());
+          const body = renderPage(consoleFoldWindow({ ...snapshot, drawer }), paths, pageAssetPaths());
           write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, body, head);
         } catch (error) {
           text(res, errorStatus(error), errorMessage(error), head);
@@ -1262,7 +1283,7 @@ export function createConsoleHandler(backend, options = {}) {
         const paths = routes(basePath, snapshot.id, snapshot.project, snapshot.folder);
         const drawer = await drawerView(snapshot.project, url, false, snapshot.folder);
         const { renderPage } = await loadRender();
-        const body = renderPage({ ...snapshot, drawer }, paths, pageAssetPaths());
+        const body = renderPage(consoleFoldWindow({ ...snapshot, drawer }), paths, pageAssetPaths());
         write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, body, head);
       } catch (error) {
         text(res, errorStatus(error), `DSH session unavailable: ${errorMessage(error)}`, head);
@@ -1338,10 +1359,11 @@ export function createConsoleHandler(backend, options = {}) {
           } catch {
             return;
           }
-          const nextFp = render.regionFingerprints(next);
-          const liveUpdate = render.liveTranscriptUpdate(liveState, next);
+          const surface = consoleFoldWindow(next);
+          const nextFp = render.regionFingerprints(surface);
+          const liveUpdate = render.liveTranscriptUpdate(liveState, surface);
           const append = typeof render.renderSettledTranscriptAppend === "function"
-            ? render.renderSettledTranscriptAppend(settledKeys, next)
+            ? render.renderSettledTranscriptAppend(settledKeys, surface)
             : { keys: settledKeys, html: "" };
           const initial = !initialized;
           const changed = render.SSE_REGION_NAMES.filter((name) =>
@@ -1368,7 +1390,7 @@ export function createConsoleHandler(backend, options = {}) {
           }
           const { renderSessionRegion } = render;
           for (const name of changed) {
-            res.write(sseEvent(name, renderSessionRegion(name, next, paths)));
+            res.write(sseEvent(name, renderSessionRegion(name, surface, paths)));
           }
           if (transcriptHtml) {
             res.write(sseEvent(append.reset ? "transcript-reset" : "transcript", transcriptHtml));
