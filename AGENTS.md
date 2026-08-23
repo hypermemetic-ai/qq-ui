@@ -6,6 +6,8 @@ Independent regions. Same rule as Cordis fibers: a piece that did not change is 
 
 This console is HTMX. One `sse-connect`, named events, named `sse-swap` targets. Status is not the transcript. Settled messages are not the streaming tail. The composer is not the heading. Popups are not the chrome. The drawer and project rail live outside the session stream.
 
-Do not replace `#session-panel` as one blob because something in the session changed. POSTs update named regions with `hx-swap="none"` and out-of-band `innerHTML`. Token growth swaps `#transcript-live` only.
+The transcript cell is the current DSH surface, not the raw log: `surfaceOp: replace` drops shadowed nodes and leaves the stub. A closed tool card is a summary; its body loads on open. First paint must not inline closed bodies.
 
-Stay on this stack. Do not add a second UI framework. Morphing a god-node is not independence.
+Do not replace `#session-panel` as one blob because something in the session changed. POSTs update named regions with `hx-swap="none"` and out-of-band `innerHTML`. Prompt/interrupt do not OOB the queue; SSE owns pending. Token growth stays on the registered `live` event and appends its suffix into the existing `.message-live-text` text node instead of replacing the wrapper or cumulative text. Settled nodes append into `#transcript-settled` unless a replace recommissions it.
+
+Stay on this stack. Do not add a second UI framework. Morphing a god-node is not independence. Client islands stay a closed list: composer draft, transcript follow, live text patch, drawer drag, dictation.

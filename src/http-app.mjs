@@ -5,9 +5,13 @@ import {
   renderFilePage as bundledRenderFilePage,
   renderPage as bundledRenderPage,
   renderMutationOob as bundledRenderMutationOob,
+  MUTATION_REGION_NAMES as bundledMutationRegionNames,
+  PROMPT_MUTATION_REGION_NAMES as bundledPromptMutationRegionNames,
   renderSessionContent as bundledRenderSessionContent,
   renderSessionRegion as bundledRenderSessionRegion,
   renderTranscriptJunction as bundledRenderTranscriptJunction,
+  renderSettledTranscriptAppend as bundledRenderSettledTranscriptAppend,
+  renderToolBody as bundledRenderToolBody,
   liveTranscriptUpdate as bundledLiveTranscriptUpdate,
   regionFingerprints as bundledRegionFingerprints,
   SSE_REGION_NAMES as bundledSseRegionNames,
@@ -341,14 +345,23 @@ function parseSessionRoute(basePath, pathname) {
   const prefix = `${basePath}/session/`;
   if (!pathname.startsWith(prefix)) return undefined;
   const parts = pathname.slice(prefix.length).split("/");
-  if (parts.length < 1 || parts.length > 2 || !parts[0]) return undefined;
+  if (parts.length < 1 || !parts[0]) return undefined;
   let sessionId;
   try {
     sessionId = decodeURIComponent(parts[0]);
   } catch {
     return undefined;
   }
-  return { sessionId, action: parts[1] ?? "page" };
+  if (parts.length === 1) return { sessionId, action: "page" };
+  if (parts.length === 2) return { sessionId, action: parts[1] };
+  if (parts.length === 3 && parts[1] === "tool" && parts[2]) {
+    try {
+      return { sessionId, action: "tool", callId: decodeURIComponent(parts[2]) };
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 const PROJECT_ROUTE_ACTIONS = new Set(["sessions", "session", "file", "open"]);
@@ -402,6 +415,13 @@ function parseProjectRoute(basePath, pathname) {
         return undefined;
       }
       return { ...base, sessionId, filePath, action: rest[2] };
+    }
+    if (rest[2] === "tool" && rest.length === 4 && rest[3]) {
+      try {
+        return { ...base, sessionId, action: "tool", callId: decodeURIComponent(rest[3]) };
+      } catch {
+        return undefined;
+      }
     }
     return { ...base, sessionId, action: rest[2] ?? "page" };
   }
@@ -763,8 +783,12 @@ export function createConsoleHandler(backend, options = {}) {
     renderSessionContent: bundledRenderSessionContent,
     renderSessionRegion: bundledRenderSessionRegion,
     renderTranscriptJunction: bundledRenderTranscriptJunction,
+    renderSettledTranscriptAppend: bundledRenderSettledTranscriptAppend,
+    renderToolBody: bundledRenderToolBody,
     liveTranscriptUpdate: bundledLiveTranscriptUpdate,
     renderMutationOob: bundledRenderMutationOob,
+    MUTATION_REGION_NAMES: bundledMutationRegionNames,
+    PROMPT_MUTATION_REGION_NAMES: bundledPromptMutationRegionNames,
     regionFingerprints: bundledRegionFingerprints,
     SSE_REGION_NAMES: bundledSseRegionNames,
   });
@@ -796,12 +820,17 @@ export function createConsoleHandler(backend, options = {}) {
     return liveRender;
   }
 
-  async function mutationResponse(req, res, sessionId, notice = "") {
+  async function mutationResponse(req, res, sessionId, notice = "", regions) {
     const snapshot = await view(sessionId);
     const paths = routes(basePath, snapshot.id, snapshot.project, snapshot.folder);
     if (isHtmx(req)) {
-      const { renderMutationOob } = await loadRender();
-      const body = renderMutationOob(snapshot, paths, notice);
+      const { renderMutationOob, PROMPT_MUTATION_REGION_NAMES } = await loadRender();
+      const body = renderMutationOob(
+        snapshot,
+        paths,
+        notice,
+        regions ?? PROMPT_MUTATION_REGION_NAMES ?? bundledPromptMutationRegionNames,
+      );
       write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, body);
       return;
     }
@@ -1208,6 +1237,7 @@ export function createConsoleHandler(backend, options = {}) {
       res.once("close", close);
       let fingerprints = {};
       let liveState = null;
+      let settledKeys = null;
       let initialized = false;
       stop = watch(selected.sessionId, (error, next) => {
         if (closed || res.destroyed || res.writableEnded) {
@@ -1222,32 +1252,46 @@ export function createConsoleHandler(backend, options = {}) {
         const render = currentRender();
         const nextFp = render.regionFingerprints(next);
         const liveUpdate = render.liveTranscriptUpdate(liveState, next);
+        const append = typeof render.renderSettledTranscriptAppend === "function"
+          ? render.renderSettledTranscriptAppend(settledKeys, next)
+          : { keys: settledKeys, html: "" };
         const initial = !initialized;
-        const transcriptChanged = nextFp.transcript !== fingerprints.transcript;
         const changed = render.SSE_REGION_NAMES.filter((name) =>
-          name !== "live" && (nextFp[name] !== fingerprints[name] || (name === "transcript" && liveUpdate.junction)));
-        const rebuildLive = initial || transcriptChanged || liveUpdate.junction;
-        const liveFrames = rebuildLive && liveUpdate.state
-          ? [{ event: "live", data: liveUpdate.state.html }]
-          : liveUpdate.frames;
-        if (changed.length === 0 && liveFrames.length === 0) {
+          name !== "live" && name !== "transcript" && nextFp[name] !== fingerprints[name]);
+        const liveFrames = [];
+        if (initial) {
+          // The GET and EventSource snapshots are not atomic. Recommission the
+          // small live cell on connect so the first later delta always has the
+          // text prefix it was calculated from; settled history is still never
+          // resent here.
+          if (liveUpdate.frames.length > 0) liveFrames.push(...liveUpdate.frames);
+        } else if (liveUpdate.frames.length > 0) {
+          liveFrames.push(...liveUpdate.frames);
+        } else if (liveUpdate.junction && !liveUpdate.state) {
+          liveFrames.push({ event: "live", data: "" });
+        }
+        const transcriptHtml = !initial && append.html ? append.html : "";
+        if (changed.length === 0 && liveFrames.length === 0 && !transcriptHtml) {
           fingerprints = nextFp;
           liveState = liveUpdate.state;
+          settledKeys = append.keys;
           initialized = true;
           return;
         }
         const { renderSessionRegion } = render;
         for (const name of changed) {
-          const body = name === "transcript"
-            ? render.renderTranscriptJunction(next)
-            : renderSessionRegion(name, next, paths);
-          res.write(sseEvent(name, body));
+          res.write(sseEvent(name, renderSessionRegion(name, next, paths)));
+        }
+        if (transcriptHtml) {
+          res.write(sseEvent(append.reset ? "transcript-reset" : "transcript", transcriptHtml));
         }
         for (const frame of liveFrames) {
           res.write(sseEvent(frame.event, frame.data));
         }
+        if (typeof res.flush === "function") res.flush();
         fingerprints = nextFp;
         liveState = liveUpdate.state;
+        settledKeys = append.keys;
         initialized = true;
       });
       keepalive = setInterval(() => {
@@ -1258,6 +1302,32 @@ export function createConsoleHandler(backend, options = {}) {
         res.write(": keepalive\n\n");
       }, ssePollMs);
       keepalive.unref?.();
+      return;
+    }
+
+    if (selected?.action === "tool") {
+      if (req.method !== "GET" && !head) {
+        write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
+        return;
+      }
+      try {
+        const snapshot = await view(selected.sessionId);
+        if (projectRoute && snapshot.project && snapshot.project !== projectRoute.project) {
+          text(res, 404, "DSH session is not in this project", head);
+          return;
+        }
+        const callId = String(selected.callId ?? "");
+        const node = (snapshot.conversation?.nodes ?? []).find((item) =>
+          item?.kind === "tool" && item.callId === callId);
+        if (!node) {
+          text(res, 404, "qq: tool output is not available", head);
+          return;
+        }
+        const { renderToolBody } = await loadRender();
+        write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, renderToolBody(node), head);
+      } catch (error) {
+        text(res, errorStatus(error), `DSH session unavailable: ${errorMessage(error)}`, head);
+      }
       return;
     }
 
@@ -1381,12 +1451,12 @@ export function createConsoleHandler(backend, options = {}) {
           error.status = 422;
           throw error;
         }
-        await mutationResponse(req, res, selected.sessionId);
+        await mutationResponse(req, res, selected.sessionId, "", bundledMutationRegionNames);
       } catch (error) {
         const message = errorMessage(error);
         if (isHtmx(req)) {
           try {
-            await mutationResponse(req, res, selected.sessionId, message);
+            await mutationResponse(req, res, selected.sessionId, message, bundledMutationRegionNames);
             return;
           } catch {
             // Fall through when the DSH session itself cannot be read.

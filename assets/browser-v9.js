@@ -1457,12 +1457,40 @@
   document.addEventListener("scroll", (event) => {
     if (event.target?.id === "transcript") captureTranscriptView(event.target);
   }, true);
+  const appendLiveTail = (elt, data) => {
+    if (!(elt instanceof HTMLElement) || elt.id !== "transcript-live") return false;
+    if (typeof data !== "string" || data.length === 0) return false;
+    let patch;
+    try {
+      patch = JSON.parse(data);
+    } catch {
+      return false;
+    }
+    if (patch?.op !== "qq-live-append"
+      || typeof patch.key !== "string"
+      || !Number.isSafeInteger(patch.from)
+      || patch.from < 0
+      || typeof patch.text !== "string") return false;
+    const block = [...elt.querySelectorAll(".message-live-text")]
+      .find((node) => node.dataset.liveKey === patch.key);
+    // A recognized append frame must never fall through to HTMX's innerHTML
+    // swap. If a reconnect raced an old DOM, the next full frame recommissions
+    // the cell without ever painting protocol JSON into the transcript.
+    if (!block || (block.textContent ?? "").length !== patch.from) return true;
+    const textNode = block.firstChild;
+    if (textNode?.nodeType === 3 && textNode === block.lastChild && typeof textNode.appendData === "function") {
+      textNode.appendData(patch.text);
+    } else {
+      block.append(patch.text);
+    }
+    return true;
+  };
   const swapTargetId = (event) => event.detail?.target?.id || event.target?.id || "";
   const touchesComposer = (id) =>
     id === "session-panel" || id === "session-composer" || id === "session-queue" || id === "pending-queue" || id === "composer";
   const touchesTranscript = (id) =>
     id === "session-panel" || id === "transcript" || id === "transcript-log" || id === "transcript-live"
-      || id.startsWith("live-assistant-");
+      || id === "transcript-anchor" || id.startsWith("live-assistant-");
   for (const eventName of ["htmx:beforeSwap", "htmx:sseBeforeMessage"]) {
     document.addEventListener(eventName, (event) => {
       const id = swapTargetId(event);
@@ -1470,6 +1498,17 @@
       if (touchesTranscript(id)) captureTranscriptView();
     });
   }
+  document.addEventListener("htmx:sseBeforeMessage", (event) => {
+    const elt = event.target instanceof HTMLElement ? event.target : event.detail?.target;
+    const data = typeof event.detail?.data === "string"
+      ? event.detail.data
+      : typeof event.detail?.elt?.id === "string" && typeof event.data === "string"
+        ? event.data
+        : "";
+    if (!appendLiveTail(elt, data)) return;
+    event.preventDefault();
+    if (transcriptView.follow) showLatest();
+  });
   for (const eventName of ["htmx:afterSwap", "htmx:sseMessage"]) {
     document.addEventListener(eventName, (event) => {
       const id = swapTargetId(event);

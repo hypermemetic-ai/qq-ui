@@ -157,6 +157,13 @@ function renderToolContent(node) {
   return '<p class="tool-empty">No output</p>';
 }
 
+/** Inner HTML for a tool card body. Closed cards omit this from first paint. */
+export function renderToolBody(node) {
+  if (!node || node.kind !== "tool") return "";
+  const title = node.resultView?.title ?? node.callView?.title ?? node.name ?? "unknown";
+  return `${renderToolContent(node)}${renderToolDocument(node, title, node.seq ?? "")}`;
+}
+
 function safeDocumentId(value) {
   const id = String(value ?? "").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
   return id || "output";
@@ -257,10 +264,16 @@ function renderConversationNode(node) {
                 ? "Stopped"
                 : "Failed";
     const tone = failed || stopped ? "bad" : node.status === "running" ? "running" : "ok";
-    const document = renderToolDocument(node, title, seq);
-    return `<details class="message message-tool tool-${escapeHtml(node.status)} tool-tone-${tone}" data-seq="${seq}" data-call-id="${escapeHtml(node.callId ?? "")}" data-card="${escapeHtml(card)}"${node.expanded ? " open" : ""}>
+    const callId = String(node.callId ?? "");
+    const lazy = !node.expanded && node.status !== "running" && callId.length > 0;
+    const href = lazy ? `tool/${encodeURIComponent(callId)}` : "";
+    const lazyAttrs = lazy
+      ? ` hx-get="${escapeHtml(href)}" hx-trigger="toggle once" hx-target="find .tool-body" hx-swap="innerHTML"`
+      : "";
+    const body = lazy ? "" : renderToolBody(node);
+    return `<details class="message message-tool tool-${escapeHtml(node.status)} tool-tone-${tone}" data-seq="${seq}" data-call-id="${escapeHtml(callId)}" data-card="${escapeHtml(card)}"${node.expanded ? " open" : ""}${lazyAttrs}>
       <summary><strong>${escapeHtml(title)}</strong><span class="tool-status tool-status-${tone}">${escapeHtml(status)}</span>${argument}</summary>
-      <div class="message-body">${renderToolContent(node)}${document}</div>
+      <div class="message-body tool-body">${body}</div>
     </details>`;
   }
   if (node?.kind === "command") {
@@ -362,14 +375,19 @@ function safeTurnFailure(code) {
   }
 }
 
-export function deriveStatus(events, agentStatus) {
+export function deriveStatus(events, agentStatus, turnStatus) {
   let openTurn;
   let lastEnd;
-  for (const event of events) {
-    if (event?.type === "turn/start") openTurn = event.data?.turn;
-    if (event?.type === "turn/end") {
-      if (openTurn === event.data?.turn) openTurn = undefined;
-      lastEnd = event.data?.reason;
+  if (turnStatus && typeof turnStatus === "object") {
+    openTurn = turnStatus.openTurn;
+    lastEnd = turnStatus.lastEnd;
+  } else {
+    for (const event of events) {
+      if (event?.type === "turn/start") openTurn = event.data?.turn;
+      if (event?.type === "turn/end") {
+        if (openTurn === event.data?.turn) openTurn = undefined;
+        lastEnd = event.data?.reason;
+      }
     }
   }
   if (agentStatus === "running" || (agentStatus === undefined && openTurn !== undefined)) {
@@ -851,6 +869,9 @@ function composer(paths, running, sessionId = "", findWork = "") {
 }
 
 export const SSE_REGION_NAMES = Object.freeze(["chrome", "transcript", "live", "queue", "composer", "popups"]);
+export const MUTATION_REGION_NAMES = Object.freeze(["chrome", "queue", "composer", "popups"]);
+/** Prompt/interrupt: SSE owns the queue. POST OOB of pending races claim and sticks a duplicate. */
+export const PROMPT_MUTATION_REGION_NAMES = Object.freeze(["chrome", "composer", "popups"]);
 export const SSE_REGION_IDS = Object.freeze({
   chrome: "session-chrome",
   transcript: "transcript-log",
@@ -892,14 +913,15 @@ function renderLiveAssistantBlock(node, block, index, key) {
   const turn = escapeHtml(node?.turn ?? "");
   const step = escapeHtml(node?.step ?? "");
   const time = eventTime(node?.time);
-  const target = liveBlockEvent(key, index, block?.type);
+  const type = block?.type === "reasoning" ? "reasoning" : block?.type === "image" ? "image" : "text";
+  const target = liveBlockEvent(key, index, type);
   const text = String(block?.text ?? "");
-  const stream = `<div class="message-text message-live-text" data-live-block="${index}">${escapeHtml(text)}</div>`;
-  if (block?.type === "reasoning") {
+  const stream = `<div class="message-text message-live-text" data-live-block="${index}" data-live-key="${escapeHtml(target)}">${escapeHtml(text)}</div>`;
+  if (type === "reasoning") {
     const label = time ? `Reasoning at ${time}` : "Reasoning";
     return `<section class="assistant-reasoning" aria-label="${escapeHtml(label)}" data-seq="${seq}" data-turn="${turn}" data-step="${step}" aria-busy="true">${stream}</section>`;
   }
-  if (block?.type === "image") {
+  if (type === "image") {
     return `<article class="message message-assistant message-streaming" data-seq="${seq}" data-turn="${turn}" data-step="${step}" aria-busy="true">${attachmentBlock(block)}</article>`;
   }
   const label = time ? `Assistant message at ${time}` : "Assistant message";
@@ -928,9 +950,34 @@ export function liveTranscriptState(snapshot) {
   return { key, kind: "assistant", segments, html: segments.map((segment) => segment.html).join("\n") };
 }
 
+function liveAppendFrames(previous, state) {
+  if (previous.kind !== "assistant" || state.kind !== "assistant") return null;
+  if (previous.segments.length !== state.segments.length) return null;
+  const frames = [];
+  for (let index = 0; index < state.segments.length; index += 1) {
+    const before = previous.segments[index];
+    const after = state.segments[index];
+    if (before.key !== after.key || before.type !== after.type) return null;
+    if (before.text === after.text) continue;
+    if (after.type === "image" || !after.text.startsWith(before.text)) return null;
+    frames.push({
+      event: "live",
+      data: JSON.stringify({
+        op: "qq-live-append",
+        key: after.event,
+        from: before.text.length,
+        text: after.text.slice(before.text.length),
+      }),
+    });
+  }
+  return frames.length > 0 ? frames : null;
+}
+
 /**
- * Live tail frames target the stable `live` event. HTMX replaces
- * `#transcript-live` innerHTML; suffix event names never reach the page.
+ * The stable `live` event opens or recommissions the live cell with HTML. Plain
+ * token growth stays on that same registered event, but carries only an append
+ * instruction for the existing text node. A segment/tool junction falls back
+ * to one HTML frame so markdown promotion can happen independently in settled.
  */
 export function liveTranscriptUpdate(previous, snapshot) {
   const state = liveTranscriptState(snapshot);
@@ -940,7 +987,9 @@ export function liveTranscriptUpdate(previous, snapshot) {
     return { state, junction: true, frames: frame };
   }
   if (state.html === previous.html) return { state, junction: false, frames: [] };
-  return { state, junction: false, frames: frame };
+  const append = liveAppendFrames(previous, state);
+  if (append) return { state, junction: false, frames: append };
+  return { state, junction: true, frames: frame };
 }
 
 function hxMutateAttrs() {
@@ -950,7 +999,7 @@ function hxMutateAttrs() {
 function sessionStatus(snapshot) {
   if (!snapshot?.id) return { key: "ready", label: "Ready" };
   const events = Array.isArray(snapshot.events) ? snapshot.events : [];
-  return deriveStatus(events, snapshot.agentStatus);
+  return deriveStatus(events, snapshot.agentStatus, snapshot.turnStatus);
 }
 
 function sessionFindWork(snapshot) {
@@ -972,6 +1021,8 @@ function isPopupMarkup(html) {
 function nodeFingerprint(node) {
   if (!node || typeof node !== "object") return "";
   const blocks = Array.isArray(node.blocks) ? node.blocks : Array.isArray(node.content) ? node.content : [];
+  const last = blocks.at(-1);
+  const lastText = typeof last?.text === "string" ? last.text : "";
   return [
     node.seq,
     node.kind,
@@ -979,9 +1030,20 @@ function nodeFingerprint(node) {
     node.turn,
     node.step,
     node.eventType,
-    node.outcome?.text ?? "",
-    blocks.map((block) => `${block?.type ?? ""}:${block?.text ?? ""}`).join("\n"),
+    node.callId ?? "",
+    node.messageId ?? "",
+    node.outcome?.kind ?? "",
+    last?.type ?? "",
+    lastText.length,
+    lastText.slice(-24),
   ];
+}
+
+function settledNodeKey(node) {
+  if (!node || typeof node !== "object") return "";
+  if (typeof node.key === "string" && node.key) return node.key;
+  if (node.kind === "tool") return `tool:${node.callId || node.seq || ""}`;
+  return `${node.kind ?? "node"}:${node.seq ?? ""}`;
 }
 
 function sseSwapAttrs(name, enabled, swap = "innerHTML") {
@@ -1030,14 +1092,51 @@ export function renderTranscriptSettled(snapshot) {
   if (!snapshot?.id) return "";
   const { settled, live } = splitTranscriptNodes(sessionNodes(snapshot));
   if (settled.length === 0 && live.length === 0) {
-    return '<p class="empty-transcript">This DSH session has no transcript yet.</p>';
+    return '<p id="transcript-empty" class="empty-transcript">This DSH session has no transcript yet.</p>';
   }
   return settled.map(renderSettledConversationNode).filter(Boolean).join("\n");
 }
 
-/** Clean settled markdown and clear raw live text in the same HTMX junction. */
+function transcriptAnchor() {
+  return regionShell("transcript-anchor", "transcript-anchor", "transcript", "", true, "beforebegin");
+}
+
+function transcriptSettledInner(snapshot) {
+  return `${renderTranscriptSettled(snapshot)}${transcriptAnchor()}`;
+}
+
+function isKeyPrefix(previous, next) {
+  if (!Array.isArray(previous) || !Array.isArray(next) || previous.length > next.length) return false;
+  for (let index = 0; index < previous.length; index += 1) {
+    if (previous[index] !== next[index]) return false;
+  }
+  return true;
+}
+
+/**
+ * HTML for newly settled nodes only. `#transcript-settled` is append-only after
+ * first paint unless a surface replace drops nodes, in which case the cell is
+ * recommissioned.
+ */
+export function renderSettledTranscriptAppend(previousKeys, snapshot) {
+  const { settled } = splitTranscriptNodes(sessionNodes(snapshot));
+  const keys = settled.map(settledNodeKey);
+  if (!Array.isArray(previousKeys)) return { keys, html: "", reset: false };
+  if (!isKeyPrefix(previousKeys, keys)) {
+    return { keys, html: transcriptSettledInner(snapshot), reset: true };
+  }
+  const seen = new Set(previousKeys);
+  const added = settled.filter((node) => !seen.has(settledNodeKey(node)));
+  let html = added.map(renderSettledConversationNode).filter(Boolean).join("\n");
+  if (previousKeys.length === 0 && added.length > 0) {
+    html += '<p id="transcript-empty" hx-swap-oob="delete"></p>';
+  }
+  return { keys, html, reset: false };
+}
+
+/** @deprecated Junctions append via renderSettledTranscriptAppend; live is its own region. */
 export function renderTranscriptJunction(snapshot) {
-  return `${renderTranscriptSettled(snapshot)}\n<div id="transcript-live" hx-swap-oob="innerHTML"></div>`;
+  return renderTranscriptSettled(snapshot);
 }
 
 export function renderTranscriptLive(snapshot) {
@@ -1122,7 +1221,8 @@ export function regionFingerprints(snapshot) {
     ]),
     transcript: JSON.stringify([
       snapshot?.id,
-      settled.map(nodeFingerprint),
+      settled.length,
+      nodeFingerprint(settled.at(-1)),
     ]),
     live: JSON.stringify([
       snapshot?.id,
@@ -1158,7 +1258,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   if (emptyProject) return `${chrome}${popups}`;
   return `${chrome}
     <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
-      ${regionShell("transcript-log", "transcript-log", "transcript", renderTranscriptSettled(snapshot), true)}
+      <div id="transcript-log" class="transcript-log" hx-history="false">${regionShell("transcript-settled", "transcript-settled", "transcript-reset", transcriptSettledInner(snapshot), true)}</div>
       ${regionShell("transcript-live", "transcript-live", "live", renderTranscriptLive(snapshot), true)}
     </div>
     ${regionShell("session-queue", "session-queue", "queue", renderQueue(snapshot, paths), true)}
@@ -1166,9 +1266,12 @@ export function renderSessionContent(snapshot, paths, notice = "") {
     ${popups}`;
 }
 
-/** HTMX mutation response: out-of-band innerHTML for each named region. */
-export function renderMutationOob(snapshot, paths, notice = "") {
-  return SSE_REGION_NAMES.map((name) => {
+/**
+ * HTMX mutation response. Transcript and live tail belong to SSE. Queue is
+ * SSE-owned on prompt; queue POST still replaces `#session-queue`.
+ */
+export function renderMutationOob(snapshot, paths, notice = "", regions = MUTATION_REGION_NAMES) {
+  return regions.map((name) => {
     const id = SSE_REGION_IDS[name];
     const inner = renderSessionRegion(name, snapshot, paths, notice);
     return `<div id="${escapeHtml(id)}" hx-swap-oob="innerHTML">${inner}</div>`;

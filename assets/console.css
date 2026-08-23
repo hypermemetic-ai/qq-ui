@@ -581,7 +581,8 @@ details.session-menu.session-controls {
   min-width: 0;
 }
 
-.transcript-live:empty {
+.transcript-live:empty,
+.transcript-anchor {
   display: none;
 }
 
