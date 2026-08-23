@@ -894,7 +894,7 @@ function renderLiveAssistantBlock(node, block, index, key) {
   const time = eventTime(node?.time);
   const target = liveBlockEvent(key, index, block?.type);
   const text = String(block?.text ?? "");
-  const stream = `<div id="${escapeHtml(target)}" class="message-text message-live-text" data-live-block="${index}" sse-swap="${escapeHtml(target)}" hx-swap="beforeend">${escapeHtml(text)}</div>`;
+  const stream = `<div class="message-text message-live-text" data-live-block="${index}">${escapeHtml(text)}</div>`;
   if (block?.type === "reasoning") {
     const label = time ? `Reasoning at ${time}` : "Reasoning";
     return `<section class="assistant-reasoning" aria-label="${escapeHtml(label)}" data-seq="${seq}" data-turn="${turn}" data-step="${step}" aria-busy="true">${stream}</section>`;
@@ -929,35 +929,18 @@ export function liveTranscriptState(snapshot) {
 }
 
 /**
- * Return only append frames for cumulative model chunks. A junction asks the
- * caller to clean the settled log, clear the live tail, then append `state.html`.
+ * Live tail frames target the stable `live` event. HTMX replaces
+ * `#transcript-live` innerHTML; suffix event names never reach the page.
  */
 export function liveTranscriptUpdate(previous, snapshot) {
   const state = liveTranscriptState(snapshot);
-  if (!previous) {
-    return { state, junction: false, frames: state ? [{ event: "live", data: state.html }] : [] };
-  }
+  const frame = state ? [{ event: "live", data: state.html }] : [];
+  if (!previous) return { state, junction: false, frames: frame };
   if (!state || previous.key !== state.key || previous.kind !== state.kind) {
-    return { state, junction: true, frames: state ? [{ event: "live", data: state.html }] : [] };
+    return { state, junction: true, frames: frame };
   }
-  if (state.kind === "tool") return { state, junction: false, frames: [] };
-  if (state.segments.length < previous.segments.length) {
-    return { state, junction: true, frames: [{ event: "live", data: state.html }] };
-  }
-  const frames = [];
-  for (let index = 0; index < previous.segments.length; index += 1) {
-    const before = previous.segments[index];
-    const after = state.segments[index];
-    if (!after || before.key !== after.key || !after.text.startsWith(before.text)) {
-      return { state, junction: true, frames: [{ event: "live", data: state.html }] };
-    }
-    const suffix = after.text.slice(before.text.length);
-    if (suffix) frames.push({ event: after.event, data: escapeHtml(suffix) });
-  }
-  for (const segment of state.segments.slice(previous.segments.length)) {
-    frames.push({ event: "live", data: segment.html });
-  }
-  return { state, junction: false, frames };
+  if (state.html === previous.html) return { state, junction: false, frames: [] };
+  return { state, junction: false, frames: frame };
 }
 
 function hxMutateAttrs() {
@@ -1176,7 +1159,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   return `${chrome}
     <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
       ${regionShell("transcript-log", "transcript-log", "transcript", renderTranscriptSettled(snapshot), true)}
-      ${regionShell("transcript-live", "transcript-live", "live", renderTranscriptLive(snapshot), true, "beforeend")}
+      ${regionShell("transcript-live", "transcript-live", "live", renderTranscriptLive(snapshot), true)}
     </div>
     ${regionShell("session-queue", "session-queue", "queue", renderQueue(snapshot, paths), true)}
     ${regionShell("session-composer", "session-composer", "", renderComposer(snapshot, paths), false)}
