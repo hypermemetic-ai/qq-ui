@@ -575,6 +575,8 @@ details.session-menu.session-controls {
 
 .transcript-log,
 .transcript-live,
+.transcript-live-text,
+.transcript-live-tool,
 .transcript-settled {
   display: flex;
   flex-direction: column;
@@ -582,7 +584,9 @@ details.session-menu.session-controls {
   min-width: 0;
 }
 
-.transcript-live:empty,
+.transcript-live-text:empty,
+.transcript-live-tool:empty,
+.transcript-live:not(:has(.message, .assistant-reasoning, details)),
 .transcript-anchor {
   display: none;
 }
@@ -1717,6 +1721,12 @@ body > footer {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.drawer-head h2 a {
+  color: inherit;
+  text-decoration: none;
+}
+.drawer-head h2 a:hover,
+.drawer-head h2 a:focus-visible { color: #fff; }
 #project-drawer-title:focus { outline: none; }
 
 .drawer-close {

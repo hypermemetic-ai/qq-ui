@@ -868,30 +868,33 @@ function composer(paths, running, sessionId = "", findWork = "") {
     </form>`;
 }
 
-export const SSE_REGION_NAMES = Object.freeze(["chrome", "transcript", "live", "queue", "composer", "popups"]);
+export const SSE_REGION_NAMES = Object.freeze(["chrome", "transcript", "live", "live-tool", "queue", "composer", "popups"]);
+export const LIVE_SSE_EVENTS = Object.freeze(["live", "live-tool"]);
 export const MUTATION_REGION_NAMES = Object.freeze(["chrome", "queue", "composer", "popups"]);
 /** Prompt/interrupt: SSE owns the queue. POST OOB of pending races claim and sticks a duplicate. */
 export const PROMPT_MUTATION_REGION_NAMES = Object.freeze(["chrome", "composer", "popups"]);
 export const SSE_REGION_IDS = Object.freeze({
   chrome: "session-chrome",
   transcript: "transcript-log",
-  live: "transcript-live",
+  live: "transcript-live-text",
+  "live-tool": "transcript-live-tool",
   queue: "session-queue",
   composer: "composer-turn-controls",
   popups: "session-popups",
 });
 
-function isLiveNode(node) {
-  return (node?.kind === "assistant" && node.status === "streaming")
-    || (node?.kind === "tool" && node.status === "running");
-}
-
-/** A node streams only while it is the active tail. A following tool is a cap. */
+/** Streaming assistant text and a running tool are independent islands. A tool is not a cap. */
 export function splitTranscriptNodes(nodes) {
   const list = Array.isArray(nodes) ? nodes : [];
-  const tail = list.at(-1);
-  if (!isLiveNode(tail)) return { settled: list, live: [] };
-  return { settled: list.slice(0, -1), live: [tail] };
+  const settled = [];
+  const liveText = [];
+  const liveTool = [];
+  for (const node of list) {
+    if (node?.kind === "assistant" && node.status === "streaming") liveText.push(node);
+    else if (node?.kind === "tool" && node.status === "running") liveTool.push(node);
+    else settled.push(node);
+  }
+  return { settled, live: liveText, liveText, liveTool };
 }
 
 function safeLiveId(value) {
@@ -928,15 +931,9 @@ function renderLiveAssistantBlock(node, block, index, key) {
   return `<article class="message message-assistant message-streaming" data-seq="${seq}" data-turn="${turn}" data-step="${step}" aria-label="${escapeHtml(label)}" aria-busy="true">${stream}</article>`;
 }
 
-/** Serializable cursor for one open transcript tail. */
-export function liveTranscriptState(snapshot) {
-  const { live } = splitTranscriptNodes(sessionNodes(snapshot));
-  const node = live[0];
+function liveAssistantIsland(node) {
   if (!node) return null;
   const key = liveNodeKey(node);
-  if (node.kind === "tool") {
-    return { key, kind: "tool", segments: [], html: renderConversationNode(node) };
-  }
   const segments = (Array.isArray(node.blocks) ? node.blocks : []).map((block, index) => {
     const type = block?.type === "reasoning" ? "reasoning" : block?.type === "image" ? "image" : "text";
     return {
@@ -948,6 +945,38 @@ export function liveTranscriptState(snapshot) {
     };
   });
   return { key, kind: "assistant", segments, html: segments.map((segment) => segment.html).join("\n") };
+}
+
+function liveToolIsland(node) {
+  if (!node) return null;
+  return { key: liveNodeKey(node), kind: "tool", segments: [], html: renderConversationNode(node) };
+}
+
+/** Serializable cursors for the open text island and the open tool island. */
+export function liveTranscriptState(snapshot) {
+  const { liveText, liveTool } = splitTranscriptNodes(sessionNodes(snapshot));
+  return {
+    text: liveText.length === 1
+      ? liveAssistantIsland(liveText[0])
+      : liveText.length > 1
+        ? {
+            key: liveText.map(liveNodeKey).join("+"),
+            kind: "assistant",
+            segments: [],
+            html: liveText.map((node) => liveAssistantIsland(node)?.html ?? "").join("\n"),
+          }
+        : null,
+    tool: liveTool.length === 1
+      ? liveToolIsland(liveTool[0])
+      : liveTool.length > 1
+        ? {
+            key: liveTool.map(liveNodeKey).join("+"),
+            kind: "tool",
+            segments: [],
+            html: liveTool.map((node) => liveToolIsland(node)?.html ?? "").join("\n"),
+          }
+        : null,
+  };
 }
 
 function liveAppendFrames(previous, state) {
@@ -973,23 +1002,34 @@ function liveAppendFrames(previous, state) {
   return frames.length > 0 ? frames : null;
 }
 
+function islandUpdate(previous, next, event) {
+  if (!previous && !next) return { junction: false, frames: [] };
+  if (!next) return { junction: true, frames: [{ event, data: "" }] };
+  if (!previous || previous.key !== next.key || previous.kind !== next.kind) {
+    return { junction: true, frames: [{ event, data: next.html }] };
+  }
+  if (next.html === previous.html) return { junction: false, frames: [] };
+  if (event === "live") {
+    const append = liveAppendFrames(previous, next);
+    if (append) return { junction: false, frames: append };
+  }
+  return { junction: true, frames: [{ event, data: next.html }] };
+}
+
 /**
- * The stable `live` event opens or recommissions the live cell with HTML. Plain
- * token growth stays on that same registered event, but carries only an append
- * instruction for the existing text node. A segment/tool junction falls back
- * to one HTML frame so markdown promotion can happen independently in settled.
+ * Token growth stays on `live` and patches the existing text node. A running
+ * tool is a separate `live-tool` island, so it cannot replace the text cell.
+ * Markdown promotion happens when the assistant node actually settles.
  */
 export function liveTranscriptUpdate(previous, snapshot) {
   const state = liveTranscriptState(snapshot);
-  const frame = state ? [{ event: "live", data: state.html }] : [];
-  if (!previous) return { state, junction: false, frames: frame };
-  if (!state || previous.key !== state.key || previous.kind !== state.kind) {
-    return { state, junction: true, frames: frame };
-  }
-  if (state.html === previous.html) return { state, junction: false, frames: [] };
-  const append = liveAppendFrames(previous, state);
-  if (append) return { state, junction: false, frames: append };
-  return { state, junction: true, frames: frame };
+  const text = islandUpdate(previous?.text, state.text, "live");
+  const tool = islandUpdate(previous?.tool, state.tool, "live-tool");
+  return {
+    state,
+    junction: text.junction || tool.junction,
+    frames: [...text.frames, ...tool.frames],
+  };
 }
 
 function hxMutateAttrs() {
@@ -1090,8 +1130,8 @@ function renderSettledConversationNode(node) {
 
 export function renderTranscriptSettled(snapshot) {
   if (!snapshot?.id) return "";
-  const { settled, live } = splitTranscriptNodes(sessionNodes(snapshot));
-  if (settled.length === 0 && live.length === 0) {
+  const { settled, liveText, liveTool } = splitTranscriptNodes(sessionNodes(snapshot));
+  if (settled.length === 0 && liveText.length === 0 && liveTool.length === 0) {
     return '<p id="transcript-empty" class="empty-transcript">This DSH session has no transcript yet.</p>';
   }
   return settled.map(renderSettledConversationNode).filter(Boolean).join("\n");
@@ -1139,9 +1179,17 @@ export function renderTranscriptJunction(snapshot) {
   return renderTranscriptSettled(snapshot);
 }
 
+export function renderLiveText(snapshot) {
+  return liveTranscriptState(snapshot).text?.html ?? "";
+}
+
+export function renderLiveTool(snapshot) {
+  return liveTranscriptState(snapshot).tool?.html ?? "";
+}
+
 export function renderTranscriptLive(snapshot) {
   if (!snapshot?.id) return "";
-  return liveTranscriptState(snapshot)?.html ?? "";
+  return `${regionShell("transcript-live-text", "transcript-live-text", "live", renderLiveText(snapshot), true)}${regionShell("transcript-live-tool", "transcript-live-tool", "live-tool", renderLiveTool(snapshot), true)}`;
 }
 
 export function renderTranscript(snapshot) {
@@ -1185,7 +1233,9 @@ export function renderSessionRegion(name, snapshot, paths, notice = "") {
     case "transcript":
       return renderTranscriptSettled(snapshot);
     case "live":
-      return renderTranscriptLive(snapshot);
+      return renderLiveText(snapshot);
+    case "live-tool":
+      return renderLiveTool(snapshot);
     case "queue":
       return renderQueue(snapshot, paths);
     case "composer":
@@ -1202,7 +1252,7 @@ export function regionFingerprints(snapshot) {
   const sessions = Array.isArray(snapshot?.sessions) ? snapshot.sessions : [];
   const status = sessionStatus(snapshot);
   const offer = snapshot?.offer;
-  const { settled, live } = splitTranscriptNodes(sessionNodes(snapshot));
+  const { settled, liveText, liveTool } = splitTranscriptNodes(sessionNodes(snapshot));
   return {
     chrome: JSON.stringify([
       snapshot?.id,
@@ -1226,7 +1276,11 @@ export function regionFingerprints(snapshot) {
     ]),
     live: JSON.stringify([
       snapshot?.id,
-      live.map(nodeFingerprint),
+      liveText.map(nodeFingerprint),
+    ]),
+    "live-tool": JSON.stringify([
+      snapshot?.id,
+      liveTool.map(nodeFingerprint),
     ]),
     queue: JSON.stringify((snapshot?.conversation?.pending ?? []).map((item) => [item.id, item.target, item.text])),
     composer: JSON.stringify([
@@ -1259,7 +1313,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   return `${chrome}
     <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
       <div id="transcript-log" class="transcript-log" hx-history="false">${regionShell("transcript-settled", "transcript-settled", "transcript-reset", transcriptSettledInner(snapshot), true)}</div>
-      ${regionShell("transcript-live", "transcript-live", "live", renderTranscriptLive(snapshot), true)}
+      <div id="transcript-live" class="transcript-live">${renderTranscriptLive(snapshot)}</div>
     </div>
     ${regionShell("session-queue", "session-queue", "queue", renderQueue(snapshot, paths), true)}
     ${regionShell("session-composer", "session-composer", "", renderComposer(snapshot, paths), false)}
@@ -1343,9 +1397,9 @@ function drawerQuery(path) {
 function drawerEntryHref(entry, drawer, paths) {
   if (entry.type === "project") {
     const project = String(entry.project ?? entry.name ?? "");
-    const path = String(entry.path ?? "");
-    const qualified = `~/${project}${path ? `/${path}` : ""}`;
-    return `${paths.canonical}${drawerQuery(qualified)}`;
+    const folder = String(entry.folder ?? "");
+    const folderPath = folder ? `/${encodeURIComponent(folder)}` : "";
+    return `${paths.projectsBase}/${encodeURIComponent(project)}${folderPath}`;
   }
   if (entry.type === "directory") {
     const qualified = drawer.project ? `~/${drawer.project}/${entry.path}` : entry.path;
@@ -1378,12 +1432,9 @@ export function renderProjectDrawer(drawer, paths, options = {}) {
       : `<a href="${escapeHtml(href)}" title="${escapeHtml(label)}">${escapeHtml(label)}</a>`}</li>`;
   }).join("");
   const projectsHref = paths.projectsSession || "/qq/projects";
-  const atRootLevel = drawer.scope === "projects" || !drawer.path;
-  const projectsRow = atRootLevel
-    ? (onProjectsSession
-      ? `<li><span class="drawer-entry" aria-current="page" title="~/projects"><span class="drawer-name">~/projects</span></span></li>`
-      : `<li><a class="drawer-entry" data-entry-type="projects" href="${escapeHtml(projectsHref)}" aria-label="Open the projects session" title="~/projects"><span class="drawer-name">~/projects</span></a></li>`)
-    : "";
+  const title = onProjectsSession
+    ? "projects"
+    : `<a href="${escapeHtml(projectsHref)}" aria-label="Open the projects session">projects</a>`;
   const upPath = drawer.scope === "projects"
     ? ""
     : drawer.path
@@ -1414,18 +1465,14 @@ export function renderProjectDrawer(drawer, paths, options = {}) {
     const projectAttr = entry.project ? ` data-project="${escapeHtml(entry.project)}"` : "";
     const folderAttr = entry.folder ? ` data-folder="${escapeHtml(entry.folder)}"` : "";
     const treeAction = entry.type === "file" ? "open" : "expand";
-    const suffix = entry.type === "directory" || entry.type === "project" ? "/" : "";
     return `<li><a class="drawer-entry" data-entry-type="${escapeHtml(entry.type)}" data-tree-action="${treeAction}" data-file-kind="${escapeHtml(entry.kind ?? "")}"${projectAttr}${folderAttr}${pathAttr} href="${escapeHtml(href)}" aria-label="${escapeHtml(`${action} ${entry.name}`)}">
-      <span class="drawer-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}${suffix}</span>
+      <span class="drawer-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</span>
     </a></li>`;
   }).join("");
-  const empty = `${projectsRow}${rows}` || '<li class="drawer-empty">nothing at this level</li>';
+  const empty = rows || '<li class="drawer-empty">nothing at this level</li>';
   const crumbs = breadcrumbHtml
     ? `<nav class="drawer-breadcrumbs" aria-label="File location"><ol>${breadcrumbHtml}</ol></nav>`
     : "";
-  const title = atRootLevel
-    ? "~/projects"
-    : (nestedCrumbs.at(-1)?.name ?? drawer.path ?? "files");
   const drawerBrowserPath = drawer.scope === "projects"
     ? "~"
     : `~/${drawer.project}${drawer.path ? `/${drawer.path}` : ""}`;
@@ -1433,7 +1480,7 @@ export function renderProjectDrawer(drawer, paths, options = {}) {
   <div id="project-drawer-backdrop" class="drawer-backdrop"${opened ? "" : " hidden"}></div>
   <aside id="project-drawer" class="project-drawer" role="dialog" aria-modal="true" aria-hidden="${opened ? "false" : "true"}" aria-labelledby="project-drawer-title" data-drawer-path="${escapeHtml(drawerBrowserPath)}"${opened ? "" : " inert"}>
     <header class="drawer-head">
-      <h2 id="project-drawer-title" tabindex="-1">${escapeHtml(title)}</h2>
+      <h2 id="project-drawer-title" tabindex="-1">${title}</h2>
       <button class="drawer-close" type="button" aria-label="Close files">${bannerMark("close")}</button>
     </header>
     ${crumbs}
@@ -1462,7 +1509,7 @@ function documentHead(assetPaths, title = "qq", options = {}) {
   <link rel="stylesheet" href="${escapeHtml(assetPaths.css)}">
   <script defer src="${escapeHtml(assetPaths.htmx)}"></script>
   <script defer src="${escapeHtml(assetPaths.sse)}"></script>
-  <script defer src="${escapeHtml(assetPaths.browser)}" data-service-worker="${escapeHtml(assetPaths.serviceWorker)}"${assetPaths.uiGeneration ? ` data-ui-generation="${escapeHtml(assetPaths.uiGeneration)}"` : ""}></script>
+  <script defer src="${escapeHtml(assetPaths.browser)}" data-service-worker="${escapeHtml(assetPaths.serviceWorker)}"${assetPaths.uiGeneration ? ` data-ui-generation="${escapeHtml(assetPaths.uiGeneration)}"` : ""}${assetPaths.uiRevision ? ` data-ui-revision="${escapeHtml(assetPaths.uiRevision)}"` : ""}></script>
   <script defer src="/qq/dictate/client.js"></script>
 </head>`;
 }
@@ -1693,7 +1740,7 @@ ${documentHead(assetPaths)}
     <span>Sequential handoff</span>
   </header>
   <main id="console-stream"${backgroundInert}${paths.events ? ` hx-ext="sse" sse-connect="${escapeHtml(paths.events)}"` : ""} hx-history="false">
-    ${paths.events ? `<div id="ui-generation" hidden sse-swap="ui" hx-swap="none"></div>` : ""}
+    ${paths.events ? `<div id="ui-generation" hidden sse-swap="ui" hx-swap="none"${assetPaths.uiRevision ? ` data-ui-revision="${escapeHtml(assetPaths.uiRevision)}"` : ""}></div>` : ""}
     <section id="session-panel" class="session-panel" aria-labelledby="session-heading">${content}</section>
   </main>
   <footer${backgroundInert}>DSH owns session identity, transcript order, turn status, and interruption. Browser view state is not shared.</footer>

@@ -15,8 +15,11 @@ On phone, a deliberate rightward pull across the ordinary app surface directly
 moves the compact one-level project drawer, which settles from release distance
 and velocity. An open drawer closes by dragging left; tapping the empty dimmer
 does nothing. Native vertical scrolling, horizontal file panning, and controls
-keep their own touch gestures. Folder and `~/projects`
-navigation stay URL-addressed; project choices only navigate. Readable files use
+keep their own touch gestures. The drawer is labelled projects at the top and
+taps through to the projects session; project rows jump to that project's
+session. Folders keep the square mark and no trailing slash. Each project has
+its own sessions list; session ids stay universal. Folder navigation stays
+URL-addressed. Readable files use
 one full-viewport, pitch-black document viewer. Markdown-It
 15.0.0 renders Markdown with raw HTML disabled and allowlisted links, while
 highlight.js 11.12.0 deterministically highlights recognized code languages.

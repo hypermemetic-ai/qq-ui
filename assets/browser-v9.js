@@ -1458,7 +1458,7 @@
     if (event.target?.id === "transcript") captureTranscriptView(event.target);
   }, true);
   const appendLiveTail = (elt, data) => {
-    if (!(elt instanceof HTMLElement) || elt.id !== "transcript-live") return false;
+    if (!(elt instanceof HTMLElement) || elt.id !== "transcript-live-text") return false;
     if (typeof data !== "string" || data.length === 0) return false;
     let patch;
     try {
@@ -1490,6 +1490,7 @@
     id === "session-panel" || id === "session-composer" || id === "session-queue" || id === "pending-queue" || id === "composer";
   const touchesTranscript = (id) =>
     id === "session-panel" || id === "transcript" || id === "transcript-log" || id === "transcript-live"
+      || id === "transcript-live-text" || id === "transcript-live-tool"
       || id === "transcript-anchor" || id.startsWith("live-assistant-");
   for (const eventName of ["htmx:beforeSwap", "htmx:sseBeforeMessage"]) {
     document.addEventListener(eventName, (event) => {

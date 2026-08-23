@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -212,6 +213,31 @@ const BOOT_GENERATION = liveGenerationStamp();
 export function readUiGeneration(liveAssets = false) {
   return liveAssets ? liveGenerationStamp() : BOOT_GENERATION;
 }
+
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+const BOOT_STARTED_AT = new Date().toISOString();
+
+export function readUiRevision(cwd = REPO_ROOT) {
+  try {
+    const sha = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+      cwd, encoding: "utf8", timeout: 2_000,
+    }).trim();
+    const dirty = execFileSync("git", ["status", "--porcelain"], {
+      cwd, encoding: "utf8", timeout: 2_000,
+    }).trim().length > 0;
+    return { sha, dirty };
+  } catch {
+    return { sha: "", dirty: false };
+  }
+}
+
+function formatUiRevision(revision) {
+  if (!revision?.sha) return "";
+  return revision.dirty ? `${revision.sha}:dirty` : revision.sha;
+}
+
+const BOOT_REVISION = readUiRevision();
+const BOOT_REVISION_LABEL = formatUiRevision(BOOT_REVISION);
 
 export function createRootRedirectHandler(basePath = "/qq") {
   const target = normalizeBasePath(basePath);
@@ -552,6 +578,7 @@ export function createConsoleHandler(backend, options = {}) {
   const pageAssetPaths = () => Object.freeze({
     ...assetPaths,
     uiGeneration: readUiGeneration(liveAssets),
+    uiRevision: liveAssets ? formatUiRevision(readUiRevision()) : BOOT_REVISION_LABEL,
   });
   const streams = new Set();
   const findWork = new Map();
@@ -639,20 +666,21 @@ export function createConsoleHandler(backend, options = {}) {
             context: "projects",
             ...(snapshot.alias ? { alias: snapshot.alias } : {}),
           }]
-        : await backend.list(snapshot.project);
+        : await backend.list(snapshot.project, snapshot.folder ?? "");
     if (snapshot.id && !available.some((session) => session.id === snapshot.id)) {
       available.unshift({
         id: snapshot.id,
         createdAt: 0,
         ...(snapshot.scope ? { scope: snapshot.scope } : {}),
         ...(snapshot.project ? { project: snapshot.project } : {}),
+        ...(snapshot.folder ? { folder: snapshot.folder } : {}),
       });
     }
     return withSheets({ ...snapshot, sessions: available });
   }
 
   async function projectView(project, folder) {
-    const available = await backend.list(project, folder);
+    const available = await backend.list(project, folder ?? "");
     const meta = backend.listProjects().find((entry) => entry.name === project);
     const folderMeta = folder
       ? (meta?.folders ?? []).find((entry) => entry.name === folder)
@@ -882,6 +910,24 @@ export function createConsoleHandler(backend, options = {}) {
       url = new URL(req.url ?? basePath, "http://qq-ui.invalid");
     } catch {
       text(res, 400, "Malformed request URL", head);
+      return;
+    }
+
+    if (url.pathname === `${basePath}/health` && (req.method === "GET" || head)) {
+      const revision = liveAssets ? readUiRevision() : BOOT_REVISION;
+      write(
+        res,
+        200,
+        { ...SECURITY_HEADERS, "Content-Type": "application/json; charset=utf-8" },
+        JSON.stringify({
+          generation: readUiGeneration(liveAssets),
+          revision: revision.sha,
+          dirty: revision.dirty,
+          pid: process.pid,
+          startedAt: BOOT_STARTED_AT,
+        }),
+        head,
+      );
       return;
     }
 
@@ -1130,7 +1176,7 @@ export function createConsoleHandler(backend, options = {}) {
         try {
           const groupedPicker = known.grouped === true && !projectRoute.folder;
           if (!groupedPicker) {
-            const rows = await backend.list(projectRoute.project, projectRoute.folder);
+            const rows = await backend.list(projectRoute.project, projectRoute.folder ?? "");
             if (rows[0]) {
               write(
                 res,
@@ -1299,18 +1345,16 @@ export function createConsoleHandler(backend, options = {}) {
             : { keys: settledKeys, html: "" };
           const initial = !initialized;
           const changed = render.SSE_REGION_NAMES.filter((name) =>
-            name !== "live" && name !== "transcript" && nextFp[name] !== fingerprints[name]);
+            name !== "live" && name !== "live-tool" && name !== "transcript" && nextFp[name] !== fingerprints[name]);
           const liveFrames = [];
           if (initial) {
             // The GET and EventSource snapshots are not atomic. Recommission the
-            // small live cell on connect so the first later delta always has the
-            // text prefix it was calculated from; settled history is still never
-            // resent here.
+            // small live islands on connect so the first later delta always has
+            // the text prefix it was calculated from; settled history is still
+            // never resent here.
             if (liveUpdate.frames.length > 0) liveFrames.push(...liveUpdate.frames);
           } else if (liveUpdate.frames.length > 0) {
             liveFrames.push(...liveUpdate.frames);
-          } else if (liveUpdate.junction && !liveUpdate.state) {
-            liveFrames.push({ event: "live", data: "" });
           }
           const transcriptHtml = !initial && append.html ? append.html : "";
           const generation = readUiGeneration(liveAssets);
@@ -1762,6 +1806,7 @@ export const internals = Object.freeze({
   parseProjectRoute,
   resolveAsset,
   readUiGeneration,
+  readUiRevision,
   routes,
   sameOrigin,
   sseEvent,
