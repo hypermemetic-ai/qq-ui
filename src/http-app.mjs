@@ -576,10 +576,6 @@ export function createConsoleHandler(backend, options = {}) {
     return next;
   }
 
-  function viewFingerprint(snapshot) {
-    return JSON.stringify(bundledRegionFingerprints(snapshot));
-  }
-
   async function view(sessionId) {
     const snapshot = await backend.read(sessionId);
     const available = snapshot.scope === "home" && typeof backend.listHome === "function"
@@ -659,37 +655,72 @@ export function createConsoleHandler(backend, options = {}) {
     return locationFor(snapshot);
   }
 
+  const SHEET_KEYS = Object.freeze([
+    "offer", "approval", "loginSheet", "overlay", "progress",
+    "sessionMode", "workflows", "activeProjects", "findWork",
+  ]);
+
+  function sheetFields(snapshot) {
+    const sheets = {};
+    for (const key of SHEET_KEYS) {
+      if (snapshot?.[key] !== undefined) sheets[key] = snapshot[key];
+    }
+    return sheets;
+  }
+
+  async function loadSheets(sessionId) {
+    return sheetFields(await withSheets({ id: sessionId }));
+  }
+
   function watch(sessionId, listener, extra = {}) {
     if (typeof backend.observe !== "function") {
       throw new Error("qq-ui: qq service observe() is required");
     }
-    if (!readOffer && !readOverlay && !readProgress && !inFindMode && !sessionModeFor && !workflowsFor) {
-      return backend.observe(sessionId, listener, { intervalMs: ssePollMs, ...extra });
-    }
     const intervalMs = extra.intervalMs ?? ssePollMs;
+    const hasSheets = Boolean(
+      readOffer || readOverlay || readProgress || readApproval || readLoginSheet
+      || inFindMode || sessionModeFor || workflowsFor,
+    );
     let cancelled = false;
-    let timer;
-    let fingerprint;
-    const tick = async () => {
+    let sheets = {};
+    let lastSnapshot = null;
+    const deliver = (snapshot) => {
+      if (cancelled || !snapshot) return;
+      try { listener(null, { ...snapshot, ...sheets }); } catch {}
+    };
+    const stopObserve = backend.observe(sessionId, (error, snapshot) => {
       if (cancelled) return;
+      if (error) {
+        try { listener(error); } catch {}
+        return;
+      }
+      lastSnapshot = snapshot;
+      deliver(snapshot);
+    }, { intervalMs, ...extra });
+    let timer;
+    let sheetFp;
+    const tickSheets = async () => {
+      if (cancelled || !hasSheets) return;
       try {
-        const snapshot = await view(sessionId);
-        const next = viewFingerprint(snapshot);
-        if (next !== fingerprint) {
-          fingerprint = next;
-          try { listener(null, snapshot); } catch {}
+        const next = await loadSheets(sessionId);
+        const fingerprint = JSON.stringify(next);
+        if (fingerprint !== sheetFp) {
+          sheetFp = fingerprint;
+          sheets = next;
+          deliver(lastSnapshot);
         }
       } catch (error) {
         try { listener(error); } catch {}
       }
       if (cancelled) return;
-      timer = setTimeout(tick, intervalMs);
+      timer = setTimeout(tickSheets, intervalMs);
       timer.unref?.();
     };
-    void tick();
+    if (hasSheets) void tickSheets();
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      try { stopObserve?.(); } catch {}
     };
   }
 
@@ -725,23 +756,44 @@ export function createConsoleHandler(backend, options = {}) {
     text(res, 409, message);
   }
 
+  const bundledRender = Object.freeze({
+    renderDocumentViewerProofPage: bundledRenderDocumentViewerProofPage,
+    renderFilePage: bundledRenderFilePage,
+    renderPage: bundledRenderPage,
+    renderSessionContent: bundledRenderSessionContent,
+    renderSessionRegion: bundledRenderSessionRegion,
+    renderTranscriptJunction: bundledRenderTranscriptJunction,
+    liveTranscriptUpdate: bundledLiveTranscriptUpdate,
+    renderMutationOob: bundledRenderMutationOob,
+    regionFingerprints: bundledRegionFingerprints,
+    SSE_REGION_NAMES: bundledSseRegionNames,
+  });
+  let liveRender = bundledRender;
+  let liveRenderStamp = 0;
+
   async function loadRender() {
-    if (!liveAssets) {
-      return {
-        renderDocumentViewerProofPage: bundledRenderDocumentViewerProofPage,
-        renderFilePage: bundledRenderFilePage,
-        renderPage: bundledRenderPage,
-        renderSessionContent: bundledRenderSessionContent,
-        renderSessionRegion: bundledRenderSessionRegion,
-        renderTranscriptJunction: bundledRenderTranscriptJunction,
-        liveTranscriptUpdate: bundledLiveTranscriptUpdate,
-        renderMutationOob: bundledRenderMutationOob,
-        regionFingerprints: bundledRegionFingerprints,
-        SSE_REGION_NAMES: bundledSseRegionNames,
-      };
-    }
+    if (!liveAssets) return bundledRender;
     const stamp = statSync(RENDER_FILE).mtimeMs;
-    return import(`${pathToFileURL(RENDER_FILE).href}?t=${stamp}`);
+    const mod = await import(`${pathToFileURL(RENDER_FILE).href}?t=${stamp}`);
+    liveRenderStamp = stamp;
+    liveRender = mod;
+    return mod;
+  }
+
+  function currentRender() {
+    if (!liveAssets) return liveRender;
+    try {
+      const stamp = statSync(RENDER_FILE).mtimeMs;
+      if (stamp !== liveRenderStamp) {
+        liveRenderStamp = stamp;
+        void import(`${pathToFileURL(RENDER_FILE).href}?t=${stamp}`).then((mod) => {
+          liveRender = mod;
+        });
+      }
+    } catch {
+      /* keep the last loaded renderer */
+    }
+    return liveRender;
   }
 
   async function mutationResponse(req, res, sessionId, notice = "") {
@@ -1157,7 +1209,7 @@ export function createConsoleHandler(backend, options = {}) {
       let fingerprints = {};
       let liveState = null;
       let initialized = false;
-      stop = watch(selected.sessionId, async (error, next) => {
+      stop = watch(selected.sessionId, (error, next) => {
         if (closed || res.destroyed || res.writableEnded) {
           close();
           return;
@@ -1167,7 +1219,7 @@ export function createConsoleHandler(backend, options = {}) {
           close();
           return;
         }
-        const render = await loadRender();
+        const render = currentRender();
         const nextFp = render.regionFingerprints(next);
         const liveUpdate = render.liveTranscriptUpdate(liveState, next);
         const initial = !initialized;
