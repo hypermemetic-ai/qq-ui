@@ -1498,8 +1498,17 @@
       if (touchesTranscript(id)) captureTranscriptView();
     });
   }
+  const ownGeneration = ownScript?.dataset.uiGeneration ?? "";
   document.addEventListener("htmx:sseBeforeMessage", (event) => {
     const elt = event.target instanceof HTMLElement ? event.target : event.detail?.target;
+    if (elt instanceof HTMLElement && elt.id === "ui-generation") {
+      event.preventDefault();
+      const incoming = typeof event.detail?.data === "string"
+        ? event.detail.data
+        : typeof event.data === "string" ? event.data : "";
+      if (ownGeneration && incoming && incoming !== ownGeneration) location.reload();
+      return;
+    }
     const data = typeof event.detail?.data === "string"
       ? event.detail.data
       : typeof event.detail?.elt?.id === "string" && typeof event.data === "string"

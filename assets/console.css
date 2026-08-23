@@ -574,7 +574,8 @@ details.session-menu.session-controls {
 }
 
 .transcript-log,
-.transcript-live {
+.transcript-live,
+.transcript-settled {
   display: flex;
   flex-direction: column;
   gap: 1.2rem;

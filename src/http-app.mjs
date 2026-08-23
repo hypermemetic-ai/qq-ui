@@ -111,6 +111,10 @@ const bundledAssets = Object.freeze({
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
   },
+  "console.css": {
+    type: "text/css; charset=utf-8",
+    body: readFileSync(new URL("assets/console.css", root)),
+  },
   "geist-latin-wght-normal-5.3.0.woff2": {
     type: "font/woff2",
     body: readFileSync(new URL("assets/geist-latin-wght-normal-5.3.0.woff2", root)),
@@ -147,6 +151,10 @@ const bundledAssets = Object.freeze({
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("assets/browser-v9.js", root)),
   },
+  "browser.js": {
+    type: "text/javascript; charset=utf-8",
+    body: readFileSync(new URL("assets/browser-v9.js", root)),
+  },
   "reconnect-v1.js": {
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("assets/reconnect-v1.js", root)),
@@ -176,6 +184,8 @@ const bundledAssets = Object.freeze({
 });
 
 const LIVE_ASSET_FILES = Object.freeze({
+  "console.css": "assets/console.css",
+  "browser.js": "assets/browser-v9.js",
   "console-v18.css": "assets/console.css",
   "console-v19.css": "assets/console.css",
   "console-v20.css": "assets/console.css",
@@ -185,6 +195,23 @@ const LIVE_ASSET_FILES = Object.freeze({
   "browser-v10.js": "assets/browser-v9.js",
 });
 const RENDER_FILE = fileURLToPath(new URL("./render.mjs", import.meta.url));
+const BROWSER_FILE = fileURLToPath(new URL("assets/browser-v9.js", root));
+const CSS_FILE = fileURLToPath(new URL("assets/console.css", root));
+
+function liveGenerationStamp() {
+  return [
+    Math.trunc(statSync(RENDER_FILE).mtimeMs),
+    Math.trunc(statSync(BROWSER_FILE).mtimeMs),
+    Math.trunc(statSync(CSS_FILE).mtimeMs),
+  ].join("-");
+}
+
+const BOOT_GENERATION = liveGenerationStamp();
+
+/** Generation the process is actually serving. Live reads disk; frozen at boot otherwise. */
+export function readUiGeneration(liveAssets = false) {
+  return liveAssets ? liveGenerationStamp() : BOOT_GENERATION;
+}
 
 export function createRootRedirectHandler(basePath = "/qq") {
   const target = normalizeBasePath(basePath);
@@ -515,12 +542,16 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v22.css`,
-    browser: `${assetsPrefix}browser-v10.js`,
+    css: `${assetsPrefix}console.css`,
+    browser: `${assetsPrefix}browser.js`,
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
     manifest: `${assetsPrefix}manifest-v3.webmanifest`,
     serviceWorker: `${basePath}/sw.js`,
+  });
+  const pageAssetPaths = () => Object.freeze({
+    ...assetPaths,
+    uiGeneration: readUiGeneration(liveAssets),
   });
   const streams = new Set();
   const findWork = new Map();
@@ -794,30 +825,32 @@ export function createConsoleHandler(backend, options = {}) {
   });
   let liveRender = bundledRender;
   let liveRenderStamp = 0;
+  let liveRenderFromDisk = false;
 
   async function loadRender() {
     if (!liveAssets) return bundledRender;
-    const stamp = statSync(RENDER_FILE).mtimeMs;
-    const mod = await import(`${pathToFileURL(RENDER_FILE).href}?t=${stamp}`);
-    liveRenderStamp = stamp;
-    liveRender = mod;
-    return mod;
-  }
-
-  function currentRender() {
-    if (!liveAssets) return liveRender;
-    try {
-      const stamp = statSync(RENDER_FILE).mtimeMs;
-      if (stamp !== liveRenderStamp) {
-        liveRenderStamp = stamp;
-        void import(`${pathToFileURL(RENDER_FILE).href}?t=${stamp}`).then((mod) => {
-          liveRender = mod;
-        });
+    for (;;) {
+      let stamp;
+      try {
+        stamp = statSync(RENDER_FILE).mtimeMs;
+      } catch (error) {
+        if (liveRenderFromDisk) return liveRender;
+        throw error;
       }
-    } catch {
-      /* keep the last loaded renderer */
+      if (liveRenderFromDisk && stamp === liveRenderStamp) return liveRender;
+      try {
+        const mod = await import(`${pathToFileURL(RENDER_FILE).href}?t=${stamp}`);
+        const latest = statSync(RENDER_FILE).mtimeMs;
+        if (latest !== stamp) continue;
+        liveRender = mod;
+        liveRenderStamp = stamp;
+        liveRenderFromDisk = true;
+        return mod;
+      } catch (error) {
+        if (liveRenderFromDisk) return liveRender;
+        throw error;
+      }
     }
-    return liveRender;
   }
 
   async function mutationResponse(req, res, sessionId, notice = "", regions) {
@@ -1051,7 +1084,7 @@ export function createConsoleHandler(backend, options = {}) {
             name: String(projectRoute.filePath).split("/").at(-1),
             file,
             error: fileError,
-          }, paths, assetPaths);
+          }, paths, pageAssetPaths());
           write(
             res,
             fileError ? errorStatus(fileError) : 200,
@@ -1116,7 +1149,7 @@ export function createConsoleHandler(backend, options = {}) {
           const paths = routes(basePath, "", projectRoute.project, projectRoute.folder);
           const drawer = await drawerView(projectRoute.project, url, false, projectRoute.folder);
           const { renderPage } = await loadRender();
-          const body = renderPage({ ...snapshot, drawer }, paths, assetPaths);
+          const body = renderPage({ ...snapshot, drawer }, paths, pageAssetPaths());
           write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, body, head);
         } catch (error) {
           text(res, errorStatus(error), errorMessage(error), head);
@@ -1183,7 +1216,7 @@ export function createConsoleHandler(backend, options = {}) {
         const paths = routes(basePath, snapshot.id, snapshot.project, snapshot.folder);
         const drawer = await drawerView(snapshot.project, url, false, snapshot.folder);
         const { renderPage } = await loadRender();
-        const body = renderPage({ ...snapshot, drawer }, paths, assetPaths);
+        const body = renderPage({ ...snapshot, drawer }, paths, pageAssetPaths());
         write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, body, head);
       } catch (error) {
         text(res, errorStatus(error), `DSH session unavailable: ${errorMessage(error)}`, head);
@@ -1239,60 +1272,76 @@ export function createConsoleHandler(backend, options = {}) {
       let liveState = null;
       let settledKeys = null;
       let initialized = false;
+      let lastUiGeneration = readUiGeneration(liveAssets);
+      let tick = Promise.resolve();
+      res.write(sseEvent("ui", lastUiGeneration));
       stop = watch(selected.sessionId, (error, next) => {
-        if (closed || res.destroyed || res.writableEnded) {
-          close();
-          return;
-        }
-        if (error) {
-          res.write(sseEvent("console-error", errorMessage(error)));
-          close();
-          return;
-        }
-        const render = currentRender();
-        const nextFp = render.regionFingerprints(next);
-        const liveUpdate = render.liveTranscriptUpdate(liveState, next);
-        const append = typeof render.renderSettledTranscriptAppend === "function"
-          ? render.renderSettledTranscriptAppend(settledKeys, next)
-          : { keys: settledKeys, html: "" };
-        const initial = !initialized;
-        const changed = render.SSE_REGION_NAMES.filter((name) =>
-          name !== "live" && name !== "transcript" && nextFp[name] !== fingerprints[name]);
-        const liveFrames = [];
-        if (initial) {
-          // The GET and EventSource snapshots are not atomic. Recommission the
-          // small live cell on connect so the first later delta always has the
-          // text prefix it was calculated from; settled history is still never
-          // resent here.
-          if (liveUpdate.frames.length > 0) liveFrames.push(...liveUpdate.frames);
-        } else if (liveUpdate.frames.length > 0) {
-          liveFrames.push(...liveUpdate.frames);
-        } else if (liveUpdate.junction && !liveUpdate.state) {
-          liveFrames.push({ event: "live", data: "" });
-        }
-        const transcriptHtml = !initial && append.html ? append.html : "";
-        if (changed.length === 0 && liveFrames.length === 0 && !transcriptHtml) {
+        tick = tick.then(async () => {
+          if (closed || res.destroyed || res.writableEnded) {
+            close();
+            return;
+          }
+          if (error) {
+            res.write(sseEvent("console-error", errorMessage(error)));
+            close();
+            return;
+          }
+          let render;
+          try {
+            render = await loadRender();
+          } catch {
+            return;
+          }
+          const nextFp = render.regionFingerprints(next);
+          const liveUpdate = render.liveTranscriptUpdate(liveState, next);
+          const append = typeof render.renderSettledTranscriptAppend === "function"
+            ? render.renderSettledTranscriptAppend(settledKeys, next)
+            : { keys: settledKeys, html: "" };
+          const initial = !initialized;
+          const changed = render.SSE_REGION_NAMES.filter((name) =>
+            name !== "live" && name !== "transcript" && nextFp[name] !== fingerprints[name]);
+          const liveFrames = [];
+          if (initial) {
+            // The GET and EventSource snapshots are not atomic. Recommission the
+            // small live cell on connect so the first later delta always has the
+            // text prefix it was calculated from; settled history is still never
+            // resent here.
+            if (liveUpdate.frames.length > 0) liveFrames.push(...liveUpdate.frames);
+          } else if (liveUpdate.frames.length > 0) {
+            liveFrames.push(...liveUpdate.frames);
+          } else if (liveUpdate.junction && !liveUpdate.state) {
+            liveFrames.push({ event: "live", data: "" });
+          }
+          const transcriptHtml = !initial && append.html ? append.html : "";
+          const generation = readUiGeneration(liveAssets);
+          const uiChanged = generation !== lastUiGeneration;
+          if (changed.length === 0 && liveFrames.length === 0 && !transcriptHtml && !uiChanged) {
+            fingerprints = nextFp;
+            liveState = liveUpdate.state;
+            settledKeys = append.keys;
+            initialized = true;
+            return;
+          }
+          const { renderSessionRegion } = render;
+          for (const name of changed) {
+            res.write(sseEvent(name, renderSessionRegion(name, next, paths)));
+          }
+          if (transcriptHtml) {
+            res.write(sseEvent(append.reset ? "transcript-reset" : "transcript", transcriptHtml));
+          }
+          for (const frame of liveFrames) {
+            res.write(sseEvent(frame.event, frame.data));
+          }
+          if (uiChanged) {
+            res.write(sseEvent("ui", generation));
+            lastUiGeneration = generation;
+          }
+          if (typeof res.flush === "function") res.flush();
           fingerprints = nextFp;
           liveState = liveUpdate.state;
           settledKeys = append.keys;
           initialized = true;
-          return;
-        }
-        const { renderSessionRegion } = render;
-        for (const name of changed) {
-          res.write(sseEvent(name, renderSessionRegion(name, next, paths)));
-        }
-        if (transcriptHtml) {
-          res.write(sseEvent(append.reset ? "transcript-reset" : "transcript", transcriptHtml));
-        }
-        for (const frame of liveFrames) {
-          res.write(sseEvent(frame.event, frame.data));
-        }
-        if (typeof res.flush === "function") res.flush();
-        fingerprints = nextFp;
-        liveState = liveUpdate.state;
-        settledKeys = append.keys;
-        initialized = true;
+        }).catch(() => {});
       });
       keepalive = setInterval(() => {
         if (closed || res.destroyed || res.writableEnded) {
@@ -1677,7 +1726,7 @@ export function createConsoleHandler(backend, options = {}) {
           res,
           200,
           { "Content-Type": "text/html; charset=utf-8" },
-          renderDocumentViewerProofPage(assetPaths),
+          renderDocumentViewerProofPage(pageAssetPaths()),
           head,
         );
       } catch (error) {
@@ -1712,6 +1761,7 @@ export const internals = Object.freeze({
   parseSessionRoute,
   parseProjectRoute,
   resolveAsset,
+  readUiGeneration,
   routes,
   sameOrigin,
   sseEvent,

@@ -1462,7 +1462,7 @@ function documentHead(assetPaths, title = "qq", options = {}) {
   <link rel="stylesheet" href="${escapeHtml(assetPaths.css)}">
   <script defer src="${escapeHtml(assetPaths.htmx)}"></script>
   <script defer src="${escapeHtml(assetPaths.sse)}"></script>
-  <script defer src="${escapeHtml(assetPaths.browser)}" data-service-worker="${escapeHtml(assetPaths.serviceWorker)}"></script>
+  <script defer src="${escapeHtml(assetPaths.browser)}" data-service-worker="${escapeHtml(assetPaths.serviceWorker)}"${assetPaths.uiGeneration ? ` data-ui-generation="${escapeHtml(assetPaths.uiGeneration)}"` : ""}></script>
   <script defer src="/qq/dictate/client.js"></script>
 </head>`;
 }
@@ -1693,6 +1693,7 @@ ${documentHead(assetPaths)}
     <span>Sequential handoff</span>
   </header>
   <main id="console-stream"${backgroundInert}${paths.events ? ` hx-ext="sse" sse-connect="${escapeHtml(paths.events)}"` : ""} hx-history="false">
+    ${paths.events ? `<div id="ui-generation" hidden sse-swap="ui" hx-swap="none"></div>` : ""}
     <section id="session-panel" class="session-panel" aria-labelledby="session-heading">${content}</section>
   </main>
   <footer${backgroundInert}>DSH owns session identity, transcript order, turn status, and interruption. Browser view state is not shared.</footer>
