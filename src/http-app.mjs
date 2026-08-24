@@ -1342,14 +1342,33 @@ export function createConsoleHandler(backend, options = {}) {
       let lastUiGeneration = readUiGeneration(liveAssets);
       let tick = Promise.resolve();
       res.write(sseEvent("ui", lastUiGeneration));
+      const writeLiveFrames = (next) => {
+        if (closed || res.destroyed || res.writableEnded) return;
+        const liveUpdate = liveRender.liveTranscriptUpdate(liveState, next);
+        liveState = liveUpdate.state;
+        if (liveUpdate.frames.length === 0) return;
+        for (const frame of liveUpdate.frames) {
+          res.write(sseEvent(frame.event, frame.data));
+        }
+        if (typeof res.flush === "function") res.flush();
+      };
       stop = watch(selected.sessionId, (error, next) => {
+        if (closed || res.destroyed || res.writableEnded) {
+          close();
+          return;
+        }
+        if (error) {
+          res.write(sseEvent("console-error", errorMessage(error)));
+          close();
+          return;
+        }
+        // Token frames must not wait behind loadRender or chrome HTML. The
+        // observe callback is the session/event hot path. Console sees the
+        // same two-pair window as first paint.
+        const surface = consoleFoldWindow(next);
+        writeLiveFrames(surface);
         tick = tick.then(async () => {
           if (closed || res.destroyed || res.writableEnded) {
-            close();
-            return;
-          }
-          if (error) {
-            res.write(sseEvent("console-error", errorMessage(error)));
             close();
             return;
           }
@@ -1359,31 +1378,20 @@ export function createConsoleHandler(backend, options = {}) {
           } catch {
             return;
           }
-          const surface = consoleFoldWindow(next);
           const nextFp = render.regionFingerprints(surface);
-          const liveUpdate = render.liveTranscriptUpdate(liveState, surface);
           const append = typeof render.renderSettledTranscriptAppend === "function"
             ? render.renderSettledTranscriptAppend(settledKeys, surface)
             : { keys: settledKeys, html: "" };
           const initial = !initialized;
           const changed = render.SSE_REGION_NAMES.filter((name) =>
-            name !== "live" && name !== "live-tool" && name !== "transcript" && nextFp[name] !== fingerprints[name]);
-          const liveFrames = [];
-          if (initial) {
-            // The GET and EventSource snapshots are not atomic. Recommission the
-            // small live islands on connect so the first later delta always has
-            // the text prefix it was calculated from; settled history is still
-            // never resent here.
-            if (liveUpdate.frames.length > 0) liveFrames.push(...liveUpdate.frames);
-          } else if (liveUpdate.frames.length > 0) {
-            liveFrames.push(...liveUpdate.frames);
-          }
-          const transcriptHtml = !initial && append.html ? append.html : "";
+            name !== "live" && name !== "transcript" && nextFp[name] !== fingerprints[name]);
+          // Ordinary growth is already painted node-by-node by writeLiveFrames.
+          // Only a surface replace recommissions the settled prefix.
+          const transcriptHtml = !initial && append.reset ? append.html : "";
           const generation = readUiGeneration(liveAssets);
           const uiChanged = generation !== lastUiGeneration;
-          if (changed.length === 0 && liveFrames.length === 0 && !transcriptHtml && !uiChanged) {
+          if (changed.length === 0 && !transcriptHtml && !uiChanged) {
             fingerprints = nextFp;
-            liveState = liveUpdate.state;
             settledKeys = append.keys;
             initialized = true;
             return;
@@ -1395,16 +1403,12 @@ export function createConsoleHandler(backend, options = {}) {
           if (transcriptHtml) {
             res.write(sseEvent(append.reset ? "transcript-reset" : "transcript", transcriptHtml));
           }
-          for (const frame of liveFrames) {
-            res.write(sseEvent(frame.event, frame.data));
-          }
           if (uiChanged) {
             res.write(sseEvent("ui", generation));
             lastUiGeneration = generation;
           }
           if (typeof res.flush === "function") res.flush();
           fingerprints = nextFp;
-          liveState = liveUpdate.state;
           settledKeys = append.keys;
           initialized = true;
         }).catch(() => {});

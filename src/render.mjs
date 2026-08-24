@@ -242,9 +242,11 @@ function renderConversationNode(node) {
   if (node?.kind === "tool") {
     const card = node.resultView?.card ?? node.callView?.card ?? "generic";
     const title = node.resultView?.title ?? node.callView?.title ?? node.name ?? "unknown";
-    const argument = node.argumentSummary
-      && !String(title).toLocaleLowerCase().includes(String(node.argumentSummary).toLocaleLowerCase())
-      ? `<span class="tool-argument">${escapeHtml(node.argumentSummary)}</span>`
+    const liveArg = typeof node.liveKey === "string" && node.liveKey;
+    const argumentText = liveArg ? String(node.arguments ?? "") : (node.argumentSummary ?? "");
+    const argument = liveArg || (argumentText
+      && !String(title).toLocaleLowerCase().includes(String(argumentText).toLocaleLowerCase()))
+      ? `<span class="tool-argument${liveArg ? " message-live-text" : ""}"${liveArg ? ` data-live-key="${escapeHtml(liveArg)}"` : ""}>${escapeHtml(argumentText)}</span>`
       : "";
     const terminal = node.resultView?.card === "terminal" ? node.resultView : null;
     const terminalFailed = Number.isFinite(terminal?.exitCode) && terminal.exitCode !== 0;
@@ -266,8 +268,8 @@ function renderConversationNode(node) {
     const tone = failed || stopped ? "bad" : node.status === "running" ? "running" : "ok";
     const callId = String(node.callId ?? "");
     const lazy = !node.expanded && node.status !== "running" && callId.length > 0;
-    const href = lazy ? `tool/${encodeURIComponent(callId)}` : "";
-    const lazyAttrs = lazy
+    const href = lazy && node.inner !== true ? `tool/${encodeURIComponent(callId)}` : "";
+    const lazyAttrs = lazy && href
       ? ` hx-get="${escapeHtml(href)}" hx-trigger="toggle once" hx-target="find .tool-body" hx-swap="innerHTML"`
       : "";
     const body = lazy ? "" : renderToolBody(node);
@@ -326,6 +328,10 @@ function renderConversationNode(node) {
   return "";
 }
 
+function queueTextRows(text) {
+  return Math.min(12, Math.max(1, String(text ?? "").split("\n").length));
+}
+
 function renderPendingQueue(snapshot, paths) {
   const pending = Array.isArray(snapshot?.conversation?.pending) ? snapshot.conversation.pending : [];
   if (pending.length === 0) return "";
@@ -333,26 +339,26 @@ function renderPendingQueue(snapshot, paths) {
   const mutable = snapshot.canMutatePending === true && Boolean(paths.queue);
   const rows = pending.map((item, index) => {
     const id = escapeHtml(item.id ?? "");
-    const label = item.placement === "steering" ? "Steering" : "Queued";
+    const steering = item.placement === "steering";
+    const n = index + 1;
+    const text = item.text ?? "";
     const edit = mutable && item.editable
-      ? `<form class="queue-edit" action="${action}" method="post" hx-post="${action}" ${hxMutateAttrs()} hx-disabled-elt="find button">
+      ? `<form class="queue-edit" action="${action}" method="post" hx-post="${action}" hx-trigger="change" ${hxMutateAttrs()} hx-disabled-elt="find button">
           <input type="hidden" name="operation" value="edit">
           <input type="hidden" name="itemId" value="${id}">
-          <label for="queue-text-${index}">Edit pending message ${index + 1}</label>
-          <textarea id="queue-text-${index}" class="queue-edit-text" name="text" rows="1" maxlength="32768" required data-message-id="${id}">${escapeHtml(item.text ?? "")}</textarea>
-          <button type="submit" aria-label="Save pending message ${index + 1}">Save</button>
+          <label for="queue-text-${index}">Edit pending message ${n}</label>
+          <textarea id="queue-text-${index}" class="queue-edit-text" name="text" rows="${queueTextRows(text)}" maxlength="32768" required data-message-id="${id}">${escapeHtml(text)}</textarea>
         </form>`
-      : `<p class="queue-preview">${escapeHtml(item.text || "Pending message")}</p>`;
+      : `<p class="queue-preview">${escapeHtml(text || "Queued message")}</p>`;
     const remove = mutable
       ? `<form class="queue-remove" action="${action}" method="post" hx-post="${action}" ${hxMutateAttrs()} hx-disabled-elt="find button">
           <input type="hidden" name="itemId" value="${id}">
-          <button type="submit" name="operation" value="remove" aria-label="Remove pending message ${index + 1}">Remove</button>
+          <button type="submit" name="operation" value="remove" aria-label="Remove pending message ${n}" title="Remove">&times;</button>
         </form>`
       : "";
-    return `<li class="queue-item" data-message-id="${id}"><span class="queue-kind">${label}</span>${edit}${remove}</li>`;
+    return `<li class="queue-item message-queued" data-message-id="${id}" data-placement="${steering ? "steering" : "queued"}" aria-label="${steering ? "Steering message" : "Queued message"}"><span class="queue-mark" aria-hidden="true">◦</span>${edit}${remove}</li>`;
   }).join("");
-  return `<section id="pending-queue" class="pending-queue" aria-labelledby="pending-queue-heading">
-    <header><h2 id="pending-queue-heading">Pending messages</h2><span>${pending.length}</span></header>
+  return `<section id="pending-queue" class="pending-queue" aria-label="Queued messages">
     <ol>${rows}</ol>
   </section>`;
 }
@@ -479,53 +485,39 @@ function menuSessions(sessions) {
   });
 }
 
+function newSessionForm(action, extraClass = "") {
+  if (!action) return "";
+  const className = extraClass ? `new-session ${extraClass}` : "new-session";
+  return `<form class="${className}" action="${escapeHtml(action)}" method="post">
+      <button type="submit" aria-label="New session">${bannerMark("add")}</button>
+    </form>`;
+}
+
 function sessionNavigation(snapshot, paths) {
-  const live = pickerSessions(snapshot.sessions);
   const choices = menuSessions(snapshot.sessions);
   const selectedId = String(snapshot.id ?? "");
   const selected = selectedId
     ? choices.find((session) => session.id === selectedId) ?? snapshot
     : undefined;
-  const face = selected ? sessionFace(selected) : "";
   const token = selected ? sessionToken(selected) : "";
-  const closeControls = selectedId && paths.close
-    ? `<button type="button" class="close-arm" aria-label="Close this session">${bannerMark("close")}</button>
-      <div class="close-confirm" hidden role="alertdialog" aria-modal="true" aria-labelledby="close-confirm-title" aria-describedby="close-confirm-copy">
-        <p id="close-confirm-title">close session ${escapeHtml(face)}?</p>
-        <p id="close-confirm-copy">history is kept</p>
-        <div class="close-confirm-actions">
-          <button type="button" class="close-keep" aria-label="Keep this session">keep</button>
-          <form id="close-session" class="close-session" action="${escapeHtml(paths.close)}" method="post">
-            <button type="submit" class="close-confirm-submit" aria-label="Close this session">Close session</button>
-          </form>
-        </div>
-      </div>`
-    : "";
-  const sessionLinks = choices.map((session) => {
+  const sessionItems = choices.map((session) => {
     const current = session.id === selectedId;
     const href = `${paths.switchSession}?session=${encodeURIComponent(session.id)}`;
-    return `<a class="session-choice${current ? " session-choice-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""}>${escapeHtml(sessionToken(session))}</a>`;
+    const close = current && paths.close
+      ? `<button type="button" class="close-arm" aria-label="Close this session">${bannerMark("close")}</button>
+        <form id="close-session" class="close-session close-confirm" action="${escapeHtml(paths.close)}" method="post" hidden>
+          <button type="submit" aria-label="Close this session">close</button>
+        </form>`
+      : "";
+    return `<li class="session-item${current ? " session-item-current" : ""}"><a class="session-choice${current ? " session-choice-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""}>${escapeHtml(sessionToken(session))}</a>${close}</li>`;
   }).join("");
-  const newSession = `<form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
-      <button type="submit" aria-label="New session">${bannerMark("add")}</button>
-    </form>`;
-  const controls = choices.length === 0
-    ? `<div class="session-controls session-controls-empty">${newSession}</div>`
-    : `<details class="session-menu session-controls"${!selectedId ? " open" : ""}>
-        <summary aria-label="Sessions">${escapeHtml(token || "sessions")}</summary>
-        <div class="session-menu-list">
-          ${sessionLinks}
-          ${newSession}
-          ${closeControls}
-        </div>
-      </details>`;
-  const links = live.map((session) => {
-    const current = session.id === selectedId;
-    const href = `${paths.switchSession}?session=${encodeURIComponent(session.id)}`;
-    return `<a class="session-token${current ? " session-token-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(session.id)}"><span>${escapeHtml(sessionToken(session))}</span></a>`;
-  }).join("");
-  const tokens = `<nav class="session-traversal" aria-label="Sessions" aria-keyshortcuts="ArrowLeft ArrowRight">${links}</nav>`;
-  return { controls, tokens };
+  const list = `<nav class="project-sessions" aria-label="Sessions" aria-keyshortcuts="ArrowLeft ArrowRight">
+      ${choices.length > 0 ? `<ol>${sessionItems}</ol>` : '<p class="session-empty">no live sessions</p>'}
+      <div class="session-controls${choices.length === 0 ? " session-controls-empty" : ""}">
+        ${newSessionForm(paths.createSession)}
+      </div>
+    </nav>`;
+  return { token, list };
 }
 
 export function renderLoginSheet(sheet, paths) {
@@ -725,19 +717,33 @@ function renderHomeLink(snapshot, paths) {
 
 function activeProjectList(snapshot) {
   const projects = [];
-  const seen = new Set();
+  const seen = new Map();
   const add = (entry) => {
     const project = String(entry?.project ?? entry?.name ?? "").trim();
     if (!project) return;
     const folder = String(entry?.folder ?? "").trim();
     const key = `${project}\n${folder}`;
-    if (seen.has(key)) return;
-    seen.add(key);
+    const projectLabel = String(entry?.projectLabel ?? entry?.label ?? project);
+    const folderLabel = String(entry?.folderLabel ?? folder);
+    const sessionId = String(entry?.id ?? "").trim();
+    const recency = Number(entry?.latestEventAt ?? entry?.createdAt ?? 0);
+    if (seen.has(key)) {
+      const existing = projects[seen.get(key)];
+      if (sessionId && recency >= (existing.recency ?? 0)) {
+        existing.sessionId = sessionId;
+        existing.recency = recency;
+      }
+      return;
+    }
+    seen.set(key, projects.length);
     projects.push({
       project,
       folder,
-      projectLabel: String(entry?.projectLabel ?? entry?.label ?? project),
-      folderLabel: String(entry?.folderLabel ?? folder),
+      projectLabel,
+      folderLabel,
+      label: folder ? folderLabel : projectLabel,
+      sessionId,
+      recency,
     });
   };
   if (snapshot?.id) add(snapshot);
@@ -746,24 +752,45 @@ function activeProjectList(snapshot) {
   return projects;
 }
 
+function livePlaceKey(entry) {
+  const project = String(entry?.project ?? "").trim();
+  if (!project) return "";
+  return `${project}\n${String(entry?.folder ?? "").trim()}`;
+}
+
+function livePlaceSet(snapshot) {
+  const keys = new Set();
+  const add = (entry) => {
+    const key = livePlaceKey(entry);
+    if (key) keys.add(key);
+  };
+  add(snapshot);
+  for (const entry of Array.isArray(snapshot?.activeProjects) ? snapshot.activeProjects : []) add(entry);
+  for (const entry of Array.isArray(snapshot?.sessions) ? snapshot.sessions : []) add(entry);
+  return keys;
+}
+
+function activeProjectHref(entry, paths, current) {
+  if (current && paths.canonical) return paths.canonical;
+  const folderPath = entry.folder ? `/${encodeURIComponent(entry.folder)}` : "";
+  if (entry.sessionId) {
+    return `${paths.projectsBase}/${encodeURIComponent(entry.project)}${folderPath}/session/${encodeURIComponent(entry.sessionId)}`;
+  }
+  return `${paths.projectsBase}/${encodeURIComponent(entry.project)}${folderPath}`;
+}
+
 function renderProjectsMenu(snapshot, paths) {
   if (!paths?.projectsBase) return "";
   const projects = activeProjectList(snapshot);
   const currentProject = String(snapshot?.project ?? "");
   const currentFolder = String(snapshot?.folder ?? "");
   const current = projects.find((entry) => entry.project === currentProject && entry.folder === currentFolder);
-  const summary = current
-    ? (current.folder ? `${current.projectLabel} / ${current.folderLabel}` : current.projectLabel)
-    : (placeName(snapshot) || "projects");
+  const summary = current?.label || placeName(snapshot) || "projects";
   const links = projects.length > 0
     ? projects.map((entry) => {
         const isCurrent = entry.project === currentProject && entry.folder === currentFolder;
-        const folderPath = entry.folder ? `/${encodeURIComponent(entry.folder)}` : "";
-        const href = `${paths.projectsBase}/${encodeURIComponent(entry.project)}${folderPath}`;
-        const label = entry.folder
-          ? `${entry.projectLabel} / ${entry.folderLabel}`
-          : entry.projectLabel;
-        return `<a class="projects-choice${isCurrent ? " projects-choice-current" : ""}" href="${escapeHtml(href)}" data-project="${escapeHtml(entry.project)}" data-folder="${escapeHtml(entry.folder)}"${isCurrent ? ' aria-current="page"' : ""}>${escapeHtml(label)}</a>`;
+        const href = activeProjectHref(entry, paths, isCurrent);
+        return `<a class="projects-choice${isCurrent ? " projects-choice-current" : ""}" href="${escapeHtml(href)}" data-project="${escapeHtml(entry.project)}" data-folder="${escapeHtml(entry.folder)}"${isCurrent ? ' aria-current="page"' : ""}>${escapeHtml(entry.label)}</a>`;
       }).join("")
     : `<p class="session-empty">no live projects</p>`;
   return `<details class="projects-menu">
@@ -774,23 +801,21 @@ function renderProjectsMenu(snapshot, paths) {
   </details>`;
 }
 
-function renderProjectRail(snapshot, paths, inert = false) {
+export function renderProjectRail(snapshot, paths, inert = false) {
   if (!paths?.projectsBase) return "";
   const projects = activeProjectList(snapshot);
   const currentProject = String(snapshot?.project ?? "");
   const currentFolder = String(snapshot?.folder ?? "");
   const rows = projects.map((entry) => {
     const current = entry.project === currentProject && entry.folder === currentFolder;
-    const folderPath = entry.folder ? `/${encodeURIComponent(entry.folder)}` : "";
-    const href = `${paths.projectsBase}/${encodeURIComponent(entry.project)}${folderPath}`;
-    const label = entry.folder
-      ? `${entry.projectLabel} / ${entry.folderLabel}`
-      : entry.projectLabel;
-    return `<li><a class="active-project-item${current ? " active-project-current" : ""}" href="${escapeHtml(href)}" data-project="${escapeHtml(entry.project)}" data-folder="${escapeHtml(entry.folder)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(label)}"><span class="active-project-mark" aria-hidden="true"></span><span class="active-project-label">${escapeHtml(label)}</span></a></li>`;
+    const href = activeProjectHref(entry, paths, current);
+    return `<li><a class="active-project-item${current ? " active-project-current" : ""}" href="${escapeHtml(href)}" data-project="${escapeHtml(entry.project)}" data-folder="${escapeHtml(entry.folder)}" data-live="true"${current ? ' aria-current="page"' : ""} title="${escapeHtml(entry.label)}"><span class="active-project-mark" aria-hidden="true"></span><span class="active-project-label">${escapeHtml(entry.label)}</span></a></li>`;
   }).join("");
+  const sessions = sessionNavigation(snapshot, paths);
   const rootUrl = `${paths.canonical}${paths.canonical.includes("?") ? "&" : "?"}drawer=~`;
   return `<aside id="project-rail" class="project-rail" aria-label="Projects" data-current-project="${escapeHtml(currentProject)}" data-current-folder="${escapeHtml(currentFolder)}" data-current-active="${snapshot?.id ? "true" : "false"}"${inert ? " inert" : ""}>
-    <nav class="active-projects" aria-label="Active projects" aria-keyshortcuts="ArrowUp ArrowDown"><ol>${rows}</ol></nav>
+    <nav class="active-projects" aria-label="Active projects" aria-keyshortcuts="ArrowUp ArrowDown"><ol>${rows || '<li class="session-empty">no live projects</li>'}</ol></nav>
+    ${sessions.list}
     <section id="inactive-project-tree" class="inactive-project-tree" aria-label="Files" aria-keyshortcuts="F" data-root-url="${escapeHtml(rootUrl)}" hidden>
       <div class="project-tree-columns" role="tree" aria-label="Project files"><span class="project-tree-loading" role="status">···</span></div>
     </section>
@@ -834,7 +859,15 @@ function composerControls(running, findWork = "") {
     <button id="interrupt-submit" class="composer-interrupt" type="submit" form="interrupt-form" aria-label="Stop current turn" title="Stop"><svg class="composer-stop" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><rect fill="currentColor" x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg></button>`;
 }
 
-function composer(paths, running, sessionId = "", findWork = "") {
+function composerCaseButton(snapshot) {
+  if (!snapshot?.caseFile) return "";
+  return `<button id="composer-case" class="composer-case" type="button" aria-haspopup="dialog" aria-controls="session-case-viewer" data-document-viewer-open="session-case-viewer" aria-label="Working memory">doc</button>`;
+}
+
+function composer(paths, snapshot) {
+  const running = sessionStatus(snapshot).key === "running";
+  const sessionId = snapshot?.id ?? "";
+  const findWork = sessionFindWork(snapshot);
   const interrupt = `<form id="interrupt-form" class="interrupt-proxy" action="${escapeHtml(paths.interrupt)}" method="post"
       data-session-id="${escapeHtml(sessionId)}"
       hx-post="${escapeHtml(paths.interrupt)}"
@@ -845,7 +878,7 @@ function composer(paths, running, sessionId = "", findWork = "") {
       data-session-id="${escapeHtml(sessionId)}"
       hx-post="${escapeHtml(paths.prompt)}"
       ${hxMutateAttrs()}
-      hx-push-url="${escapeHtml(paths.canonical)}"
+      hx-replace-url="${escapeHtml(paths.canonical)}"
       hx-disabled-elt="#composer-submit"
       hx-indicator="#working"
       hx-preserve="true">
@@ -861,6 +894,7 @@ function composer(paths, running, sessionId = "", findWork = "") {
           </svg>
         </button>
         ${regionShell("composer-turn-controls", "composer-turn-controls", "composer", composerControls(running, findWork), true)}
+        ${composerCaseButton(snapshot)}
         <button id="composer-submit" type="submit" aria-label="Send"><svg class="composer-enter" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19 6v5H7.83l2.58-2.59L9 7 4 12l5 5 1.41-1.41L7.83 13H21V6h-2z"/></svg></button>
       </div>
       <span id="working" class="htmx-indicator" aria-live="polite">Admitting message…</span>
@@ -868,33 +902,39 @@ function composer(paths, running, sessionId = "", findWork = "") {
     </form>`;
 }
 
-export const SSE_REGION_NAMES = Object.freeze(["chrome", "transcript", "live", "live-tool", "queue", "composer", "popups"]);
-export const LIVE_SSE_EVENTS = Object.freeze(["live", "live-tool"]);
+export const SSE_REGION_NAMES = Object.freeze(["chrome", "transcript", "live", "queue", "composer", "popups", "case"]);
+export const LIVE_SSE_EVENTS = Object.freeze(["live"]);
 export const MUTATION_REGION_NAMES = Object.freeze(["chrome", "queue", "composer", "popups"]);
 /** Prompt/interrupt: SSE owns the queue. POST OOB of pending races claim and sticks a duplicate. */
 export const PROMPT_MUTATION_REGION_NAMES = Object.freeze(["chrome", "composer", "popups"]);
 export const SSE_REGION_IDS = Object.freeze({
   chrome: "session-chrome",
   transcript: "transcript-log",
-  live: "transcript-live-text",
-  "live-tool": "transcript-live-tool",
+  live: "transcript-live-nodes",
   queue: "session-queue",
   composer: "composer-turn-controls",
   popups: "session-popups",
+  case: "session-case",
 });
 
-/** Streaming assistant text and a running tool are independent islands. A tool is not a cap. */
+function transcriptNodeIsOpen(node) {
+  return node?.status === "running"
+    || (node?.kind === "assistant" && node.status === "streaming");
+}
+
+/**
+ * The settled transcript is a chronological prefix. Once any node opens, every
+ * later node belongs to one mixed live suffix, irrespective of node kind. This
+ * keeps text, tools, and subsequent text in log order.
+ */
 export function splitTranscriptNodes(nodes) {
   const list = Array.isArray(nodes) ? nodes : [];
-  const settled = [];
-  const liveText = [];
-  const liveTool = [];
-  for (const node of list) {
-    if (node?.kind === "assistant" && node.status === "streaming") liveText.push(node);
-    else if (node?.kind === "tool" && node.status === "running") liveTool.push(node);
-    else settled.push(node);
-  }
-  return { settled, live: liveText, liveText, liveTool };
+  const liveIndex = list.findIndex(transcriptNodeIsOpen);
+  if (liveIndex < 0) return { settled: list, live: [] };
+  return {
+    settled: list.slice(0, liveIndex),
+    live: list.slice(liveIndex),
+  };
 }
 
 function safeLiveId(value) {
@@ -904,7 +944,10 @@ function safeLiveId(value) {
 
 function liveNodeKey(node) {
   if (node?.kind === "tool") return `tool-${node.callId || node.seq || "tail"}`;
-  return `assistant-${node?.turn ?? ""}-${node?.step ?? ""}-${node?.seq ?? "tail"}`;
+  if (node?.kind === "assistant") {
+    return `assistant-${node.turn ?? ""}-${node.step ?? ""}-${node.seq ?? "tail"}`;
+  }
+  return `${node?.kind ?? "node"}-${node?.key ?? node?.seq ?? "tail"}`;
 }
 
 function liveBlockEvent(key, index, type) {
@@ -919,7 +962,7 @@ function renderLiveAssistantBlock(node, block, index, key) {
   const type = block?.type === "reasoning" ? "reasoning" : block?.type === "image" ? "image" : "text";
   const target = liveBlockEvent(key, index, type);
   const text = String(block?.text ?? "");
-  const stream = `<div class="message-text message-live-text" data-live-block="${index}" data-live-key="${escapeHtml(target)}">${escapeHtml(text)}</div>`;
+  const stream = `<div id="${escapeHtml(target)}" class="message-text message-live-text" data-live-block="${index}" data-live-key="${escapeHtml(target)}">${escapeHtml(text)}</div>`;
   if (type === "reasoning") {
     const label = time ? `Reasoning at ${time}` : "Reasoning";
     return `<section class="assistant-reasoning" aria-label="${escapeHtml(label)}" data-seq="${seq}" data-turn="${turn}" data-step="${step}" aria-busy="true">${stream}</section>`;
@@ -931,56 +974,101 @@ function renderLiveAssistantBlock(node, block, index, key) {
   return `<article class="message message-assistant message-streaming" data-seq="${seq}" data-turn="${turn}" data-step="${step}" aria-label="${escapeHtml(label)}" aria-busy="true">${stream}</article>`;
 }
 
+function wrapLiveNode(id, inner) {
+  return `<div id="${escapeHtml(id)}" class="transcript-live-node" data-live-node="${escapeHtml(id)}">${inner}</div>`;
+}
+
 function liveAssistantIsland(node) {
   if (!node) return null;
   const key = liveNodeKey(node);
-  const segments = (Array.isArray(node.blocks) ? node.blocks : []).map((block, index) => {
-    const type = block?.type === "reasoning" ? "reasoning" : block?.type === "image" ? "image" : "text";
-    return {
-      key: `${key}:${index}:${type}`,
-      event: liveBlockEvent(key, index, type),
-      type,
-      text: type === "image" ? JSON.stringify(block?.attachment ?? null) : String(block?.text ?? ""),
-      html: renderLiveAssistantBlock(node, block, index, key),
-    };
-  });
-  return { key, kind: "assistant", segments, html: segments.map((segment) => segment.html).join("\n") };
+  const id = `live-node-${safeLiveId(key)}`;
+  const streaming = node.status === "streaming";
+  const segments = streaming
+    ? (Array.isArray(node.blocks) ? node.blocks : []).map((block, index) => {
+        const type = block?.type === "reasoning" ? "reasoning" : block?.type === "image" ? "image" : "text";
+        return {
+          key: `${key}:${index}:${type}`,
+          event: liveBlockEvent(key, index, type),
+          type,
+          text: type === "image" ? JSON.stringify(block?.attachment ?? null) : String(block?.text ?? ""),
+        };
+      })
+    : [];
+  const inner = streaming
+    ? (Array.isArray(node.blocks) ? node.blocks : []).map((block, index) =>
+        renderLiveAssistantBlock(node, block, index, key)).join("\n")
+    : renderConversationNode(node);
+  return { key, id, kind: "assistant", segments, inner, html: wrapLiveNode(id, inner) };
 }
 
 function liveToolIsland(node) {
   if (!node) return null;
-  return { key: liveNodeKey(node), kind: "tool", segments: [], html: renderConversationNode(node) };
-}
-
-/** Serializable cursors for the open text island and the open tool island. */
-export function liveTranscriptState(snapshot) {
-  const { liveText, liveTool } = splitTranscriptNodes(sessionNodes(snapshot));
+  const key = liveNodeKey(node);
+  const id = `live-node-${safeLiveId(key)}`;
+  const event = liveBlockEvent(key, "args", "text");
+  const text = String(node.arguments ?? "");
+  const inner = renderConversationNode({ ...node, liveKey: node.status === "running" ? event : undefined });
   return {
-    text: liveText.length === 1
-      ? liveAssistantIsland(liveText[0])
-      : liveText.length > 1
-        ? {
-            key: liveText.map(liveNodeKey).join("+"),
-            kind: "assistant",
-            segments: [],
-            html: liveText.map((node) => liveAssistantIsland(node)?.html ?? "").join("\n"),
-          }
-        : null,
-    tool: liveTool.length === 1
-      ? liveToolIsland(liveTool[0])
-      : liveTool.length > 1
-        ? {
-            key: liveTool.map(liveNodeKey).join("+"),
-            kind: "tool",
-            segments: [],
-            html: liveTool.map((node) => liveToolIsland(node)?.html ?? "").join("\n"),
-          }
-        : null,
+    key,
+    id,
+    kind: "tool",
+    segments: node.status === "running" ? [{ key: `${key}:args:text`, event, type: "text", text }] : [],
+    inner,
+    html: wrapLiveNode(id, inner),
   };
 }
 
-function liveAppendFrames(previous, state) {
-  if (previous.kind !== "assistant" || state.kind !== "assistant") return null;
+function liveConversationIsland(node) {
+  if (node?.kind === "assistant") return liveAssistantIsland(node);
+  if (node?.kind === "tool") return liveToolIsland(node);
+  const key = liveNodeKey(node);
+  const id = `live-node-${safeLiveId(key)}`;
+  const inner = renderConversationNode(node);
+  return { key, id, kind: node?.kind ?? "node", segments: [], inner, html: wrapLiveNode(id, inner) };
+}
+
+function nodeKeys(nodes) {
+  const seen = new Map();
+  return (Array.isArray(nodes) ? nodes : []).map((node) => {
+    const base = liveNodeKey(node);
+    const occurrence = seen.get(base) ?? 0;
+    seen.set(base, occurrence + 1);
+    return occurrence === 0 ? base : `${base}-occurrence-${occurrence}`;
+  });
+}
+
+function keyedIslands(nodes) {
+  const keys = nodeKeys(nodes);
+  return nodes.map((node, index) => {
+    const island = liveConversationIsland(node);
+    if (island.key === keys[index]) return island;
+    const id = `live-node-${safeLiveId(keys[index])}`;
+    return { ...island, key: keys[index], id, html: wrapLiveNode(id, island.inner) };
+  });
+}
+
+/** Serializable cursors for the chronological live suffix. */
+export function liveTranscriptState(snapshot, previous = null) {
+  const nodes = sessionNodes(snapshot);
+  const allKeys = nodeKeys(nodes);
+  const allIslands = keyedIslands(nodes);
+  const { live } = splitTranscriptNodes(nodes);
+  if (!previous) {
+    return { allKeys, nodes: allIslands.slice(nodes.length - live.length), reset: false };
+  }
+
+  const prefix = isKeyPrefix(previous.allKeys, allKeys);
+  if (!prefix) {
+    return { allKeys, nodes: allIslands.slice(nodes.length - live.length), reset: true };
+  }
+
+  const held = new Set(previous.nodes.map((island) => island.key));
+  for (const key of allKeys.slice(previous.allKeys.length)) held.add(key);
+  return { allKeys, nodes: allIslands.filter((island) => held.has(island.key)), reset: false };
+}
+
+function liveAppendFrames(previous, state, event = "live") {
+  if (!previous || !state || previous.kind !== state.kind) return null;
   if (previous.segments.length !== state.segments.length) return null;
   const frames = [];
   for (let index = 0; index < state.segments.length; index += 1) {
@@ -990,7 +1078,7 @@ function liveAppendFrames(previous, state) {
     if (before.text === after.text) continue;
     if (after.type === "image" || !after.text.startsWith(before.text)) return null;
     frames.push({
-      event: "live",
+      event: `${event}-append`,
       data: JSON.stringify({
         op: "qq-live-append",
         key: after.event,
@@ -1002,34 +1090,74 @@ function liveAppendFrames(previous, state) {
   return frames.length > 0 ? frames : null;
 }
 
-function islandUpdate(previous, next, event) {
-  if (!previous && !next) return { junction: false, frames: [] };
-  if (!next) return { junction: true, frames: [{ event, data: "" }] };
-  if (!previous || previous.key !== next.key || previous.kind !== next.kind) {
-    return { junction: true, frames: [{ event, data: next.html }] };
-  }
-  if (next.html === previous.html) return { junction: false, frames: [] };
-  if (event === "live") {
-    const append = liveAppendFrames(previous, next);
-    if (append) return { junction: false, frames: append };
-  }
-  return { junction: true, frames: [{ event, data: next.html }] };
+function liveNodePatch(event, op, island, html = island.html) {
+  return {
+    event: `${event}-append`,
+    data: JSON.stringify({
+      op,
+      key: island.id,
+      html,
+      ...(op === "qq-live-insert" ? { inner: island.inner } : {}),
+    }),
+  };
 }
 
 /**
- * Token growth stays on `live` and patches the existing text node. A running
- * tool is a separate `live-tool` island, so it cannot replace the text cell.
- * Markdown promotion happens when the assistant node actually settles.
+ * Nodes enter one mixed tail and never change stacks. New nodes append after the
+ * existing last node; token suffixes and tool progress patch their own ids;
+ * sealing replaces only that node's contents so Markdown is promoted in place.
  */
 export function liveTranscriptUpdate(previous, snapshot) {
-  const state = liveTranscriptState(snapshot);
-  const text = islandUpdate(previous?.text, state.text, "live");
-  const tool = islandUpdate(previous?.tool, state.tool, "live-tool");
-  return {
-    state,
-    junction: text.junction || tool.junction,
-    frames: [...text.frames, ...tool.frames],
-  };
+  const state = liveTranscriptState(snapshot, previous);
+  if (!previous) {
+    return {
+      state,
+      junction: state.nodes.length > 0,
+      frames: state.nodes.map((island) =>
+        liveNodePatch(island.kind === "tool" ? "live-tool" : "live", "qq-live-insert", island)),
+    };
+  }
+  if (state.reset) {
+    return {
+      state,
+      junction: true,
+      frames: [{ event: "live", data: state.nodes.map((island) => island.html).join("\n") }],
+    };
+  }
+
+  const beforeByKey = new Map(previous.nodes.map((island) => [island.key, island]));
+  const nextKeys = state.nodes.map((island) => island.key);
+  const retainedKeys = previous.nodes
+    .map((island) => island.key)
+    .filter((key) => nextKeys.includes(key));
+  if (!isKeyPrefix(retainedKeys, nextKeys)) {
+    return {
+      state,
+      junction: true,
+      frames: [{ event: "live", data: state.nodes.map((island) => island.html).join("\n") }],
+    };
+  }
+
+  const frames = [];
+  let junction = false;
+  for (const island of state.nodes) {
+    const before = beforeByKey.get(island.key);
+    const event = island.kind === "tool" ? "live-tool" : "live";
+    if (!before) {
+      frames.push(liveNodePatch(event, "qq-live-insert", island));
+      junction = true;
+      continue;
+    }
+    if (before.inner === island.inner) continue;
+    const append = liveAppendFrames(before, island, event);
+    if (append) {
+      frames.push(...append);
+      continue;
+    }
+    frames.push(liveNodePatch(event, "qq-live-replace", island, island.inner));
+    junction = true;
+  }
+  return { state, junction, frames };
 }
 
 function hxMutateAttrs() {
@@ -1046,8 +1174,92 @@ function sessionFindWork(snapshot) {
   return snapshot?.findWork === "save" ? "save" : snapshot?.findWork === "compile" ? "compile" : "";
 }
 
+function argumentSummary(raw) {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const preferred = ["command", "path", "file_path", "file", "query", "pattern", "url", "task", "id"];
+    for (const key of preferred) {
+      const value = raw[key];
+      if (typeof value === "string" && value.trim()) return value.replace(/\s+/g, " ").trim().slice(0, 180);
+      if (typeof value === "number" || typeof value === "boolean") return `${key}: ${value}`;
+    }
+    const first = Object.entries(raw).find(([, value]) =>
+      typeof value === "string" || typeof value === "number" || typeof value === "boolean");
+    if (first) return `${first[0]}: ${String(first[1]).replace(/\s+/g, " ").slice(0, 150)}`;
+    return "";
+  }
+  const text = typeof raw === "string" ? raw.trim() : "";
+  if (!text) return "";
+  try {
+    return argumentSummary(JSON.parse(text));
+  } catch {
+    return text.replace(/\s+/g, " ").slice(0, 180);
+  }
+}
+
+/**
+ * Inner code-mode tools live on the log (`tool/code-dispatch`), not the DSH
+ * mouth. Project only the live sandbox so the operator sees the constant stub
+ * plus current tools, not the last dry dump.
+ * Closed inner cards are summaries only: the tool-body route reads the mouth.
+ */
+export function codeDispatchNodes(events, sinceSeq = 0) {
+  const byId = new Map();
+  const order = [];
+  for (const event of Array.isArray(events) ? events : []) {
+    if (!Number.isSafeInteger(event?.seq) || event.seq < sinceSeq) continue;
+    if (event.type !== "tool/code-dispatch-start" && event.type !== "tool/code-dispatch") continue;
+    const data = event.data ?? {};
+    const callId = String(data.subCallId ?? "");
+    if (!callId) continue;
+    let node = byId.get(callId);
+    if (!node) {
+      const args = data.arguments;
+      node = {
+        kind: "tool",
+        key: `tool:${callId}`,
+        seq: event.seq,
+        time: event.time,
+        callId,
+        name: String(data.name ?? "unknown"),
+        arguments: typeof args === "string" ? args : JSON.stringify(args ?? {}),
+        argumentSummary: argumentSummary(args),
+        callView: null,
+        resultView: null,
+        status: "running",
+        expanded: false,
+        content: [],
+        inner: true,
+      };
+      byId.set(callId, node);
+      order.push(node);
+    }
+    if (event.type === "tool/code-dispatch") {
+      node.resultSeq = event.seq;
+      node.content = Array.isArray(data.content) ? data.content : [];
+      node.isError = data.isError === true;
+      node.status = data.isError === true ? "error" : "success";
+    }
+  }
+  return order;
+}
+
+export function sessionDisplayNodes(snapshot) {
+  const nodes = Array.isArray(snapshot?.conversation?.nodes) ? snapshot.conversation.nodes : [];
+  let lastSettledSeq = 0;
+  for (const node of nodes) {
+    if (node?.status === "running") continue;
+    if (Number.isSafeInteger(node?.seq) && node.seq > lastSettledSeq) lastSettledSeq = node.seq;
+  }
+  const inner = codeDispatchNodes(snapshot?.events, lastSettledSeq + 1);
+  if (inner.length === 0) return nodes;
+  const rest = nodes.filter((node) => !(
+    node?.kind === "tool" && node.name === "run_code" && node.status === "running"
+  ));
+  return [...rest, ...inner].sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0));
+}
+
 function sessionNodes(snapshot) {
-  return Array.isArray(snapshot?.conversation?.nodes) ? snapshot.conversation.nodes : [];
+  return sessionDisplayNodes(snapshot);
 }
 
 function slashNoticeHtml(snapshot, paths, notice) {
@@ -1099,22 +1311,17 @@ export function renderChrome(snapshot, paths, notice = "") {
   const status = sessionStatus(snapshot);
   const face = emptyProject ? "" : liveFace(snapshot);
   const sessions = sessionNavigation(snapshot, paths);
+  const project = placeName(snapshot);
   const slash = slashNoticeHtml(snapshot, paths, notice);
   const inlineNotice = slash && !isPopupMarkup(slash) ? slash : "";
   return `<div class="session-heading">
       <div class="session-heading-start">
-        ${renderHomeLink(snapshot, paths)}
-        ${renderProjectsMenu(snapshot, paths)}
-        ${sessions.tokens}
-      </div>
-      <div class="session-heading-center">
-        ${snapshot?.id ? renderWorkflowMenu(snapshot, paths) || sessionModeChip(snapshot.sessionMode) : ""}
+        ${project ? `<p class="session-project">${escapeHtml(project)}</p>` : ""}
+        ${sessions.token ? `<p class="session-id">${escapeHtml(sessions.token)}</p>` : ""}
+        <h1 id="session-heading"><span class="session-heading-title">Operator console${face ? ` · ${escapeHtml(face)}` : ""}</span></h1>
       </div>
       <div class="session-heading-end">
-        ${sessions.controls}
-        ${renderSessionPlace(snapshot)}
-        <h1 id="session-heading"><span class="session-heading-title">Operator console${face ? ` · ${escapeHtml(face)}` : ""}</span></h1>
-        <p class="status status-${escapeHtml(status.key)}" role="status"><span class="status-dot" aria-hidden="true"></span><span class="status-label">${escapeHtml(status.label)}</span></p>
+        ${snapshot?.id ? renderWorkflowMenu(snapshot, paths) || sessionModeChip(snapshot.sessionMode) : ""}
       </div>
     </div>
     ${status.detail ? `<p class="notice turn-error" role="alert"><strong>${escapeHtml(status.label)}</strong><span>${escapeHtml(status.detail)}</span>${status.code ? `<code>${escapeHtml(status.code)}</code>` : ""}</p>` : ""}
@@ -1130,8 +1337,8 @@ function renderSettledConversationNode(node) {
 
 export function renderTranscriptSettled(snapshot) {
   if (!snapshot?.id) return "";
-  const { settled, liveText, liveTool } = splitTranscriptNodes(sessionNodes(snapshot));
-  if (settled.length === 0 && liveText.length === 0 && liveTool.length === 0) {
+  const { settled, live } = splitTranscriptNodes(sessionNodes(snapshot));
+  if (settled.length === 0 && live.length === 0) {
     return '<p id="transcript-empty" class="empty-transcript">This DSH session has no transcript yet.</p>';
   }
   return settled.map(renderSettledConversationNode).filter(Boolean).join("\n");
@@ -1174,27 +1381,37 @@ export function renderSettledTranscriptAppend(previousKeys, snapshot) {
   return { keys, html, reset: false };
 }
 
-/** @deprecated Junctions append via renderSettledTranscriptAppend; live is its own region. */
+/** @deprecated Junctions are projected through the chronological live suffix. */
 export function renderTranscriptJunction(snapshot) {
   return renderTranscriptSettled(snapshot);
 }
 
+export function renderLiveNodes(snapshot) {
+  return liveTranscriptState(snapshot).nodes.map((island) => island.html).join("\n");
+}
+
+/** @deprecated Use renderLiveNodes. */
 export function renderLiveText(snapshot) {
-  return liveTranscriptState(snapshot).text?.html ?? "";
+  return renderLiveNodes(snapshot);
 }
 
-export function renderLiveTool(snapshot) {
-  return liveTranscriptState(snapshot).tool?.html ?? "";
+/** @deprecated Tools share the mixed live suffix. */
+export function renderLiveTool() {
+  return "";
 }
 
-export function renderTranscriptLive(snapshot) {
+function renderProviderGapSlot() {
+  return `<div id="provider-gap" class="provider-gap" data-state="idle" role="status" aria-live="polite" aria-atomic="true" aria-hidden="true"><span class="provider-gap-caret" aria-hidden="true"></span><span class="provider-gap-elapsed" hidden></span></div>`;
+}
+
+export function renderTranscriptLive(snapshot, paths = {}) {
   if (!snapshot?.id) return "";
-  return `${regionShell("transcript-live-text", "transcript-live-text", "live", renderLiveText(snapshot), true)}${regionShell("transcript-live-tool", "transcript-live-tool", "live-tool", renderLiveTool(snapshot), true)}`;
+  return `${regionShell("transcript-live-nodes", "transcript-live-nodes", "live", renderLiveNodes(snapshot), true)}${regionShell("session-queue", "session-queue", "queue", renderQueue(snapshot, paths), true)}${renderProviderGapSlot()}`;
 }
 
-export function renderTranscript(snapshot) {
+export function renderTranscript(snapshot, paths = {}) {
   const settled = renderTranscriptSettled(snapshot);
-  const live = renderTranscriptLive(snapshot);
+  const live = renderTranscriptLive(snapshot, paths);
   return [settled, live].filter(Boolean).join("\n");
 }
 
@@ -1211,8 +1428,22 @@ export function renderComposerControls(snapshot) {
 
 export function renderComposer(snapshot, paths) {
   if (!snapshot?.id) return "";
-  const status = sessionStatus(snapshot);
-  return composer(paths, status.key === "running", snapshot.id, sessionFindWork(snapshot));
+  return composer(paths, snapshot);
+}
+
+export function renderCaseRegion(snapshot) {
+  const doc = snapshot?.caseFile;
+  if (!doc || typeof doc !== "object") return "";
+  const text = String(doc.text ?? "");
+  const title = doc.title || "Working memory";
+  const panel = `<aside class="case-panel" aria-label="Working memory">${renderMarkdownText(text, "document-prose case-prose")}</aside>`;
+  const viewer = renderDocumentViewer({
+    title,
+    identity: doc.identity || "working memory",
+    kind: "markdown",
+    text,
+  }, { mode: "dialog", id: "session-case-viewer", closeLabel: "Close" });
+  return `${panel}${viewer}`;
 }
 
 export function renderPopups(snapshot, paths, notice = "") {
@@ -1233,15 +1464,15 @@ export function renderSessionRegion(name, snapshot, paths, notice = "") {
     case "transcript":
       return renderTranscriptSettled(snapshot);
     case "live":
-      return renderLiveText(snapshot);
-    case "live-tool":
-      return renderLiveTool(snapshot);
+      return renderLiveNodes(snapshot);
     case "queue":
       return renderQueue(snapshot, paths);
     case "composer":
       return renderComposerControls(snapshot);
     case "popups":
       return renderPopups(snapshot, paths, notice);
+    case "case":
+      return renderCaseRegion(snapshot);
     default:
       return "";
   }
@@ -1252,7 +1483,7 @@ export function regionFingerprints(snapshot) {
   const sessions = Array.isArray(snapshot?.sessions) ? snapshot.sessions : [];
   const status = sessionStatus(snapshot);
   const offer = snapshot?.offer;
-  const { settled, liveText, liveTool } = splitTranscriptNodes(sessionNodes(snapshot));
+  const { settled, live } = splitTranscriptNodes(sessionNodes(snapshot));
   return {
     chrome: JSON.stringify([
       snapshot?.id,
@@ -1276,17 +1507,19 @@ export function regionFingerprints(snapshot) {
     ]),
     live: JSON.stringify([
       snapshot?.id,
-      liveText.map(nodeFingerprint),
-    ]),
-    "live-tool": JSON.stringify([
-      snapshot?.id,
-      liveTool.map(nodeFingerprint),
+      live.map(nodeFingerprint),
     ]),
     queue: JSON.stringify((snapshot?.conversation?.pending ?? []).map((item) => [item.id, item.target, item.text])),
     composer: JSON.stringify([
       snapshot?.id,
       status.key === "running",
       sessionFindWork(snapshot),
+      Boolean(snapshot?.caseFile),
+    ]),
+    case: JSON.stringify([
+      snapshot?.id,
+      snapshot?.caseFile?.title ?? "",
+      snapshot?.caseFile?.text ?? "",
     ]),
     popups: JSON.stringify([
       offer?.id ?? "",
@@ -1312,10 +1545,11 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   if (emptyProject) return `${chrome}${popups}`;
   return `${chrome}
     <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
-      <div id="transcript-log" class="transcript-log" hx-history="false">${regionShell("transcript-settled", "transcript-settled", "transcript-reset", transcriptSettledInner(snapshot), true)}</div>
-      <div id="transcript-live" class="transcript-live">${renderTranscriptLive(snapshot)}</div>
+      <div id="transcript-log" class="transcript-log" hx-history="false">
+        ${regionShell("transcript-settled", "transcript-settled", "transcript-reset", transcriptSettledInner(snapshot), true)}
+        <div id="transcript-live" class="transcript-live">${renderTranscriptLive(snapshot, paths)}</div>
+      </div>
     </div>
-    ${regionShell("session-queue", "session-queue", "queue", renderQueue(snapshot, paths), true)}
     ${regionShell("session-composer", "session-composer", "", renderComposer(snapshot, paths), false)}
     ${popups}`;
 }
@@ -1398,8 +1632,8 @@ function drawerEntryHref(entry, drawer, paths) {
   if (entry.type === "project") {
     const project = String(entry.project ?? entry.name ?? "");
     const folder = String(entry.folder ?? "");
-    const folderPath = folder ? `/${encodeURIComponent(folder)}` : "";
-    return `${paths.projectsBase}/${encodeURIComponent(project)}${folderPath}`;
+    const qualified = folder ? `~/${project}/${folder}` : `~/${project}`;
+    return `${paths.canonical}${drawerQuery(qualified)}`;
   }
   if (entry.type === "directory") {
     const qualified = drawer.project ? `~/${drawer.project}/${entry.path}` : entry.path;
@@ -1413,34 +1647,11 @@ function drawerEntryHref(entry, drawer, paths) {
 }
 
 /** Render one non-recursive project level. Descendants are never embedded. */
-export function renderProjectDrawer(drawer, paths, options = {}) {
+export function renderProjectDrawer(drawer, paths, livePlaces = new Set()) {
   if (!drawer || !Array.isArray(drawer.entries)) return "";
   const opened = drawer.open === true;
-  const onProjectsSession = options.scope === "projects";
   const breadcrumbs = Array.isArray(drawer.breadcrumbs) ? drawer.breadcrumbs : [];
   const nestedCrumbs = breadcrumbs.filter((crumb) => crumb.type !== "projects");
-  const breadcrumbHtml = nestedCrumbs.map((crumb, index) => {
-    const current = index === nestedCrumbs.length - 1;
-    const label = String(crumb.name ?? "").replace(/[\\/]+$/, "") || String(crumb.name ?? "");
-    const path = String(crumb.path ?? "");
-    const qualified = drawer.project
-      ? `~/${drawer.project}${path ? `/${path}` : ""}`
-      : "~";
-    const href = `${paths.canonical}${drawerQuery(qualified)}`;
-    return `<li>${current
-      ? `<span aria-current="page" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`
-      : `<a href="${escapeHtml(href)}" title="${escapeHtml(label)}">${escapeHtml(label)}</a>`}</li>`;
-  }).join("");
-  const projectsHref = paths.projectsSession || "/qq/projects";
-  const title = onProjectsSession
-    ? "projects"
-    : `<a href="${escapeHtml(projectsHref)}" aria-label="Open the projects session">projects</a>`;
-  const upPath = drawer.scope === "projects"
-    ? ""
-    : drawer.path
-      ? `~/${drawer.project}${drawer.parent ? `/${drawer.parent}` : ""}`
-      : "~";
-  const up = drawer.scope === "projects" ? "" : `<a class="drawer-up" href="${escapeHtml(`${paths.canonical}${drawerQuery(upPath)}`)}" aria-label="Up one level">../</a>`;
   const latestCrumb = nestedCrumbs.at(-1);
   const groupedRoot = !drawer.path && drawer.entries.some((entry) => entry.type === "project" && entry.folder);
   const atProjectDirectory = drawer.scope === "project"
@@ -1450,25 +1661,57 @@ export function renderProjectDrawer(drawer, paths, options = {}) {
   const selectedFolder = drawer.path && latestCrumb?.type === "project"
     ? String(drawer.path).split("/")[0]
     : "";
-  const startSessionBase = `${paths.projectsBase}/${encodeURIComponent(drawer.project ?? "")}${selectedFolder ? `/${encodeURIComponent(selectedFolder)}` : ""}`;
-  const startSession = atProjectDirectory
+  const liveHere = livePlaces.has(`${String(drawer.project ?? "")}\n${selectedFolder}`);
+  const startSessionBase = atProjectDirectory && !liveHere && paths.projectsBase
+    ? `${paths.projectsBase}/${encodeURIComponent(drawer.project ?? "")}${selectedFolder ? `/${encodeURIComponent(selectedFolder)}` : ""}`
+    : "";
+  const startSession = startSessionBase
     ? `<form class="drawer-start-session" action="${escapeHtml(`${startSessionBase}/sessions`)}" method="post">
-        <button type="submit"><span aria-hidden="true">+</span><span>session</span></button>
+        <button type="submit" aria-label="New session"><span aria-hidden="true">+</span></button>
       </form>`
     : "";
-  const rows = drawer.entries.map((entry) => {
+  const breadcrumbHtml = nestedCrumbs.map((crumb, index) => {
+    const current = index === nestedCrumbs.length - 1;
+    const label = String(crumb.name ?? "").replace(/[\\/]+$/, "") || String(crumb.name ?? "");
+    const path = String(crumb.path ?? "");
+    const qualified = drawer.project
+      ? `~/${drawer.project}${path ? `/${path}` : ""}`
+      : "~";
+    const href = `${paths.canonical}${drawerQuery(qualified)}`;
+    return `<li${current ? ' class="drawer-crumb-current"' : ""}>${current
+      ? `<span aria-current="page" title="${escapeHtml(label)}">${escapeHtml(label)}</span>${startSession}`
+      : `<a href="${escapeHtml(href)}" title="${escapeHtml(label)}">${escapeHtml(label)}</a>`}</li>`;
+  }).join("");
+  const title = "files";
+  const upPath = drawer.scope === "projects"
+    ? ""
+    : drawer.path
+      ? `~/${drawer.project}${drawer.parent ? `/${drawer.parent}` : ""}`
+      : "~";
+  const upRow = drawer.scope === "projects"
+    ? ""
+    : `<li><a class="drawer-entry drawer-up" data-entry-type="up" data-tree-action="expand" href="${escapeHtml(`${paths.canonical}${drawerQuery(upPath)}`)}" aria-label="Up one level"><span class="drawer-name">..</span></a></li>`;
+  const renderEntry = (entry, split = false) => {
     const href = drawerEntryHref(entry, drawer, paths);
-    const action = entry.type === "directory" ? "Open folder" : entry.type === "project" ? "Open project" : entry.kind === "binary" ? "Open file" : "Read file";
+    const action = entry.type === "directory" || entry.type === "project" ? "Open folder" : entry.kind === "binary" ? "Open file" : "Read file";
     const pathAttr = entry.type === "file" && entry.path
       ? ` data-file-path="${escapeHtml(entry.path)}"`
       : "";
     const projectAttr = entry.project ? ` data-project="${escapeHtml(entry.project)}"` : "";
     const folderAttr = entry.folder ? ` data-folder="${escapeHtml(entry.folder)}"` : "";
     const treeAction = entry.type === "file" ? "open" : "expand";
-    return `<li><a class="drawer-entry" data-entry-type="${escapeHtml(entry.type)}" data-tree-action="${treeAction}" data-file-kind="${escapeHtml(entry.kind ?? "")}"${projectAttr}${folderAttr}${pathAttr} href="${escapeHtml(href)}" aria-label="${escapeHtml(`${action} ${entry.name}`)}">
+    return `<li${split ? ' class="drawer-files-start"' : ""}><a class="drawer-entry" data-entry-type="${escapeHtml(entry.type)}" data-tree-action="${treeAction}" data-file-kind="${escapeHtml(entry.kind ?? "")}"${projectAttr}${folderAttr}${pathAttr} href="${escapeHtml(href)}" aria-label="${escapeHtml(`${action} ${entry.name}`)}">
       <span class="drawer-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</span>
     </a></li>`;
-  }).join("");
+  };
+  const folders = drawer.entries.filter((entry) => entry.type !== "file");
+  const files = drawer.entries.filter((entry) => entry.type === "file");
+  const above = Boolean(upRow) || folders.length > 0;
+  const rows = [
+    upRow,
+    ...folders.map((entry) => renderEntry(entry)),
+    ...files.map((entry, index) => renderEntry(entry, above && index === 0)),
+  ].join("");
   const empty = rows || '<li class="drawer-empty">nothing at this level</li>';
   const crumbs = breadcrumbHtml
     ? `<nav class="drawer-breadcrumbs" aria-label="File location"><ol>${breadcrumbHtml}</ol></nav>`
@@ -1484,8 +1727,6 @@ export function renderProjectDrawer(drawer, paths, options = {}) {
       <button class="drawer-close" type="button" aria-label="Close files">${bannerMark("close")}</button>
     </header>
     ${crumbs}
-    ${up}
-    ${startSession}
     <ul class="drawer-list">${empty}</ul>
   </aside>`;
 }
@@ -1501,7 +1742,7 @@ function documentHead(assetPaths, title = "qq", options = {}) {
   <meta name="apple-mobile-web-app-title" content="qq">
   <meta name="application-name" content="qq">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="htmx-config" content='{"disableInheritance":true,"historyCacheSize":0,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"409","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
+  <meta name="htmx-config" content='{"disableInheritance":true,"historyEnabled":false,"historyCacheSize":0,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"409","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
   <title>${escapeHtml(title)}</title>
   <link rel="manifest" href="${escapeHtml(assetPaths.manifest)}">
   <link rel="icon" href="${escapeHtml(assetPaths.icon192)}" sizes="192x192">
@@ -1724,15 +1965,25 @@ ${documentHead(assetPaths, "document viewer proof · qq", { themeColor: "#000000
 </html>`;
 }
 
+function bodyClass(snapshot) {
+  const classes = [];
+  if (snapshot?.drawer?.open) classes.push("drawer-open");
+  if (snapshot?.caseFile) classes.push("case-open");
+  return classes.length ? ` class="${escapeHtml(classes.join(" "))}"` : "";
+}
+
 export function renderPage(snapshot, paths, assetPaths, notice = "") {
   const content = renderSessionContent(snapshot, paths, notice);
-  const drawer = renderProjectDrawer(snapshot.drawer, paths, { scope: snapshot.scope });
+  const drawer = renderProjectDrawer(snapshot.drawer, paths, livePlaceSet(snapshot));
   const backgroundInert = snapshot?.drawer?.open ? " inert" : "";
   const rail = renderProjectRail(snapshot, paths, Boolean(backgroundInert));
+  const caseRegion = snapshot?.id
+    ? regionShell("session-case", "session-case", "case", renderCaseRegion(snapshot), Boolean(paths.events))
+    : "";
   return `<!doctype html>
 <html lang="en">
 ${documentHead(assetPaths)}
-<body${snapshot?.drawer?.open ? ' class="drawer-open"' : ""}>
+<body${bodyClass(snapshot)}>
   ${drawer}
   ${rail}
   <header class="site-header"${backgroundInert}>
@@ -1742,6 +1993,7 @@ ${documentHead(assetPaths)}
   <main id="console-stream"${backgroundInert}${paths.events ? ` hx-ext="sse" sse-connect="${escapeHtml(paths.events)}"` : ""} hx-history="false">
     ${paths.events ? `<div id="ui-generation" hidden sse-swap="ui" hx-swap="none"${assetPaths.uiRevision ? ` data-ui-revision="${escapeHtml(assetPaths.uiRevision)}"` : ""}></div>` : ""}
     <section id="session-panel" class="session-panel" aria-labelledby="session-heading">${content}</section>
+    ${caseRegion}
   </main>
   <footer${backgroundInert}>DSH owns session identity, transcript order, turn status, and interruption. Browser view state is not shared.</footer>
 </body>

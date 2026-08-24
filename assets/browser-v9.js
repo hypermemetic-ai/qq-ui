@@ -36,18 +36,57 @@
     input.style.height = "auto";
     input.style.height = `${input.scrollHeight + extras}px`;
   };
-  const showLatest = () => {
-    const transcript = document.querySelector("#transcript");
-    if (transcript) transcript.scrollTop = transcript.scrollHeight;
-  };
+  try { history.scrollRestoration = "manual"; } catch {}
   const transcriptBottomGap = 48;
   let transcriptView = { follow: true, top: 0 };
-  const captureTranscriptView = (transcript = document.querySelector("#transcript")) => {
+  let transcriptProgrammatic = false;
+  let transcriptSizeObserver = null;
+  const atTranscriptBottom = (transcript) =>
+    transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop <= transcriptBottomGap;
+  const showLatest = () => {
+    const transcript = document.querySelector("#transcript");
     if (!transcript) return;
+    transcriptProgrammatic = true;
+    transcript.scrollTop = transcript.scrollHeight;
+    transcriptView = { follow: true, top: transcript.scrollTop };
+    requestAnimationFrame(() => { transcriptProgrammatic = false; });
+  };
+  const followLatest = () => {
+    if (!transcriptView.follow) return;
+    showLatest();
+    requestAnimationFrame(() => {
+      if (transcriptView.follow) showLatest();
+    });
+  };
+  const anchorTranscript = () => {
+    transcriptView = { follow: true, top: 0 };
+    followLatest();
+  };
+  const captureTranscriptView = (transcript = document.querySelector("#transcript")) => {
+    if (!transcript || transcriptProgrammatic) return;
+    // Swaps and token paint must not unanchor. Only a user scroll does that.
+    if (transcriptView.follow) return;
+    transcriptView = { follow: false, top: transcript.scrollTop };
+  };
+  const onTranscriptUserScroll = (transcript) => {
+    if (!transcript || transcriptProgrammatic) return;
     transcriptView = {
-      follow: transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop <= transcriptBottomGap,
+      follow: atTranscriptBottom(transcript),
       top: transcript.scrollTop,
     };
+  };
+  const bindTranscriptFollow = () => {
+    const transcript = document.querySelector("#transcript");
+    if (!transcript || typeof ResizeObserver !== "function") return;
+    if (!transcriptSizeObserver) {
+      transcriptSizeObserver = new ResizeObserver(() => {
+        if (transcriptView.follow) showLatest();
+      });
+    } else {
+      transcriptSizeObserver.disconnect();
+    }
+    transcriptSizeObserver.observe(transcript);
+    for (const child of transcript.children ?? []) transcriptSizeObserver.observe(child);
   };
   const restoreTranscriptView = () => {
     const restore = () => {
@@ -103,6 +142,7 @@
       fitComposer(input, { shrink: false });
     } else if (draft?.kind === "queue" && input instanceof HTMLTextAreaElement) {
       input.value = draft.value;
+      fitComposer(input, { shrink: false });
     }
     if (draft?.focused && input instanceof HTMLTextAreaElement) {
       input.focus();
@@ -114,6 +154,9 @@
   };
   const prepareSession = () => {
     restoreTranscriptView();
+    bindTranscriptFollow();
+    syncProviderGapForTurn();
+    restorePersistedDraft();
     const input = composer();
     if (input instanceof HTMLTextAreaElement && document.activeElement !== input) {
       fitComposer(input, { shrink: false });
@@ -134,12 +177,42 @@
     const match = location.pathname.match(/\/session\/(session-[0-9a-fA-F-]{36})(?:\/|$)/);
     return match ? match[1] : "";
   };
-  const sessionIds = () => [...document.querySelectorAll(".session-token[data-session-id]")]
-    .map((token) => token.dataset.sessionId)
-    .filter(Boolean);
+  let inFlightDraft = "";
+  const composerDraftKey = (sessionId = currentSessionId()) => (sessionId ? `qq:composer:${sessionId}` : "");
+  const persistComposerDraft = (input = composer()) => {
+    const key = composerDraftKey();
+    if (!key || !(input instanceof HTMLTextAreaElement)) return;
+    try {
+      if (input.value) sessionStorage.setItem(key, input.value);
+      else sessionStorage.removeItem(key);
+    } catch { /* private mode */ }
+  };
+  const clearComposerDraft = (sessionId = currentSessionId()) => {
+    const key = composerDraftKey(sessionId);
+    if (!key) return;
+    try { sessionStorage.removeItem(key); } catch { /* private mode */ }
+  };
+  const restorePersistedDraft = () => {
+    const input = composer();
+    const key = composerDraftKey();
+    if (!key || !(input instanceof HTMLTextAreaElement) || input.value) return;
+    try {
+      const saved = sessionStorage.getItem(key);
+      if (!saved) return;
+      input.value = saved;
+      fitComposer(input, { shrink: false });
+    } catch { /* private mode */ }
+  };
+  const sessionLinks = () => [...document.querySelectorAll(".project-sessions [data-session-id]")];
+  const sessionIds = () => sessionLinks().map((link) => link.dataset.sessionId).filter(Boolean);
   const openSession = (sessionId) => {
     if (!sessionId || sessionId === currentSessionId()) return;
-    const projectMatch = location.pathname.match(/^(.*\/project\/[^/]+)\/session\/session-[0-9a-fA-F-]{36}(?:\/|$)/);
+    const link = sessionLinks().find((entry) => entry.dataset.sessionId === sessionId);
+    if (link?.href) {
+      location.assign(link.href);
+      return;
+    }
+    const projectMatch = location.pathname.match(/^(.*\/project\/[^/]+(?:\/[^/]+)?)\/session\/session-[0-9a-fA-F-]{36}(?:\/|$)/);
     if (projectMatch) {
       location.assign(`${projectMatch[1]}/session/${sessionId}`);
       return;
@@ -148,30 +221,30 @@
     const base = match ? match[1] : "/qq";
     location.assign(`${base}/session/${sessionId}`);
   };
-  const confirmingClose = () => document.querySelector(".session-controls.close-confirming");
+  const confirmingClose = () => document.querySelector(".session-item-current.close-confirming");
   const restoreCloseFocus = () => {
     const arm = document.querySelector(".close-arm");
     if (arm instanceof HTMLElement) arm.focus();
   };
   const disarmClose = () => {
-    const controls = document.querySelector(".session-controls");
-    const confirm = document.querySelector(".close-confirm");
-    const arm = document.querySelector(".close-arm");
-    if (!controls) return;
-    controls.classList.remove("close-confirming");
+    const row = document.querySelector(".session-item-current");
+    const confirm = row?.querySelector(".close-confirm");
+    const arm = row?.querySelector(".close-arm");
+    if (!row) return;
+    row.classList.remove("close-confirming");
     if (confirm) confirm.hidden = true;
     if (arm) arm.hidden = false;
   };
   const armClose = () => {
-    const controls = document.querySelector(".session-controls");
-    const confirm = document.querySelector(".close-confirm");
-    const arm = document.querySelector(".close-arm");
-    const keep = document.querySelector(".close-keep");
-    if (!controls || !confirm) return;
-    controls.classList.add("close-confirming");
+    const row = document.querySelector(".session-item-current");
+    const confirm = row?.querySelector(".close-confirm");
+    const arm = row?.querySelector(".close-arm");
+    const submit = confirm?.querySelector("button[type=\"submit\"]");
+    if (!row || !confirm) return;
+    row.classList.add("close-confirming");
     confirm.hidden = false;
     if (arm) arm.hidden = true;
-    if (keep instanceof HTMLElement) keep.focus();
+    if (submit instanceof HTMLElement) submit.focus();
   };
   const neighborSession = (delta) => {
     const ids = sessionIds();
@@ -278,7 +351,7 @@
   const activeProjectEntry = (item) => ({
     project: String(item?.dataset?.project ?? ""),
     folder: String(item?.dataset?.folder ?? ""),
-    label: String(item?.title || item?.querySelector?.(".active-project-label")?.textContent || "").trim(),
+    label: String(item?.title || item?.querySelector?.(".active-project-label")?.textContent || item?.dataset?.folder || item?.dataset?.project || "").trim(),
     href: String(item?.href ?? ""),
   });
   const readRememberedProjects = () => {
@@ -307,13 +380,16 @@
     link.href = entry.href;
     link.dataset.project = entry.project;
     link.dataset.folder = entry.folder || "";
-    link.title = entry.label;
+    const display = entry.folder && String(entry.label || "").includes(" / ")
+      ? entry.folder
+      : (entry.label || entry.folder || entry.project);
+    link.title = display;
     const mark = document.createElement("span");
     mark.className = "active-project-mark";
     mark.setAttribute("aria-hidden", "true");
     const label = document.createElement("span");
     label.className = "active-project-label";
-    label.textContent = entry.label;
+    label.textContent = display;
     link.append(mark, label);
     row.append(link);
     return row;
@@ -347,21 +423,6 @@
       const href = key === currentKey && currentHref ? currentHref : destinations.get(key);
       if (href && link instanceof HTMLElement && link.tagName === "A") link.href = href;
     }
-    const remembered = rememberedAll.filter((entry) => currentIsActive || projectIdentity(entry) !== currentKey);
-    const rows = [];
-    const used = new Set();
-    for (const entry of remembered) {
-      const key = projectIdentity(entry);
-      if (used.has(key)) continue;
-      used.add(key);
-      rows.push(existing.get(key) ?? buildActiveProjectItem(entry));
-    }
-    for (const [key, row] of existing) {
-      if (used.has(key)) continue;
-      used.add(key);
-      rows.push(row);
-    }
-    list.replaceChildren(...rows);
     restoreProjectChoiceDestinations(rememberedAll, currentKey, currentIsActive);
     rememberActiveProjects();
   };
@@ -379,14 +440,23 @@
     item?.closest("li")?.remove();
     rememberActiveProjects();
   };
-  const responseHasSession = (response) => response.ok && /\/session\/session-[0-9a-f-]+(?:\/|$)/i.test(new URL(response.url).pathname);
+  const responseHasSession = (response) => {
+    if (response.status === 404) return false;
+    const path = new URL(response.url).pathname;
+    if (/\/session\/session-[0-9a-f-]+(?:\/|$)/i.test(path)) return true;
+    if (/\/project\/[^/]+/i.test(path) && (response.ok || response.redirected)) return true;
+    return response.ok;
+  };
   const validateRememberedProjects = async () => {
     const current = activeProjectItems().find((item) => item.matches('[aria-current="page"]'));
-    const candidates = activeProjectItems().filter((item) => item !== current).map(activeProjectEntry);
+    const candidates = activeProjectItems()
+      .filter((item) => item !== current && item.dataset.live !== "true")
+      .map(activeProjectEntry);
     await Promise.all(candidates.map(async (entry) => {
       try {
         const response = await fetch(entry.href, { method: "HEAD", headers: { Accept: "text/html" } });
-        if (!responseHasSession(response)) removeActiveProject(entry);
+        if (response.status === 404) removeActiveProject(entry);
+        else if (!responseHasSession(response) && response.status >= 400) removeActiveProject(entry);
       } catch {
         /* retain remembered activity when validation cannot reach the fixture */
       }
@@ -444,13 +514,45 @@
         };
       })
       .filter((entry) => entry.href && entry.label && ["project", "directory", "file"].includes(entry.kind));
+    let createHref = "";
     const start = parsed.querySelector("#project-drawer .drawer-start-session[action]");
     if (start instanceof HTMLFormElement) {
-      let href = "";
-      try { href = new URL(start.getAttribute("action") ?? "", responseUrl).href; } catch {}
-      if (href) entries.unshift({ kind: "session", label: "session", href, project: "", folder: "", fileKind: "", action: "create" });
+      try { createHref = new URL(start.getAttribute("action") ?? "", responseUrl).href; } catch { createHref = ""; }
     }
-    return entries;
+    return { entries, createHref };
+  };
+  const projectCreateHref = (entry) => {
+    if (entry.kind !== "project" || !entry.project) return "";
+    if (activeProjectKeys().has(projectIdentity({ project: entry.project, folder: entry.folder }))) return "";
+    const folder = entry.folder ? `/${encodeURIComponent(entry.folder)}` : "";
+    const prefix = location.pathname.match(/^(.*)\/project\//)?.[1] ?? "";
+    try {
+      return new URL(`${prefix}/project/${encodeURIComponent(entry.project)}${folder}/sessions`, location.origin).href;
+    } catch {
+      return "";
+    }
+  };
+  const treeCreateMark = (href) => {
+    const create = document.createElement("span");
+    create.className = "project-tree-create";
+    create.dataset.href = href;
+    create.dataset.action = "create";
+    create.setAttribute("aria-label", "New session");
+    create.textContent = "+";
+    return create;
+  };
+  const attachTreeCreate = (node, href) => {
+    if (!(node instanceof HTMLElement) || !href) return;
+    node.classList.add("project-tree-node-create");
+    const existing = node.querySelector(".project-tree-create");
+    if (existing instanceof HTMLElement) {
+      existing.dataset.href = href;
+      return;
+    }
+    const mark = treeCreateMark(href);
+    const branch = node.querySelector(".project-tree-branch");
+    if (branch) branch.before(mark);
+    else node.append(mark);
   };
   const projectTreeNodes = (column) => [...column.querySelectorAll(".project-tree-node")];
   let treeRequest = 0;
@@ -492,12 +594,6 @@
       label.textContent = entry.label;
       if (entry.kind === "file") {
         button.append(label);
-      } else if (entry.kind === "session") {
-        const add = document.createElement("span");
-        add.className = "project-tree-add";
-        add.setAttribute("aria-hidden", "true");
-        add.textContent = "+";
-        button.append(add, label);
       } else {
         const mark = document.createElement("span");
         mark.className = "project-tree-mark";
@@ -511,6 +607,8 @@
         branch.textContent = "›";
         button.append(branch);
       }
+      const createHref = projectCreateHref(entry);
+      if (createHref) attachTreeCreate(button, createHref);
       column.append(button);
     }
     columns.append(column);
@@ -525,9 +623,9 @@
       if (!response.ok) return null;
       const html = await response.text();
       if (request !== treeRequest && depth > 0) return null;
-      const entries = folderEntries(html, response.url);
-      const column = renderProjectTreeColumn(entries, depth, parentNode);
-      if (depth === 0) void discoverActiveProjects(entries);
+      const listing = folderEntries(html, response.url);
+      if (parentNode) attachTreeCreate(parentNode, listing.createHref);
+      const column = renderProjectTreeColumn(listing.entries, depth, parentNode);
       if (focusChild) column?.querySelector(".project-tree-node")?.focus();
       return column;
     } catch {
@@ -639,6 +737,12 @@
     return false;
   };
   document.addEventListener("click", (event) => {
+    const create = event.target instanceof Element ? event.target.closest(".project-tree-create") : null;
+    if (create instanceof HTMLElement) {
+      event.preventDefault();
+      createProjectSession(create);
+      return;
+    }
     const node = event.target instanceof Element ? event.target.closest(".project-tree-node") : null;
     if (!(node instanceof HTMLElement)) return;
     event.preventDefault();
@@ -647,10 +751,14 @@
   });
 
   const projectDrawer = () => document.querySelector("#project-drawer");
+  const projectRail = () => document.querySelector("#project-rail");
   const drawerToggle = () => document.querySelector("#project-drawer-toggle");
   const drawerBackdrop = () => document.querySelector("#project-drawer-backdrop");
   let drawerReturnFocus = null;
+  let navReturnFocus = null;
   const drawerIsOpen = () => document.body.classList.contains("drawer-open");
+  const navIsOpen = () => document.body.classList.contains("nav-open");
+  const panelIsOpen = () => drawerIsOpen() || navIsOpen();
   const openDocumentViewerDialog = () => document.querySelector(".document-viewer-dialog[open]");
   const documentViewerIsOpen = () => Boolean(openDocumentViewerDialog());
   let documentViewerReturnFocus = null;
@@ -756,43 +864,61 @@
     else url.searchParams.delete("drawer");
     history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
   };
-  const drawerFocusables = () => {
-    const drawer = projectDrawer();
-    if (!drawer) return [];
-    return [...drawer.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+  const panelFocusables = (panel) => {
+    if (!panel) return [];
+    return [...panel.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')]
       .filter((node) => node instanceof HTMLElement && !node.hidden);
   };
   const drawerIsTransient = () => document.body.classList.contains("drawer-drag-active") || document.body.classList.contains("drawer-drag-settling");
+  const navIsTransient = () => document.body.classList.contains("nav-drag-active") || document.body.classList.contains("nav-drag-settling");
+  const panelIsTransient = () => drawerIsTransient() || navIsTransient();
   const syncDrawerChrome = () => {
     const drawer = projectDrawer();
+    const rail = projectRail();
     const toggle = drawerToggle();
     const backdrop = drawerBackdrop();
-    if (!drawer || !backdrop) return;
-    const open = drawerIsOpen();
-    const transient = drawerIsTransient();
-    toggle?.setAttribute("aria-expanded", String(open));
-    drawer.setAttribute("aria-hidden", String(!open));
-    drawer.inert = !open;
-    backdrop.hidden = !open && !transient;
-    backdrop.setAttribute("aria-hidden", String(!open));
-    backdrop.inert = !open;
-    for (const node of document.body.children) {
-      if (node === drawer || node === backdrop) continue;
-      node.inert = open;
+    const filesOpen = drawerIsOpen();
+    const navOpen = !desktopChair() && navIsOpen();
+    const anyOpen = filesOpen || navOpen;
+    const transient = panelIsTransient();
+    toggle?.setAttribute("aria-expanded", String(filesOpen));
+    if (drawer) {
+      drawer.setAttribute("aria-hidden", String(!filesOpen));
+      drawer.inert = !filesOpen;
+    }
+    if (rail) {
+      if (desktopChair()) {
+        rail.removeAttribute("aria-hidden");
+        rail.inert = filesOpen;
+      } else {
+        rail.setAttribute("aria-hidden", String(!navOpen));
+        rail.inert = !navOpen;
+      }
+    }
+    if (backdrop) {
+      backdrop.hidden = !anyOpen && !transient;
+      backdrop.setAttribute("aria-hidden", String(!anyOpen));
+      backdrop.inert = !anyOpen;
+    }
+    for (const node of document.body?.children ?? []) {
+      if (node === drawer || node === rail || node === backdrop) continue;
+      node.inert = anyOpen;
     }
   };
   let drawerSettleTimer = null;
   const clearDrawerTransient = ({ sync = true } = {}) => {
     if (drawerSettleTimer !== null) clearTimeout(drawerSettleTimer);
     drawerSettleTimer = null;
-    document.body.classList.remove("drawer-drag-active", "drawer-drag-settling");
+    document.body.classList.remove("drawer-drag-active", "drawer-drag-settling", "nav-drag-active", "nav-drag-settling");
     projectDrawer()?.style.removeProperty("transform");
+    projectRail()?.style.removeProperty("transform");
     drawerBackdrop()?.style.removeProperty("opacity");
     if (sync) syncDrawerChrome();
   };
   const openDrawer = ({ updateUrl = true, focus = true, preserveTransient = false } = {}) => {
     const drawer = projectDrawer();
     if (!drawer) return;
+    if (navIsOpen()) closeNav({ restoreFocus: false, preserveTransient: true });
     if (!preserveTransient) clearDrawerTransient({ sync: false });
     if (!drawerIsOpen()) {
       const active = document.activeElement;
@@ -822,8 +948,39 @@
     else if (returnFocus?.isConnected && !returnFocus.inert) returnFocus.focus({ preventScroll: true });
     else if (document.activeElement instanceof HTMLElement && drawer.contains(document.activeElement)) document.activeElement.blur();
   };
+  const openNav = ({ focus = false, preserveTransient = false } = {}) => {
+    const rail = projectRail();
+    if (!rail || desktopChair()) return;
+    if (drawerIsOpen()) closeDrawer({ updateUrl: true, restoreFocus: false, preserveTransient: true });
+    if (!preserveTransient) clearDrawerTransient({ sync: false });
+    if (!navIsOpen()) {
+      const active = document.activeElement;
+      navReturnFocus = active instanceof HTMLElement && active !== document.body && !rail.contains(active)
+        ? active
+        : null;
+    }
+    document.body.classList.add("nav-open");
+    syncDrawerChrome();
+    if (focus) {
+      const current = rail.querySelector(".active-project-current, .session-choice-current, .active-project-item, .session-choice");
+      if (current instanceof HTMLElement) current.focus({ preventScroll: true });
+    }
+  };
+  const closeNav = ({ restoreFocus = true, preserveTransient = false } = {}) => {
+    const rail = projectRail();
+    if (!rail || desktopChair()) return;
+    if (!preserveTransient) clearDrawerTransient({ sync: false });
+    const returnFocus = navReturnFocus;
+    navReturnFocus = null;
+    document.body.classList.remove("nav-open");
+    syncDrawerChrome();
+    if (!restoreFocus) return;
+    if (returnFocus?.isConnected && !returnFocus.inert) returnFocus.focus({ preventScroll: true });
+    else if (document.activeElement instanceof HTMLElement && rail.contains(document.activeElement)) document.activeElement.blur();
+  };
   const trapDrawerFocus = (event) => {
-    const focusable = drawerFocusables();
+    const panel = drawerIsOpen() ? projectDrawer() : navIsOpen() ? projectRail() : null;
+    const focusable = panelFocusables(panel);
     if (focusable.length === 0) return;
     const first = focusable[0];
     const last = focusable.at(-1);
@@ -974,10 +1131,14 @@
 
   const surfaceGestureBlocked = (target) => {
     if (documentViewerIsOpen()) return true;
-    if (target.closest("#project-drawer, #project-drawer-backdrop, .document-viewer, form, a, button, input, textarea, select, option, label, summary, audio, video, [contenteditable]:not([contenteditable=\"false\"]), [role=button], [role=link], [role=textbox], [role=slider], [role=spinbutton], [role=switch], [role=tab], [role=checkbox], [role=radio]")) return true;
+    if (target.closest("#project-drawer, #project-rail, #project-drawer-backdrop, .document-viewer, form, a, button, input, textarea, select, option, label, summary, audio, video, [contenteditable]:not([contenteditable=\"false\"]), [role=button], [role=link], [role=textbox], [role=slider], [role=spinbutton], [role=switch], [role=tab], [role=checkbox], [role=radio]")) return true;
     for (let node = target; node; node = node.parentElement) {
       if (!(node instanceof HTMLElement)) continue;
-      const overflowX = getComputedStyle(node).overflowX;
+      const style = getComputedStyle(node);
+      const overflowX = style.overflowX;
+      const overflowY = style.overflowY;
+      const vertical = overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay";
+      if (vertical) continue;
       if ((overflowX === "auto" || overflowX === "scroll") && node.scrollWidth > node.clientWidth + 1) return true;
     }
     return false;
@@ -997,7 +1158,7 @@
     document.removeEventListener("touchcancel", finishSurfaceGesture, true);
   };
   const cancelSurfaceGesture = () => {
-    const hadDrag = Boolean(surfaceGesture?.horizontal) || drawerIsTransient();
+    const hadDrag = Boolean(surfaceGesture?.horizontal) || panelIsTransient();
     endSurfaceGesture();
     if (hadDrag) clearDrawerTransient();
   };
@@ -1009,37 +1170,52 @@
       return value.trim().endsWith("ms") ? duration : duration * 1000;
     }));
   };
+  const panelNode = (panel) => (panel === "nav" ? projectRail() : projectDrawer());
   const applySurfaceDrag = (gesture, distance) => {
-    const drawer = projectDrawer();
+    const panel = panelNode(gesture.panel);
     const backdrop = drawerBackdrop();
-    if (!drawer || !backdrop) return;
+    if (!panel || !backdrop) return;
     gesture.distance = Math.min(gesture.hiddenDistance, Math.max(0, distance));
     const progress = gesture.distance / gesture.hiddenDistance;
-    drawer.style.transform = `translate3d(calc(-105% + ${gesture.distance}px), 0, 0)`;
+    panel.style.transform = gesture.panel === "nav"
+      ? `translate3d(calc(-105% + ${gesture.distance}px), 0, 0)`
+      : `translate3d(calc(105% - ${gesture.distance}px), 0, 0)`;
     backdrop.style.opacity = String(progress);
-    if (!document.body.classList.contains("drawer-drag-active")) {
-      document.body.classList.add("drawer-drag-active");
+    const dragClass = gesture.panel === "nav" ? "nav-drag-active" : "drawer-drag-active";
+    if (!document.body.classList.contains(dragClass)) {
+      document.body.classList.add(dragClass);
       syncDrawerChrome();
     }
   };
   const settleSurfaceDrag = (gesture, open) => {
-    const drawer = projectDrawer();
+    const panel = panelNode(gesture.panel);
     const backdrop = drawerBackdrop();
-    if (!drawer || !backdrop) {
+    if (!panel || !backdrop) {
       clearDrawerTransient();
       return;
     }
-    document.body.classList.remove("drawer-drag-active");
-    document.body.classList.add("drawer-drag-settling");
-    if (open) {
-      if (drawerIsOpen()) syncDrawerChrome();
-      else openDrawer({ preserveTransient: true });
-    } else if (drawerIsOpen()) closeDrawer({ preserveTransient: true });
-    else syncDrawerChrome();
-    drawer.getBoundingClientRect();
-    drawer.style.transform = open ? "translate3d(0, 0, 0)" : "translate3d(-105%, 0, 0)";
+    const dragClass = gesture.panel === "nav" ? "nav-drag-active" : "drawer-drag-active";
+    const settleClass = gesture.panel === "nav" ? "nav-drag-settling" : "drawer-drag-settling";
+    document.body.classList.remove(dragClass);
+    document.body.classList.add(settleClass);
+    if (gesture.panel === "nav") {
+      if (open) {
+        if (navIsOpen()) syncDrawerChrome();
+        else openNav({ preserveTransient: true });
+      } else if (navIsOpen()) closeNav({ preserveTransient: true });
+      else syncDrawerChrome();
+      panel.style.transform = open ? "translate3d(0, 0, 0)" : "translate3d(-105%, 0, 0)";
+    } else {
+      if (open) {
+        if (drawerIsOpen()) syncDrawerChrome();
+        else openDrawer({ preserveTransient: true });
+      } else if (drawerIsOpen()) closeDrawer({ preserveTransient: true });
+      else syncDrawerChrome();
+      panel.style.transform = open ? "translate3d(0, 0, 0)" : "translate3d(105%, 0, 0)";
+    }
+    panel.getBoundingClientRect();
     backdrop.style.opacity = open ? "1" : "0";
-    const settleFor = Math.max(transitionMilliseconds(drawer), transitionMilliseconds(backdrop));
+    const settleFor = Math.max(transitionMilliseconds(panel), transitionMilliseconds(backdrop));
     drawerSettleTimer = setTimeout(() => clearDrawerTransient(), settleFor ? settleFor + 40 : 0);
   };
   function finishSurfaceGesture(event) {
@@ -1058,7 +1234,8 @@
     }
     const releaseDelay = performance.now() - gesture.lastAt;
     const velocity = releaseDelay <= 120 ? gesture.velocity : 0;
-    const projectedDistance = gesture.distance + velocity * 320;
+    const signed = gesture.panel === "nav" ? velocity : -velocity;
+    const projectedDistance = gesture.distance + signed * 320;
     settleSurfaceDrag(gesture, projectedDistance >= gesture.hiddenDistance * .42);
   }
   function moveSurfaceGesture(event) {
@@ -1082,30 +1259,39 @@
     const cutoff = now - 120;
     while (gesture.samples.length > 1 && gesture.samples[0].at < cutoff) gesture.samples.shift();
     if (!gesture.horizontal) {
+      if (absoluteY >= 10 && absoluteY > absoluteX * 1.15) {
+        endSurfaceGesture();
+        return;
+      }
       if (closing) {
-        if (dx > 8 || (absoluteY >= 10 && absoluteY > absoluteX * 1.15)) {
+        const closeDx = gesture.panel === "nav" ? dx : -dx;
+        if (closeDx > 8) {
           endSurfaceGesture();
           return;
         }
-        if (dx > -10 || absoluteX <= absoluteY * 1.45) return;
+        if (closeDx > -10 || absoluteX <= absoluteY * 1.45) return;
+        gesture.panel = gesture.panel || (dx < 0 ? "nav" : "files");
       } else {
-        if (dx < -8 || (absoluteY >= 10 && absoluteY > absoluteX * 1.15)) {
-          endSurfaceGesture();
-          return;
-        }
-        if (dx < 10 || dx <= absoluteY * 1.45) return;
+        if (absoluteX < 10 || absoluteX <= absoluteY * 1.45) return;
+        gesture.panel = dx > 0 ? "nav" : "files";
+      }
+      const panel = panelNode(gesture.panel);
+      if (!panel) {
+        endSurfaceGesture();
+        return;
       }
       gesture.horizontal = true;
-      gesture.width = Math.max(1, projectDrawer()?.getBoundingClientRect().width || 1);
+      gesture.width = Math.max(1, panel.getBoundingClientRect().width || 1);
       gesture.hiddenDistance = gesture.width * 1.05;
       gesture.startDistance = closing ? gesture.hiddenDistance : 0;
     }
+    const openDx = gesture.panel === "nav" ? dx : -dx;
     if (closing) {
       if (absoluteY > Math.max(18, absoluteX * .68)) {
         cancelSurfaceGesture();
         return;
       }
-    } else if (dx <= 0 || absoluteY > Math.max(18, dx * .68)) {
+    } else if (openDx <= 0 || absoluteY > Math.max(18, openDx * .68)) {
       cancelSurfaceGesture();
       return;
     }
@@ -1113,21 +1299,30 @@
     const anchor = gesture.samples[0];
     gesture.velocity = (point.clientX - anchor.x) / Math.max(1, now - anchor.at);
     gesture.lastAt = now;
-    applySurfaceDrag(gesture, closing ? gesture.hiddenDistance + dx : dx);
+    applySurfaceDrag(gesture, closing ? gesture.startDistance + openDx : openDx);
   }
   document.addEventListener("touchstart", (event) => {
     if (surfaceGesture) cancelSurfaceGesture();
-    else if (drawerIsTransient()) clearDrawerTransient();
+    else if (panelIsTransient()) clearDrawerTransient();
     const target = event.target instanceof Element ? event.target : null;
-    if (!target || event.defaultPrevented || event.touches.length !== 1 || !projectDrawer() || desktopChair()) return;
-    const closing = drawerIsOpen();
-    if (closing) {
+    if (!target || event.defaultPrevented || event.touches.length !== 1 || desktopChair()) return;
+    if (!projectDrawer() && !projectRail()) return;
+    let mode = "open";
+    let panel = "";
+    if (drawerIsOpen()) {
       if (!target.closest("#project-drawer, #project-drawer-backdrop")) return;
+      mode = "close";
+      panel = "files";
+    } else if (navIsOpen()) {
+      if (!target.closest("#project-rail, #project-drawer-backdrop")) return;
+      mode = "close";
+      panel = "nav";
     } else if (surfaceGestureBlocked(target)) return;
     const point = event.touches[0];
     const now = performance.now();
     surfaceGesture = {
-      mode: closing ? "close" : "open",
+      mode,
+      panel,
       id: point.identifier,
       x: point.clientX,
       y: point.clientY,
@@ -1144,14 +1339,16 @@
   }, { capture: true, passive: true });
   window.addEventListener("pagehide", cancelSurfaceGesture);
   window.addEventListener("beforeunload", cancelSurfaceGesture);
-  window.addEventListener("popstate", cancelSurfaceGesture);
+  window.addEventListener("popstate", () => {
+    cancelSurfaceGesture();
+    restoreTranscriptView();
+  });
 
   let pendingClose = false;
 
   document.addEventListener("change", (event) => {
     const select = event.target;
     if (!(select instanceof HTMLSelectElement) || select.id !== "session-choice") return;
-    disarmClose();
     if (select.value) openSession(select.value);
   });
 
@@ -1204,14 +1401,7 @@
       armClose();
       return;
     }
-    const keep = target?.closest(".close-keep");
-    if (keep instanceof HTMLElement) {
-      event.preventDefault();
-      disarmClose();
-      restoreCloseFocus();
-      return;
-    }
-    if (confirmingClose() && !target?.closest(".session-controls")) {
+    if (confirmingClose() && !target?.closest(".session-item-current")) {
       disarmClose();
     }
   });
@@ -1219,7 +1409,6 @@
   document.addEventListener("toggle", (event) => {
     const menu = event.target;
     if (!(menu instanceof HTMLDetailsElement)) return;
-    if (menu.classList.contains("session-menu") && !menu.open) disarmClose();
     if (!menu.open) return;
     if (!menu.classList.contains("session-menu") && !menu.classList.contains("workflows-menu") && !menu.classList.contains("projects-menu")) return;
     for (const other of document.querySelectorAll("details.session-menu, details.workflows-menu, details.projects-menu")) {
@@ -1230,6 +1419,7 @@
   document.addEventListener("input", (event) => {
     if (event.target instanceof HTMLTextAreaElement && event.target.id === "prompt") {
       fitComposer(event.target);
+      persistComposerDraft(event.target);
     }
   });
 
@@ -1242,10 +1432,17 @@
       }
       return;
     }
-    if (drawerIsOpen()) {
+    if (event.key === "Escape" && confirmingClose()) {
+      event.preventDefault();
+      disarmClose();
+      restoreCloseFocus();
+      return;
+    }
+    if (drawerIsOpen() || navIsOpen()) {
       if (event.key === "Escape") {
         event.preventDefault();
-        closeDrawer();
+        if (drawerIsOpen()) closeDrawer();
+        else closeNav();
       } else if (event.key === "Tab") {
         trapDrawerFocus(event);
       }
@@ -1280,13 +1477,6 @@
         if (dismissSheet()) return;
         input.blur();
       }
-      return;
-    }
-
-    if (event.key === "Escape" && confirmingClose()) {
-      event.preventDefault();
-      disarmClose();
-      restoreCloseFocus();
       return;
     }
 
@@ -1450,39 +1640,347 @@
     // htmx has already captured the request parameters. Empty the admitted
     // draft now so typing can continue while the short admission is in flight.
     if (input instanceof HTMLTextAreaElement) {
+      inFlightDraft = input.value;
       input.value = "";
+      clearComposerDraft();
       fitComposer(input);
+      input.blur();
     }
+    anchorTranscript();
+  });
+  document.addEventListener("htmx:afterRequest", (event) => {
+    const form = event.detail?.elt;
+    if (!(form instanceof HTMLFormElement) || form.id !== "composer") return;
+    const failed = event.detail?.successful === false || event.detail?.failed === true;
+    const input = composer();
+    if (failed) {
+      if (input instanceof HTMLTextAreaElement && !input.value && inFlightDraft) {
+        input.value = inFlightDraft;
+        persistComposerDraft(input);
+        fitComposer(input, { shrink: false });
+      }
+      return;
+    }
+    inFlightDraft = "";
+    if (input instanceof HTMLTextAreaElement && input.value) persistComposerDraft(input);
+    else clearComposerDraft();
   });
   document.addEventListener("scroll", (event) => {
-    if (event.target?.id === "transcript") captureTranscriptView(event.target);
+    if (event.target?.id === "transcript") onTranscriptUserScroll(event.target);
   }, true);
-  const appendLiveTail = (elt, data) => {
-    if (!(elt instanceof HTMLElement) || elt.id !== "transcript-live-text") return false;
-    if (typeof data !== "string" || data.length === 0) return false;
+  const visualViewport = window.visualViewport;
+  if (visualViewport && typeof visualViewport.addEventListener === "function") {
+    visualViewport.addEventListener("resize", () => {
+      if (transcriptView.follow) showLatest();
+    });
+  }
+  // Jitter buffer for visible text: hold the start of a burst, then leak
+  // characters at a steady rate so a 0ms slab does not read as fast→stall→fast.
+  // Catchup may rise toward MAX_CPS so we do not trail forever, but it must
+  // not collapse a dump back into a 400ms blob.
+  const LIVE_SMOOTH_START_MS = 96;
+  const LIVE_SMOOTH_IDLE_MS = 180;
+  const LIVE_SMOOTH_CPS = 36;
+  const LIVE_SMOOTH_MAX_CPS = 52;
+  const LIVE_SMOOTH_MAX_CATCHUP_MS = 4000;
+  const liveBuffers = new Map();
+  let liveRaf = 0;
+  let liveStartTimer = 0;
+  const liveSmoothOn = () => ownScript?.dataset.liveSmooth === "1";
+  const liveNow = () => (typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now());
+  const PROVIDER_GAP_SILENCE_MS = 1000;
+  const PROVIDER_GAP_ELAPSED_MS = 1000;
+  let providerGapSince = 0;
+  let providerGapArmed = false;
+  let providerGapAwaiting = false;
+  let providerGapStopping = false;
+  let providerGapWatch = 0;
+  let providerGapTick = 0;
+  let providerGapShownSecond = -1;
+  const turnIsRunning = () => !providerGapStopping && (providerGapAwaiting || Boolean(document.querySelector("#interrupt-submit")));
+  const liveToolRunning = () => {
+    const tail = document.getElementById?.("transcript-live-nodes") ?? document.querySelector?.("#transcript-live-nodes");
+    return Boolean(tail?.querySelector?.(".message-tool.tool-running"));
+  };
+  const clearProviderGapTimers = () => {
+    if (providerGapWatch) {
+      clearTimeout(providerGapWatch);
+      providerGapWatch = 0;
+    }
+    if (providerGapTick) {
+      clearInterval(providerGapTick);
+      providerGapTick = 0;
+    }
+  };
+  const providerGapSlot = () => document.getElementById?.("provider-gap") ?? document.querySelector?.(".provider-gap");
+  const hideProviderGap = () => {
+    const gap = providerGapSlot();
+    if (gap) {
+      gap.dataset.state = "idle";
+      gap.setAttribute("data-state", "idle");
+      gap.setAttribute("aria-hidden", "true");
+      gap.removeAttribute("aria-label");
+      const elapsed = gap.querySelector(".provider-gap-elapsed");
+      if (elapsed) {
+        elapsed.hidden = true;
+        elapsed.textContent = "";
+      }
+    }
+    providerGapShownSecond = -1;
+    if (providerGapTick) {
+      clearInterval(providerGapTick);
+      providerGapTick = 0;
+    }
+  };
+  const paintProviderGap = () => {
+    let gap = providerGapSlot();
+    if (!gap) {
+      const host = document.getElementById?.("transcript-live") ?? document.querySelector?.("#transcript-live");
+      if (!host || typeof document.createElement !== "function") return;
+      gap = document.createElement("div");
+      gap.id = "provider-gap";
+      gap.className = "provider-gap";
+      gap.setAttribute("role", "status");
+      gap.setAttribute("aria-live", "polite");
+      gap.setAttribute("aria-atomic", "true");
+      gap.innerHTML = '<span class="provider-gap-caret" aria-hidden="true"></span><span class="provider-gap-elapsed" hidden></span>';
+      host.append(gap);
+    }
+    gap.dataset.state = "on";
+    gap.setAttribute("data-state", "on");
+    gap.removeAttribute("aria-hidden");
+    const waited = Math.max(0, liveNow() - providerGapSince);
+    const elapsed = gap.querySelector(".provider-gap-elapsed");
+    if (waited >= PROVIDER_GAP_ELAPSED_MS && elapsed) {
+      const seconds = Math.max(1, Math.round(waited / 1000));
+      elapsed.hidden = false;
+      elapsed.textContent = `${seconds}s`;
+      if (seconds !== providerGapShownSecond) {
+        providerGapShownSecond = seconds;
+        gap.setAttribute("aria-label", `Waiting for model · ${seconds}s`);
+      }
+    } else {
+      gap.setAttribute("aria-label", "Waiting for model");
+    }
+    followLatest();
+  };
+  const syncProviderGap = () => {
+    if (!turnIsRunning() || liveToolRunning()) {
+      hideProviderGap();
+      return;
+    }
+    if (liveNow() - providerGapSince < PROVIDER_GAP_SILENCE_MS) return;
+    paintProviderGap();
+    if (!providerGapTick) providerGapTick = setInterval(syncProviderGap, 250);
+  };
+  const scheduleProviderGap = () => {
+    if (providerGapWatch) clearTimeout(providerGapWatch);
+    providerGapWatch = setTimeout(() => {
+      providerGapWatch = 0;
+      syncProviderGap();
+    }, PROVIDER_GAP_SILENCE_MS);
+  };
+  const noteLiveActivity = () => {
+    hideProviderGap();
+    providerGapSince = liveNow();
+    if (turnIsRunning()) scheduleProviderGap();
+  };
+  const syncProviderGapForTurn = () => {
+    if (document.querySelector("#interrupt-submit")) providerGapAwaiting = false;
+    if (!document.querySelector("#interrupt-submit")) providerGapStopping = false;
+    if (!turnIsRunning()) {
+      providerGapArmed = false;
+      providerGapAwaiting = false;
+      providerGapStopping = false;
+      clearProviderGapTimers();
+      hideProviderGap();
+      return;
+    }
+    if (!providerGapArmed) {
+      providerGapArmed = true;
+      providerGapSince = liveNow();
+    }
+    if (liveToolRunning()) {
+      hideProviderGap();
+      scheduleProviderGap();
+      return;
+    }
+    scheduleProviderGap();
+  };
+  const armProviderGapFromSend = () => {
+    providerGapStopping = false;
+    providerGapAwaiting = true;
+    providerGapArmed = true;
+    providerGapSince = liveNow();
+    scheduleProviderGap();
+  };
+  document.addEventListener("htmx:beforeRequest", (event) => {
+    const form = event.detail?.elt;
+    if (!(form instanceof HTMLFormElement)) return;
+    if (form.id === "composer") {
+      armProviderGapFromSend();
+      return;
+    }
+    if (form.id !== "interrupt-form") return;
+    providerGapStopping = true;
+    providerGapAwaiting = false;
+    providerGapArmed = false;
+    clearProviderGapTimers();
+    hideProviderGap();
+  });
+  document.addEventListener("htmx:afterRequest", (event) => {
+    const form = event.detail?.elt;
+    if (!(form instanceof HTMLFormElement) || form.id !== "composer") return;
+    const failed = event.detail?.successful === false || event.detail?.failed === true;
+    if (!failed) return;
+    providerGapAwaiting = false;
+    syncProviderGapForTurn();
+  });
+  const paintLiveSlice = (state, take) => {
+    if (take <= 0) return;
+    const slice = state.committed.slice(state.painted, state.painted + take);
+    state.painted += slice.length;
+    const textNode = state.block.firstChild;
+    if (textNode?.nodeType === 3 && textNode === state.block.lastChild && typeof textNode.appendData === "function") {
+      textNode.appendData(slice);
+    } else {
+      state.block.append(slice);
+    }
+  };
+  const flushLiveElt = (elt) => {
+    for (const [key, state] of liveBuffers) {
+      if (state.elt !== elt) continue;
+      paintLiveSlice(state, state.committed.length - state.painted);
+      liveBuffers.delete(key);
+    }
+  };
+  const playLive = () => {
+    liveRaf = 0;
+    const now = liveNow();
+    let againAt = Infinity;
+    for (const state of liveBuffers.values()) {
+      const pending = state.committed.length - state.painted;
+      if (pending <= 0) continue;
+      if (now < state.startAt) {
+        againAt = Math.min(againAt, state.startAt);
+        continue;
+      }
+      const dt = Math.max(0, now - state.lastTick);
+      state.lastTick = now;
+      let cps = LIVE_SMOOTH_CPS;
+      const catchup = pending / (LIVE_SMOOTH_MAX_CATCHUP_MS / 1000);
+      if (catchup > cps) cps = Math.min(LIVE_SMOOTH_MAX_CPS, catchup);
+      const take = Math.min(pending, Math.max(1, Math.floor((cps * dt) / 1000) || 1));
+      paintLiveSlice(state, take);
+      if (state.committed.length > state.painted) againAt = Math.min(againAt, now + 16);
+      else state.emptyAt = now;
+    }
+    followLatest();
+    if (againAt < Infinity) scheduleLive(againAt - now);
+  };
+  const scheduleLive = (delayMs) => {
+    if (delayMs > 4) {
+      if (liveStartTimer) return;
+      liveStartTimer = setTimeout(() => {
+        liveStartTimer = 0;
+        scheduleLive(0);
+      }, delayMs);
+      return;
+    }
+    if (liveRaf) return;
+    liveRaf = requestAnimationFrame(playLive);
+  };
+  const appendLiveChars = (block, text) => {
+    const textNode = block.firstChild;
+    if (textNode?.nodeType === 3 && textNode === block.lastChild && typeof textNode.appendData === "function") {
+      textNode.appendData(text);
+    } else {
+      block.append(text);
+    }
+  };
+  const liveTailElement = (elt) => {
+    if (elt instanceof HTMLElement && elt.id === "transcript-live-nodes") return elt;
+    return document.getElementById?.("transcript-live-nodes") ?? document.querySelector?.("#transcript-live-nodes");
+  };
+  const applyLivePatch = (elt, data, { smooth = true } = {}) => {
+    const tail = liveTailElement(elt);
+    if (!(tail instanceof HTMLElement) || typeof data !== "string" || data.length === 0) return false;
     let patch;
     try {
       patch = JSON.parse(data);
     } catch {
       return false;
     }
-    if (patch?.op !== "qq-live-append"
-      || typeof patch.key !== "string"
+    if (!patch || typeof patch.op !== "string" || typeof patch.key !== "string") return false;
+
+    if (patch.op === "qq-live-insert" || patch.op === "qq-live-replace") {
+      if (typeof patch.html !== "string") return false;
+      const target = document.getElementById?.(patch.key) ?? null;
+      if (patch.op === "qq-live-insert") {
+        if (target && typeof patch.inner === "string") {
+          flushLiveElt(tail);
+          target.innerHTML = patch.inner;
+          globalThis.htmx?.process?.(target);
+        } else if (!target && typeof tail.insertAdjacentHTML === "function") {
+          tail.insertAdjacentHTML("beforeend", patch.html);
+          const inserted = document.getElementById?.(patch.key) ?? tail.lastElementChild;
+          globalThis.htmx?.process?.(inserted ?? tail);
+        }
+        return true;
+      }
+      // Seal and tool progress restyle only their stable wrapper. Flush any
+      // jitter-buffered suffix first so a replacement cannot strand tokens.
+      if (target) {
+        flushLiveElt(tail);
+        target.innerHTML = patch.html;
+        globalThis.htmx?.process?.(target);
+      }
+      return true;
+    }
+
+    if (patch.op !== "qq-live-append"
       || !Number.isSafeInteger(patch.from)
       || patch.from < 0
       || typeof patch.text !== "string") return false;
-    const block = [...elt.querySelectorAll(".message-live-text")]
+    const block = [...tail.querySelectorAll(".message-live-text")]
       .find((node) => node.dataset.liveKey === patch.key);
     // A recognized append frame must never fall through to HTMX's innerHTML
-    // swap. If a reconnect raced an old DOM, the next full frame recommissions
-    // the cell without ever painting protocol JSON into the transcript.
-    if (!block || (block.textContent ?? "").length !== patch.from) return true;
-    const textNode = block.firstChild;
-    if (textNode?.nodeType === 3 && textNode === block.lastChild && typeof textNode.appendData === "function") {
-      textNode.appendData(patch.text);
-    } else {
-      block.append(patch.text);
+    // swap. If a reconnect raced an old DOM, the next full live frame
+    // recommissions the tail without painting protocol JSON.
+    if (!block) return true;
+    const state = liveBuffers.get(patch.key);
+    const from = state ? state.committed.length : (block.textContent ?? "").length;
+    if (from !== patch.from) return true;
+    const buffered = smooth && liveSmoothOn() && !block.classList.contains("tool-argument");
+    if (!buffered) {
+      appendLiveChars(block, patch.text);
+      if (state) {
+        state.committed += patch.text;
+        state.painted = state.committed.length;
+      }
+      return true;
     }
+    const next = state ?? {
+      elt: tail,
+      block,
+      committed: block.textContent ?? "",
+      painted: (block.textContent ?? "").length,
+      startAt: 0,
+      lastTick: 0,
+      emptyAt: 0,
+    };
+    const wasEmpty = next.committed.length === next.painted;
+    next.committed += patch.text;
+    if (wasEmpty) {
+      const now = liveNow();
+      const continueBurst = next.emptyAt > 0 && (now - next.emptyAt) < LIVE_SMOOTH_IDLE_MS;
+      next.startAt = continueBurst ? now : now + LIVE_SMOOTH_START_MS;
+      next.lastTick = next.startAt;
+    }
+    liveBuffers.set(patch.key, next);
+    scheduleLive(Math.max(0, next.startAt - liveNow()));
     return true;
   };
   const swapTargetId = (event) => event.detail?.target?.id || event.target?.id || "";
@@ -1490,8 +1988,8 @@
     id === "session-panel" || id === "session-composer" || id === "session-queue" || id === "pending-queue" || id === "composer";
   const touchesTranscript = (id) =>
     id === "session-panel" || id === "transcript" || id === "transcript-log" || id === "transcript-live"
-      || id === "transcript-live-text" || id === "transcript-live-tool"
-      || id === "transcript-anchor" || id.startsWith("live-assistant-");
+      || id === "transcript-live-nodes" || id === "transcript-anchor"
+      || id.startsWith("live-node-") || id.startsWith("live-assistant-");
   for (const eventName of ["htmx:beforeSwap", "htmx:sseBeforeMessage"]) {
     document.addEventListener(eventName, (event) => {
       const id = swapTargetId(event);
@@ -1507,7 +2005,10 @@
       const incoming = typeof event.detail?.data === "string"
         ? event.detail.data
         : typeof event.data === "string" ? event.data : "";
-      if (ownGeneration && incoming && incoming !== ownGeneration) location.reload();
+      if (ownGeneration && incoming && incoming !== ownGeneration) {
+        persistComposerDraft();
+        location.reload();
+      }
       return;
     }
     const data = typeof event.detail?.data === "string"
@@ -1515,9 +2016,33 @@
       : typeof event.detail?.elt?.id === "string" && typeof event.data === "string"
         ? event.data
         : "";
-    if (!appendLiveTail(elt, data)) return;
-    event.preventDefault();
-    if (transcriptView.follow) showLatest();
+    if (applyLivePatch(elt, data)) {
+      event.preventDefault();
+      noteLiveActivity();
+      if (!liveSmoothOn()) followLatest();
+      return;
+    }
+    if (elt?.id === "transcript-live-nodes" && typeof data === "string") {
+      flushLiveElt(elt);
+      noteLiveActivity();
+    }
+  });
+  const paintLiveChannel = (channel, data) => {
+    const elt = document.getElementById?.("transcript-live-nodes") ?? document.querySelector?.("#transcript-live-nodes");
+    if (!applyLivePatch(elt, data, { smooth: channel !== "live-tool-append" })) return;
+    noteLiveActivity();
+    followLatest();
+  };
+  document.addEventListener("htmx:sseOpen", (event) => {
+    const source = event.detail?.source;
+    if (!source || typeof source.addEventListener !== "function" || source.qqLiveBound) return;
+    source.qqLiveBound = true;
+    source.addEventListener("live-append", (message) => {
+      paintLiveChannel("live-append", message.data);
+    });
+    source.addEventListener("live-tool-append", (message) => {
+      paintLiveChannel("live-tool-append", message.data);
+    });
   });
   for (const eventName of ["htmx:afterSwap", "htmx:sseMessage"]) {
     document.addEventListener(eventName, (event) => {
@@ -1529,7 +2054,7 @@
   for (const eventName of ["htmx:afterSwap", "htmx:afterSettle", "htmx:sseMessage"]) {
     document.addEventListener(eventName, (event) => {
       const id = swapTargetId(event);
-      if (touchesTranscript(id) || id === "session-composer") prepareSession();
+      if (touchesTranscript(id) || id === "session-composer" || id === "composer-turn-controls" || id === "composer") prepareSession();
     });
   }
 
@@ -1537,6 +2062,8 @@
   window.addEventListener("pageshow", () => {
     adoptFileReturnFromWindowName();
     restoreFileReturnFromHistory();
+    restorePersistedDraft();
+    restoreTranscriptView();
   });
 
   const syncInitialChrome = () => {
@@ -1550,7 +2077,6 @@
     prepareSession();
     restoreActiveProjects();
     void validateRememberedProjects();
-    void hydrateProjectTree();
     if (drawerIsOpen()) requestAnimationFrame(() => openDrawer({ updateUrl: false, focus: !keepOpenerFocus }));
     restoreFileReturnFromHistory();
   };
