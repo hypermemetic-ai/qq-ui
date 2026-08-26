@@ -571,11 +571,13 @@
     return { entries, createHref };
   };
   const projectCreateHref = (entry) => {
-    if (entry.kind !== "project" || !entry.project) return "";
-    const folder = entry.folder ? `/${encodeURIComponent(entry.folder)}` : "";
+    const project = entry.project || (entry.kind === "project" ? entry.label : "");
+    if (!project) return "";
+    const folder = entry.folder || (entry.kind === "directory" ? entry.label : "");
+    const folderPart = folder ? `/${encodeURIComponent(folder)}` : "";
     const prefix = location.pathname.match(/^(.*)\/project\//)?.[1] ?? "";
     try {
-      return new URL(`${prefix}/project/${encodeURIComponent(entry.project)}${folder}/sessions`, location.origin).href;
+      return new URL(`${prefix}/project/${encodeURIComponent(project)}${folderPart}/sessions`, location.origin).href;
     } catch {
       return "";
     }

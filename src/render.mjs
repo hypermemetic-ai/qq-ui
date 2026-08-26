@@ -1849,16 +1849,16 @@ export function renderProjectDrawer(drawer, paths, livePlaces = new Set()) {
   const nestedCrumbs = breadcrumbs.filter((crumb) => crumb.type !== "projects");
   const latestCrumb = nestedCrumbs.at(-1);
   const groupedRoot = !drawer.path && drawer.entries.some((entry) => entry.type === "project" && entry.folder);
-  const atProjectDirectory = drawer.scope === "project"
-    && Boolean(drawer.project)
-    && !groupedRoot
-    && (!drawer.path || latestCrumb?.type === "project");
   const selectedFolder = drawer.path && latestCrumb?.type === "project"
     ? String(drawer.path).split("/")[0]
     : "";
-  const liveHere = livePlaces.has(`${String(drawer.project ?? "")}\n${selectedFolder}`);
+  const atProjectDirectory = drawer.scope === "project"
+    && Boolean(drawer.project)
+    && !groupedRoot;
+  const currentFolder = drawer.path ? String(drawer.path) : selectedFolder;
+  const liveHere = livePlaces.has(`${String(drawer.project ?? "")}\n${currentFolder}`);
   const startSessionBase = atProjectDirectory && !liveHere && paths.projectsBase
-    ? `${paths.projectsBase}/${encodeURIComponent(drawer.project ?? "")}${selectedFolder ? `/${encodeURIComponent(selectedFolder)}` : ""}`
+    ? `${paths.projectsBase}/${encodeURIComponent(drawer.project ?? "")}${currentFolder ? `/${encodeURIComponent(currentFolder)}` : ""}`
     : "";
   const startSession = startSessionBase
     ? `<form class="drawer-start-session" action="${escapeHtml(`${startSessionBase}/sessions`)}" method="post">
@@ -1892,8 +1892,10 @@ export function renderProjectDrawer(drawer, paths, livePlaces = new Set()) {
     const pathAttr = entry.type === "file" && entry.path
       ? ` data-file-path="${escapeHtml(entry.path)}"`
       : "";
-    const projectAttr = entry.project ? ` data-project="${escapeHtml(entry.project)}"` : "";
-    const folderAttr = entry.folder ? ` data-folder="${escapeHtml(entry.folder)}"` : "";
+    const project = entry.project || (entry.type === "directory" ? drawer.project : "");
+    const folder = entry.folder || (entry.type === "directory" ? entry.path : "");
+    const projectAttr = project ? ` data-project="${escapeHtml(project)}"` : "";
+    const folderAttr = folder ? ` data-folder="${escapeHtml(folder)}"` : "";
     const treeAction = entry.type === "file" ? "open" : "expand";
     return `<li${split ? ' class="drawer-files-start"' : ""}><a class="drawer-entry" data-entry-type="${escapeHtml(entry.type)}" data-tree-action="${treeAction}" data-file-kind="${escapeHtml(entry.kind ?? "")}"${projectAttr}${folderAttr}${pathAttr} href="${escapeHtml(href)}" aria-label="${escapeHtml(`${action} ${entry.name}`)}">
       <span class="drawer-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</span>
