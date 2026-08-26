@@ -884,6 +884,35 @@
       api.trigger(node, "htmx:beforeCleanupElement");
     }
   };
+  const rebindSseSwaps = (stream) => {
+    const nodes = [
+      stream,
+      ...stream.querySelectorAll("[sse-swap], [data-sse-swap], [hx-trigger], [data-hx-trigger]"),
+    ];
+    for (const node of nodes) {
+      const internalData = node["htmx-internal-data"];
+      if (internalData) delete internalData.initHash;
+    }
+  };
+  // Mirrors HTMX 2.0.10's deterministic attribute hash without calling minified internals.
+  const htmxAttributeHash = (node) => {
+    let hash = 0;
+    const add = (value) => {
+      for (let index = 0; index < value.length; index += 1) {
+        hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+      }
+    };
+    for (const attribute of node.attributes) {
+      if (!attribute.value) continue;
+      add(attribute.name);
+      add(attribute.value);
+    }
+    return hash;
+  };
+  const syncHtmxInitHash = (node) => {
+    const internalData = node["htmx-internal-data"];
+    if (internalData) internalData.initHash = htmxAttributeHash(node);
+  };
   const markGroupCurrent = (selector, currentClass, current) => {
     for (const item of document.querySelectorAll(selector)) {
       const on = item === current;
@@ -1096,7 +1125,6 @@
       id,
       generation,
       sourceUrl: new URL(bootstrap, location.href).href,
-      events,
       canonical: canonical || pendingCanonical,
       history: historyMode,
       exitWhenReady: Boolean(exitWhenReady),
@@ -1106,6 +1134,7 @@
     closeSseSources();
     activeSseSource = null;
     stream.setAttribute("sse-connect", bootstrap);
+    rebindSseSwaps(stream);
     if (typeof globalThis.htmx?.process === "function") globalThis.htmx.process(stream);
     return true;
   };
@@ -1122,8 +1151,10 @@
     pendingCanonical = meta.canonical || state.canonical;
     const stream = document.querySelector("#console-stream");
     if (stream instanceof HTMLElement) {
-      stream.setAttribute("sse-connect", state.events);
+      // Keep the bootstrap URL: this EventSource continues with ordinary live events,
+      // and its HTMX attribute hash must continue to describe the active source.
       stream.removeAttribute("aria-busy");
+      syncHtmxInitHash(stream);
     }
     syncRailAfterSwitch(meta);
     swapDraft = null;
@@ -2652,9 +2683,22 @@
     const source = typeof EventSource !== "undefined" && event.detail?.target instanceof EventSource
       ? event.detail.target
       : null;
-    if (source && source !== activeSseSource) {
+    if (source && bootstrapSwitch?.sourceUrl && source.url !== bootstrapSwitch.sourceUrl) {
       event.preventDefault();
       return;
+    }
+    if (source && activeSseSource && source !== activeSseSource) {
+      event.preventDefault();
+      return;
+    }
+    if (elt instanceof HTMLElement
+      && elt.id === "session-composer"
+      && event.detail?.type === "composer-shell") {
+      const currentComposer = document.querySelector("#composer");
+      if (currentComposer instanceof HTMLElement) {
+        currentComposer.removeAttribute("hx-preserve");
+        currentComposer.removeAttribute("id");
+      }
     }
     const data = typeof event.detail?.data === "string"
       ? event.detail.data
@@ -2709,6 +2753,7 @@
     let expected = "";
     try { expected = new URL(stream?.getAttribute("sse-connect") || "", location.href).href; } catch {}
     if (source.url && expected && source.url !== expected) {
+      if (activeSseSource === source) activeSseSource = null;
       source.close?.();
       return;
     }
