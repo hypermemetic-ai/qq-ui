@@ -1009,11 +1009,16 @@ details.session-menu.session-controls {
 .tool-media img,
 .tool-media video {
   display: block;
-  width: auto;
-  max-width: 100%;
-  height: auto;
+  inline-size: auto;
+  max-inline-size: 100%;
+  block-size: auto;
+  object-fit: contain;
 }
-.tool-media audio { display: block; width: 100%; }
+.tool-media audio {
+  display: block;
+  inline-size: 100%;
+  max-inline-size: 100%;
+}
 .tool-empty { margin: 0; color: #8fa0aa; font-style: italic; }
 
 .message-command:not(details),
@@ -2107,11 +2112,16 @@ body.document-page {
 .document-media img,
 .document-media video {
   display: block;
-  width: auto;
-  max-width: 100%;
-  height: auto;
+  inline-size: auto;
+  max-inline-size: 100%;
+  block-size: auto;
+  object-fit: contain;
 }
-.document-media audio { display: block; width: 100%; }
+.document-media audio {
+  display: block;
+  inline-size: 100%;
+  max-inline-size: 100%;
+}
 
 .document-prose,
 .document-code,

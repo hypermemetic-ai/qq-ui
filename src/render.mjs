@@ -74,13 +74,17 @@ function mediaBlock(block, scope = "attachment") {
   const content = type === "image"
     ? `<img src="${escapeHtml(source)}" alt="${escapeHtml(label)}" decoding="async"${dimensionAttrs}>`
     : type === "video"
-      ? `<video src="${escapeHtml(source)}" controls preload="metadata" playsinline${dimensionAttrs}>${escapeHtml(label)}</video>`
-      : `<audio src="${escapeHtml(source)}" controls preload="metadata">${escapeHtml(label)}</audio>`;
+      ? `<video src="${escapeHtml(source)}" aria-label="${escapeHtml(label)}" controls preload="metadata" playsinline${dimensionAttrs}>${escapeHtml(label)}</video>`
+      : `<audio src="${escapeHtml(source)}" aria-label="${escapeHtml(label)}" controls preload="metadata">${escapeHtml(label)}</audio>`;
   return `<figure class="attachment ${escapeHtml(scope)}-media ${escapeHtml(scope)}-media-${type}">${content}</figure>`;
 }
 
 function attachmentBlock(block) {
-  return mediaBlock(block);
+  const attachment = block?.attachment ?? {};
+  const dimensions = Number.isFinite(attachment.width) && Number.isFinite(attachment.height)
+    ? ` ${attachment.width}×${attachment.height}`
+    : "";
+  return `<p class="attachment">Image attachment${escapeHtml(dimensions)}</p>`;
 }
 
 function contentBlocks(blocks, { markdown = false, empty = true } = {}) {
