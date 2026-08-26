@@ -90,14 +90,108 @@ main { min-height: 0; }
 }
 
 .session-chrome,
+.session-children,
 .session-composer,
 .session-popups {
   flex: none;
   min-width: 0;
 }
 
+.session-children:empty,
 .session-queue:empty {
   display: none;
+}
+
+.session-children {
+  padding: 0 1.5rem;
+  overflow: hidden;
+  border: 0;
+  background: #000;
+}
+
+.session-child-list,
+.session-parent {
+  min-width: 0;
+}
+
+.session-parent {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+}
+
+.session-child-list ol {
+  display: flex;
+  gap: .45rem;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-width: none;
+}
+
+.session-child-list ol::-webkit-scrollbar { display: none; }
+
+.session-child,
+.session-parent a {
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+  min-height: 2.35rem;
+  padding: .32rem .2rem;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #d8d8d8;
+  font-size: var(--chrome-size);
+  font-weight: var(--chrome-weight);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--chrome-tracking);
+  line-height: 1.2;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+
+.session-child:hover,
+.session-child:focus-visible,
+.session-parent a:hover,
+.session-parent a:focus-visible,
+.session-parent-close button:hover,
+.session-parent-close button:focus-visible {
+  color: #fff;
+  outline: none;
+}
+
+.session-child-status {
+  flex: none;
+  color: #747474;
+}
+
+.session-parent a { gap: .45rem; }
+
+.session-parent-close {
+  margin: 0;
+  flex: none;
+}
+
+.session-parent-close button {
+  display: flex;
+  width: auto;
+  min-width: 2.35rem;
+  height: 2.35rem;
+  min-height: 2.35rem;
+  align-items: center;
+  justify-content: center;
+  padding: .32rem .45rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #d8d8d8;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .session-heading {
@@ -1650,6 +1744,9 @@ body > footer {
     height: 2.45rem;
     min-width: 2.45rem;
     min-height: 2.45rem;
+  }
+  .session-children {
+    padding: 0 max(.65rem, env(safe-area-inset-right)) 0 max(.65rem, env(safe-area-inset-left));
   }
   .composer-row { grid-template-columns: minmax(0, 1fr) auto auto auto; }
   .composer-row:has(#composer-case) { grid-template-columns: minmax(0, 1fr) auto auto auto auto; }

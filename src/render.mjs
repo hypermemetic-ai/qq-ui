@@ -527,6 +527,17 @@ function sessionToken(session) {
   return uuid?.[1] ?? sessionFace(session);
 }
 
+function isChildSession(snapshot) {
+  return snapshot?.origin === "subagent" && typeof snapshot?.parent === "string" && snapshot.parent.length > 0;
+}
+
+function sessionSwitchHref(paths, sessionId) {
+  const target = String(sessionId ?? "");
+  return target && paths?.switchSession
+    ? `${paths.switchSession}?session=${encodeURIComponent(target)}`
+    : "";
+}
+
 function bannerMark(kind) {
   if (kind === "add") {
     return `<svg class="banner-mark" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`;
@@ -970,16 +981,47 @@ function composer(paths, snapshot) {
     </form>`;
 }
 
-export const SSE_REGION_NAMES = Object.freeze(["chrome", "transcript", "live", "queue", "composer", "popups", "case"]);
+function renderParentNav(snapshot, paths) {
+  if (!isChildSession(snapshot)) return "";
+  const href = sessionSwitchHref(paths, snapshot.parent);
+  const face = sessionToken({ id: snapshot.parent, alias: snapshot.parentAlias });
+  const parentLink = href
+    ? `<a href="${escapeHtml(href)}"><span aria-hidden="true">←</span><span>parent ${escapeHtml(face)}</span></a>`
+    : "";
+  const close = paths?.close
+    ? `<form class="session-parent-close" action="${escapeHtml(paths.close)}" method="post"><button type="submit" aria-label="Close this session">${bannerMark("close")}</button></form>`
+    : "";
+  return (parentLink || close)
+    ? `<nav class="session-parent" aria-label="Parent session">${parentLink}${close}</nav>`
+    : "";
+}
+
+export function renderSessionChildren(snapshot, paths) {
+  if (!snapshot?.id) return "";
+  if (isChildSession(snapshot)) return "";
+  const children = Array.isArray(snapshot.children) ? snapshot.children : [];
+  if (children.length === 0) return "";
+  const rows = children.map((child) => {
+    const href = sessionSwitchHref(paths, child?.id);
+    if (!href) return "";
+    const face = sessionToken(child);
+    const status = child?.status === "running" ? "running" : "idle";
+    return `<li><a class="session-child" href="${escapeHtml(href)}" data-child-session="${escapeHtml(child.id ?? "")}"><span class="session-child-face">${escapeHtml(face)}</span><span class="session-child-status" data-status="${status}">${status}</span></a></li>`;
+  }).filter(Boolean).join("");
+  return rows ? `<nav class="session-child-list" aria-label="Child sessions"><ol>${rows}</ol></nav>` : "";
+}
+
+export const SSE_REGION_NAMES = Object.freeze(["chrome", "transcript", "live", "queue", "children", "composer", "popups", "case"]);
 export const LIVE_SSE_EVENTS = Object.freeze(["live"]);
-export const MUTATION_REGION_NAMES = Object.freeze(["chrome", "queue", "composer", "popups"]);
+export const MUTATION_REGION_NAMES = Object.freeze(["chrome", "children", "queue", "composer", "popups"]);
 /** Prompt/interrupt: SSE owns the queue. POST OOB of pending races claim and sticks a duplicate. */
-export const PROMPT_MUTATION_REGION_NAMES = Object.freeze(["chrome", "composer", "popups"]);
+export const PROMPT_MUTATION_REGION_NAMES = Object.freeze(["chrome", "children", "composer", "popups"]);
 export const SSE_REGION_IDS = Object.freeze({
   chrome: "session-chrome",
   transcript: "transcript-log",
   live: "transcript-live-nodes",
   queue: "session-queue",
+  children: "session-children",
   composer: "composer-turn-controls",
   popups: "session-popups",
   case: "session-case",
@@ -1382,14 +1424,16 @@ export function renderChrome(snapshot, paths, notice = "") {
   const project = placeName(snapshot);
   const slash = slashNoticeHtml(snapshot, paths, notice);
   const inlineNotice = slash && !isPopupMarkup(slash) ? slash : "";
+  const child = isChildSession(snapshot);
+  const title = child ? "Child transcript" : "Operator console";
   return `<div class="session-heading">
       <div class="session-heading-start">
         ${project ? `<p class="session-project">${escapeHtml(project)}</p>` : ""}
         ${sessions.token ? `<p class="session-id">${escapeHtml(sessions.token)}</p>` : ""}
-        <h1 id="session-heading"><span class="session-heading-title">Operator console${face ? ` · ${escapeHtml(face)}` : ""}</span></h1>
+        <h1 id="session-heading"><span class="session-heading-title">${title}${face ? ` · ${escapeHtml(face)}` : ""}</span></h1>
       </div>
       <div class="session-heading-end">
-        ${snapshot?.id ? renderWorkflowMenu(snapshot, paths) || sessionModeChip(snapshot.sessionMode) : ""}
+        ${child ? renderParentNav(snapshot, paths) : snapshot?.id ? renderWorkflowMenu(snapshot, paths) || sessionModeChip(snapshot.sessionMode) : ""}
       </div>
     </div>
     ${status.detail ? `<p class="notice turn-error" role="alert"><strong>${escapeHtml(status.label)}</strong><span>${escapeHtml(status.detail)}</span>${status.code ? `<code>${escapeHtml(status.code)}</code>` : ""}</p>` : ""}
@@ -1417,7 +1461,8 @@ function transcriptAnchor() {
 }
 
 function transcriptSettledInner(snapshot) {
-  return `${renderTranscriptSettled(snapshot)}${transcriptAnchor()}`;
+  const settled = renderTranscriptSettled(snapshot);
+  return `${settled}\n${transcriptAnchor()}`;
 }
 
 function isKeyPrefix(previous, next) {
@@ -1489,13 +1534,13 @@ export function renderQueue(snapshot, paths) {
 }
 
 export function renderComposerControls(snapshot) {
-  if (!snapshot?.id) return "";
+  if (!snapshot?.id || isChildSession(snapshot)) return "";
   const status = sessionStatus(snapshot);
   return composerControls(status.key === "running", sessionFindWork(snapshot));
 }
 
 export function renderComposer(snapshot, paths) {
-  if (!snapshot?.id) return "";
+  if (!snapshot?.id || isChildSession(snapshot)) return "";
   return composer(paths, snapshot);
 }
 
@@ -1515,6 +1560,7 @@ export function renderCaseRegion(snapshot) {
 }
 
 export function renderPopups(snapshot, paths, notice = "") {
+  if (isChildSession(snapshot)) return renderProgressChip(snapshot?.progress);
   const slash = slashNoticeHtml(snapshot, paths, notice);
   const popupNotice = slash && isPopupMarkup(slash) ? slash : "";
   return `${renderProgressChip(snapshot?.progress)}
@@ -1535,6 +1581,8 @@ export function renderSessionRegion(name, snapshot, paths, notice = "") {
       return renderLiveNodes(snapshot);
     case "queue":
       return renderQueue(snapshot, paths);
+    case "children":
+      return renderSessionChildren(snapshot, paths);
     case "composer":
       return renderComposerControls(snapshot);
     case "popups":
@@ -1549,6 +1597,7 @@ export function renderSessionRegion(name, snapshot, paths, notice = "") {
 /** Compact per-region tokens. SSE emits a named event only when that token changes. */
 export function regionFingerprints(snapshot) {
   const sessions = Array.isArray(snapshot?.sessions) ? snapshot.sessions : [];
+  const children = Array.isArray(snapshot?.children) ? snapshot.children : [];
   const status = sessionStatus(snapshot);
   const offer = snapshot?.offer;
   const { settled, live } = splitTranscriptNodes(sessionNodes(snapshot));
@@ -1558,6 +1607,8 @@ export function regionFingerprints(snapshot) {
       snapshot?.project,
       snapshot?.folder,
       snapshot?.alias,
+      snapshot?.origin,
+      snapshot?.parent,
       snapshot?.agentStatus,
       status.key,
       status.label,
@@ -1578,8 +1629,16 @@ export function regionFingerprints(snapshot) {
       live.map(nodeFingerprint),
     ]),
     queue: JSON.stringify((snapshot?.conversation?.pending ?? []).map((item) => [item.id, item.target, item.text])),
+    children: JSON.stringify([
+      snapshot?.id,
+      snapshot?.origin,
+      snapshot?.parent,
+      snapshot?.parentAlias,
+      children.map((child) => [child.id, child.alias, child.status]),
+    ]),
     composer: JSON.stringify([
       snapshot?.id,
+      snapshot?.origin,
       status.key === "running",
       sessionFindWork(snapshot),
       Boolean(snapshot?.caseFile),
@@ -1611,6 +1670,10 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   const chrome = regionShell("session-chrome", "session-chrome", "chrome", renderChrome(snapshot, paths, notice), true);
   const popups = regionShell("session-popups", "session-popups", "popups", renderPopups(snapshot, paths, notice), true);
   if (emptyProject) return `${chrome}${popups}`;
+  const children = regionShell("session-children", "session-children", "children", renderSessionChildren(snapshot, paths), true);
+  const composerRegion = isChildSession(snapshot)
+    ? ""
+    : regionShell("session-composer", "session-composer", "", renderComposer(snapshot, paths), false);
   return `${chrome}
     <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" data-tool-base="${escapeHtml(paths.canonical ?? "")}" hx-history="false">
       <div id="transcript-log" class="transcript-log" hx-history="false">
@@ -1618,7 +1681,8 @@ export function renderSessionContent(snapshot, paths, notice = "") {
         <div id="transcript-live" class="transcript-live">${renderTranscriptLive(snapshot, paths)}</div>
       </div>
     </div>
-    ${regionShell("session-composer", "session-composer", "", renderComposer(snapshot, paths), false)}
+    ${children}
+    ${composerRegion}
     ${popups}`;
 }
 

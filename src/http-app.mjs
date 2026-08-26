@@ -772,6 +772,15 @@ export function createConsoleHandler(backend, options = {}) {
     return locationFor(snapshot);
   }
 
+  async function assertChairMutation(sessionId) {
+    const snapshot = await backend.read(sessionId);
+    if (snapshot?.origin !== "subagent") return snapshot;
+    const error = new Error("Child sessions are observe-only");
+    error.status = 403;
+    error.code = "child-observe-only";
+    throw error;
+  }
+
   const SHEET_KEYS = Object.freeze([
     "offer", "approval", "loginSheet", "overlay", "progress",
     "sessionMode", "workflows", "activeProjects", "findWork",
@@ -1501,6 +1510,7 @@ export function createConsoleHandler(backend, options = {}) {
           error.status = 403;
           throw error;
         }
+        await assertChairMutation(selected.sessionId);
         const form = await readForm(req);
         const prompt = String(form.get("prompt") ?? "");
         if (!prompt.trim()) {
@@ -1565,6 +1575,7 @@ export function createConsoleHandler(backend, options = {}) {
           error.status = 403;
           throw error;
         }
+        await assertChairMutation(selected.sessionId);
         const form = await readForm(req);
         const operation = String(form.get("operation") ?? "");
         const itemId = String(form.get("itemId") ?? "");
@@ -1674,6 +1685,7 @@ export function createConsoleHandler(backend, options = {}) {
           error.status = 403;
           throw error;
         }
+        await assertChairMutation(selected.sessionId);
         await readForm(req);
         findWork.delete(selected.sessionId);
         const interrupted = await backend.interrupt(selected.sessionId);
@@ -1700,6 +1712,7 @@ export function createConsoleHandler(backend, options = {}) {
           error.status = 403;
           throw error;
         }
+        await assertChairMutation(selected.sessionId);
         if (!decideApproval) {
           const error = new Error("approval answerer is unavailable");
           error.status = 503;
@@ -1709,6 +1722,10 @@ export function createConsoleHandler(backend, options = {}) {
         await decideApproval(selected.sessionId, form);
         await mutationResponse(req, res, selected.sessionId);
       } catch (error) {
+        if (error?.code === "child-observe-only") {
+          text(res, 403, errorMessage(error));
+          return;
+        }
         if (String(req.headers["hx-request"] ?? "").toLowerCase() === "true") {
           try {
             await mutationResponse(req, res, selected.sessionId, errorMessage(error));
