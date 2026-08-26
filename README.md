@@ -11,15 +11,20 @@ containment. Dependency is one-way: `qq-ui → qq`. Child chairs
 answerer rejects those asks immediately. Only root operator chairs the
 operator is talking to may ask.
 
-On phone, a deliberate rightward pull across the ordinary app surface directly
-moves the compact one-level project drawer, which settles from release distance
-and velocity. An open drawer closes by dragging left; tapping the empty dimmer
-does nothing. Native vertical scrolling, horizontal file panning, and controls
-keep their own touch gestures. The drawer is labelled projects at the top and
-taps through to the projects session; project rows jump to that project's
-session. Folders keep the square mark and no trailing slash. Each project has
-its own sessions list; session ids stay universal. Folder navigation stays
-URL-addressed. Readable files use
+On desktop, the heading project menu and session tokens switch live chairs;
+up/down and left/right arrows still move between projects and sessions. On
+phone, a leftward pull opens the right files drawer, which settles from
+release distance and velocity. An open panel closes by dragging back; tapping
+the empty dimmer does nothing. The composer `nav` control toggles navigation
+mode: a translucent overlay covers the live session (tools included) and
+shows two pressable lists — projects on the left, sessions on the right.
+Tap a row to select it; `chat` leaves the overlay. Native vertical scrolling,
+horizontal file panning, and controls keep their own touch gestures in
+session mode. The heading is read-only
+project and session id, with status after the session and workflow on the
+right. Folders list above a thin line, files below it, with no folder square.
+Each project has its own sessions; session ids stay universal. Folder
+navigation stays URL-addressed. Readable files use
 one full-viewport, pitch-black document viewer. Markdown-It
 15.0.0 renders Markdown with raw HTML disabled and allowlisted links, while
 highlight.js 11.12.0 deterministically highlights recognized code languages.

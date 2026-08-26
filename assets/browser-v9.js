@@ -177,49 +177,68 @@
     const match = location.pathname.match(/\/session\/(session-[0-9a-fA-F-]{36})(?:\/|$)/);
     return match ? match[1] : "";
   };
+  let resetAdoptedSession = () => {};
+  let overlaySessionId = "";
+  let liveSessionId = currentSessionId();
+  let committedLocation = location.href;
+  let pendingCanonical = "";
+  let switchGeneration = 0;
+  let bootstrapSwitch = null;
+  let activeSseSource = null;
+  let liveSwitchMeta = null;
+  const viewingSessionId = () => overlaySessionId || liveSessionId;
   let inFlightDraft = "";
-  const composerDraftKey = (sessionId = currentSessionId()) => (sessionId ? `qq:composer:${sessionId}` : "");
-  const persistComposerDraft = (input = composer()) => {
-    const key = composerDraftKey();
+  const composerDraftKey = (sessionId = liveSessionId || currentSessionId()) => (sessionId ? `qq:composer:${sessionId}` : "");
+  const persistComposerDraft = (input = composer(), sessionId = liveSessionId || currentSessionId()) => {
+    const key = composerDraftKey(sessionId);
     if (!key || !(input instanceof HTMLTextAreaElement)) return;
     try {
       if (input.value) sessionStorage.setItem(key, input.value);
       else sessionStorage.removeItem(key);
     } catch { /* private mode */ }
   };
-  const clearComposerDraft = (sessionId = currentSessionId()) => {
+  const clearComposerDraft = (sessionId = liveSessionId || currentSessionId()) => {
     const key = composerDraftKey(sessionId);
     if (!key) return;
     try { sessionStorage.removeItem(key); } catch { /* private mode */ }
   };
-  const restorePersistedDraft = () => {
+  const restorePersistedDraft = (sessionId = liveSessionId || currentSessionId(), { replace = false } = {}) => {
     const input = composer();
-    const key = composerDraftKey();
-    if (!key || !(input instanceof HTMLTextAreaElement) || input.value) return;
+    const key = composerDraftKey(sessionId);
+    if (!key || !(input instanceof HTMLTextAreaElement) || (!replace && input.value)) return;
     try {
-      const saved = sessionStorage.getItem(key);
-      if (!saved) return;
-      input.value = saved;
-      fitComposer(input, { shrink: false });
+      const saved = sessionStorage.getItem(key) ?? "";
+      if (replace || saved) input.value = saved;
+      if (input.value) fitComposer(input, { shrink: false });
     } catch { /* private mode */ }
   };
-  const sessionLinks = () => [...document.querySelectorAll(".project-sessions [data-session-id]")];
+  const sessionLinks = () => {
+    const seen = new Set();
+    const links = [];
+    for (const link of document.querySelectorAll(".session-token[data-session-id]")) {
+      const id = link.dataset.sessionId;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      links.push(link);
+    }
+    return links;
+  };
   const sessionIds = () => sessionLinks().map((link) => link.dataset.sessionId).filter(Boolean);
   const openSession = (sessionId) => {
-    if (!sessionId || sessionId === currentSessionId()) return;
+    if (!sessionId || sessionId === viewingSessionId()) return;
     const link = sessionLinks().find((entry) => entry.dataset.sessionId === sessionId);
     if (link?.href) {
-      location.assign(link.href);
+      void chairGo(link.href, link);
       return;
     }
     const projectMatch = location.pathname.match(/^(.*\/project\/[^/]+(?:\/[^/]+)?)\/session\/session-[0-9a-fA-F-]{36}(?:\/|$)/);
     if (projectMatch) {
-      location.assign(`${projectMatch[1]}/session/${sessionId}`);
+      void chairGo(`${projectMatch[1]}/session/${sessionId}`);
       return;
     }
     const match = location.pathname.match(/^(.*)\/session\/session-[0-9a-fA-F-]{36}(?:\/|$)/);
     const base = match ? match[1] : "/qq";
-    location.assign(`${base}/session/${sessionId}`);
+    void chairGo(`${base}/session/${sessionId}`);
   };
   const confirmingClose = () => document.querySelector(".session-item-current.close-confirming");
   const restoreCloseFocus = () => {
@@ -248,7 +267,7 @@
   };
   const neighborSession = (delta) => {
     const ids = sessionIds();
-    const current = currentSessionId();
+    const current = liveSessionId;
     const index = ids.indexOf(current);
     if (index < 0 || ids.length < 2) return;
     openSession(ids[(index + delta + ids.length) % ids.length]);
@@ -399,31 +418,60 @@
     if (!id || !location.pathname.includes(`/session/${id}`)) return "";
     return new URL(location.pathname, location.origin).href;
   };
-  const restoreProjectChoiceDestinations = (remembered, currentKey, currentIsActive) => {
-    const destinations = new Map(remembered.map((entry) => [projectIdentity(entry), entry.href]));
-    const currentHref = currentIsActive ? currentProjectSessionHref() : "";
-    for (const link of document.querySelectorAll(".projects-choice[data-project]")) {
-      const key = projectIdentity({ project: link.dataset.project, folder: link.dataset.folder });
-      const href = key === currentKey && currentHref ? currentHref : destinations.get(key);
-      if (href) link.href = href;
+  const projectSwitchHref = (project, folder = "") => {
+    const name = String(project ?? "");
+    if (!name) return "";
+    const prefix = location.pathname.match(/^(\/[^/]+)(?=\/project\/|\/session\/|$)/);
+    const base = prefix ? prefix[1] : "/qq";
+    const nested = String(folder ?? "") ? `/${encodeURIComponent(folder)}` : "";
+    return new URL(`${base}/project/${encodeURIComponent(name)}${nested}`, location.origin).href;
+  };
+  const retargetProjectLink = (link, currentKey, currentHref) => {
+    if (!(link instanceof HTMLAnchorElement) || !link.dataset.project) return;
+    const key = projectIdentity({ project: link.dataset.project, folder: link.dataset.folder });
+    if (key === currentKey && currentHref) {
+      link.href = currentHref;
+      return;
     }
+    const next = projectSwitchHref(link.dataset.project, link.dataset.folder);
+    if (next) link.href = next;
+  };
+  const restoreListOrder = (list, items, keyOf) => {
+    const remembered = readRememberedProjects();
+    if (!list || !remembered.length || items.length < 2) return;
+    const rows = new Map(items.map((item) => [keyOf(item), item.closest("li") ?? item]));
+    const next = [];
+    const used = new Set();
+    for (const entry of remembered) {
+      const key = projectIdentity(entry);
+      const row = rows.get(key);
+      if (!row || used.has(key)) continue;
+      next.push(row);
+      used.add(key);
+    }
+    for (const [key, row] of rows) {
+      if (used.has(key) || !row) continue;
+      next.push(row);
+    }
+    if (next.length) list.replaceChildren(...next);
   };
   const restoreActiveProjects = () => {
     const rail = document.querySelector("#project-rail");
     const list = rail?.querySelector(".active-projects ol");
     if (!rail || !list) return;
+    restoreListOrder(list, activeProjectItems(), (item) => projectIdentity(activeProjectEntry(item)));
+    restoreListOrder(
+      document.querySelector(".projects-menu-list"),
+      [...document.querySelectorAll(".projects-choice[data-project]")],
+      (item) => projectIdentity({ project: item.dataset.project, folder: item.dataset.folder }),
+    );
     const currentKey = projectIdentity({ project: rail.dataset.currentProject, folder: rail.dataset.currentFolder });
     const currentIsActive = rail.dataset.currentActive === "true";
-    const rememberedAll = readRememberedProjects();
-    const destinations = new Map(rememberedAll.map((entry) => [projectIdentity(entry), entry.href]));
-    const existing = new Map(activeProjectItems().map((item) => [projectIdentity(activeProjectEntry(item)), item.closest("li")]));
     const currentHref = currentIsActive ? currentProjectSessionHref() : "";
-    for (const [key, row] of existing) {
-      const link = row?.querySelector?.(".active-project-item");
-      const href = key === currentKey && currentHref ? currentHref : destinations.get(key);
-      if (href && link instanceof HTMLElement && link.tagName === "A") link.href = href;
+    for (const item of activeProjectItems()) retargetProjectLink(item, currentKey, currentHref);
+    for (const choice of document.querySelectorAll(".projects-choice[data-project]")) {
+      retargetProjectLink(choice, currentKey, currentHref);
     }
-    restoreProjectChoiceDestinations(rememberedAll, currentKey, currentIsActive);
     rememberActiveProjects();
   };
   const activeProjectKeys = () => new Set(activeProjectItems().map((item) => projectIdentity(activeProjectEntry(item))));
@@ -467,7 +515,8 @@
     if (projects.length < 2) return;
     const current = projects.findIndex((project) => project.matches('[aria-current="page"]'));
     const index = current < 0 ? 0 : current;
-    location.assign(projects[(index + delta + projects.length) % projects.length].href);
+    const next = projects[(index + delta + projects.length) % projects.length];
+    void chairGo(next.href, next);
   };
   const inactiveProjectTree = () => document.querySelector("#inactive-project-tree");
   const projectTreeColumns = () => inactiveProjectTree()?.querySelector(".project-tree-columns");
@@ -523,7 +572,6 @@
   };
   const projectCreateHref = (entry) => {
     if (entry.kind !== "project" || !entry.project) return "";
-    if (activeProjectKeys().has(projectIdentity({ project: entry.project, folder: entry.folder }))) return "";
     const folder = entry.folder ? `/${encodeURIComponent(entry.folder)}` : "";
     const prefix = location.pathname.match(/^(.*)\/project\//)?.[1] ?? "";
     try {
@@ -650,7 +698,7 @@
   };
   const spawnProjectSession = (node) => {
     if (!(node instanceof HTMLElement) || !node.dataset.href) return;
-    location.assign(node.dataset.href);
+    void navigatePage(node.dataset.href, node);
   };
   const createProjectSession = (node) => {
     if (!(node instanceof HTMLElement) || !node.dataset.href) return;
@@ -675,7 +723,7 @@
       spawnProjectSession(node);
       return;
     }
-    location.assign(node.dataset.href);
+    void navigatePage(node.dataset.href, node);
   };
   const setProjectTreeOpen = (open, restoreFocus = false) => {
     const tree = inactiveProjectTree();
@@ -755,10 +803,448 @@
   const drawerToggle = () => document.querySelector("#project-drawer-toggle");
   const drawerBackdrop = () => document.querySelector("#project-drawer-backdrop");
   let drawerReturnFocus = null;
-  let navReturnFocus = null;
   const drawerIsOpen = () => document.body.classList.contains("drawer-open");
-  const navIsOpen = () => document.body.classList.contains("nav-open");
-  const panelIsOpen = () => drawerIsOpen() || navIsOpen();
+  const CHAIR_MODE_KEY = "qq:chair-mode";
+  const navMode = () => document.body.classList.contains("nav-mode");
+  const PAGE_CACHE_MS = 8000;
+  const pageCache = new Map();
+  const pageControllers = new Map();
+  let navGeneration = 0;
+  let pendingHtmxProcess = false;
+  const consolePageUrl = (value) => {
+    try {
+      const url = new URL(value, location.href);
+      if (url.origin !== location.origin) return null;
+      if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+      const path = url.pathname;
+      if (/\.(?:js|css|png|webmanifest|map|woff2?)$/i.test(path)) return null;
+      if (/\/(?:file|open|download|events|assets)\//.test(path) || /\/events$/.test(path)) return null;
+      if (path.endsWith("/sw.js")) return null;
+      return url;
+    } catch {
+      return null;
+    }
+  };
+  const rememberPage = (key, entry) => {
+    pageCache.set(key, entry);
+    if (pageCache.size <= 24) return;
+    const oldest = pageCache.keys().next().value;
+    if (oldest && oldest !== key) pageCache.delete(oldest);
+  };
+  const abortPrefetchesExcept = (keep) => {
+    for (const [key, controller] of pageControllers) {
+      if (key === keep) continue;
+      controller.abort();
+      pageControllers.delete(key);
+      const hit = pageCache.get(key);
+      if (hit && !hit.ready) pageCache.delete(key);
+    }
+  };
+  const prefetchPage = (value, priority = "low") => {
+    const url = consolePageUrl(value);
+    if (!url) return null;
+    const key = url.href;
+    const hit = pageCache.get(key);
+    if (hit && (!hit.ready || Date.now() - hit.at < PAGE_CACHE_MS)) return hit.promise;
+    const controller = new AbortController();
+    const promise = fetch(key, {
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { Accept: "text/html" },
+      priority,
+      signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) throw new Error("navigate");
+      const html = await response.text();
+      const page = { html, url: response.url };
+      const entry = { at: Date.now(), promise: Promise.resolve(page), ready: true };
+      rememberPage(key, entry);
+      if (response.url !== key) rememberPage(response.url, entry);
+      return page;
+    }).catch((error) => {
+      pageControllers.delete(key);
+      const current = pageCache.get(key);
+      if (current?.promise === promise) pageCache.delete(key);
+      throw error;
+    }).finally(() => {
+      if (pageControllers.get(key) === controller) pageControllers.delete(key);
+    });
+    pageControllers.set(key, controller);
+    rememberPage(key, { at: Date.now(), promise, ready: false });
+    return promise;
+  };
+  const processConsole = () => {
+    pendingHtmxProcess = false;
+    if (typeof globalThis.htmx?.process === "function") globalThis.htmx.process(document.body);
+  };
+  const closeSseSources = () => {
+    const api = globalThis.htmx;
+    if (!api || typeof api.trigger !== "function") return;
+    for (const node of document.querySelectorAll("[sse-connect], [data-sse-connect]")) {
+      api.trigger(node, "htmx:beforeCleanupElement");
+    }
+  };
+  const markGroupCurrent = (selector, currentClass, current) => {
+    for (const item of document.querySelectorAll(selector)) {
+      const on = item === current;
+      item.classList.toggle(currentClass, on);
+      if (on) item.setAttribute("aria-current", "page");
+      else item.removeAttribute("aria-current");
+    }
+  };
+  const markLinkCurrent = (link) => {
+    if (!(link instanceof Element)) return;
+    if (link.matches(".active-project-item")) markGroupCurrent(".active-project-item[href]", "active-project-current", link);
+    if (link.matches(".projects-choice")) markGroupCurrent(".projects-choice[href]", "projects-choice-current", link);
+    if (link.matches(".session-token")) markGroupCurrent(".session-token[href]", "session-token-current", link);
+  };
+  const adoptPage = (html, url, historyMode = "push") => {
+    const parsed = new DOMParser().parseFromString(html, "text/html");
+    if (!(parsed.body instanceof HTMLElement)) return false;
+    const keepNav = navMode();
+    resetAdoptedSession();
+    closeSseSources();
+    projectTreeReady = null;
+    treeRequest += 1;
+    const next = document.adoptNode(parsed.body);
+    if (keepNav) next.classList.add("nav-mode");
+    document.title = parsed.title;
+    document.documentElement.replaceChild(next, document.body);
+    if (historyMode === "push") {
+      if (!history.state?.qqPage) history.replaceState({ qqPage: true }, "", location.href);
+      history.pushState({ qqPage: true }, "", url);
+    }
+    if (keepNav) pendingHtmxProcess = true;
+    else processConsole();
+    syncInitialChrome({ skipValidate: true });
+    restorePersistedDraft();
+    restoreTranscriptView();
+    return true;
+  };
+  const navigatePage = async (value, current = null) => {
+    const url = consolePageUrl(value);
+    if (!url) {
+      location.assign(String(value ?? ""));
+      return;
+    }
+    if (url.href === location.href) return;
+    if (current instanceof Element && current.matches("[aria-current='page']")) return;
+    markLinkCurrent(current);
+    const gen = ++navGeneration;
+    abortPrefetchesExcept(url.href);
+    closeSseSources();
+    try {
+      const page = await prefetchPage(url.href, "high");
+      if (gen !== navGeneration) return;
+      if (!page?.html || !adoptPage(page.html, page.url)) throw new Error("adopt");
+    } catch (error) {
+      if (gen !== navGeneration) return;
+      if (error?.name === "AbortError") return;
+      location.assign(url.href);
+    }
+  };
+  const overlayProjectItem = (link) => {
+    if (!(link instanceof Element)) return null;
+    if (link.matches(".active-project-item")) return link;
+    if (!link.matches(".projects-choice") || !link.dataset.project) return null;
+    return [...document.querySelectorAll(".active-project-item")].find((item) => (
+      item.dataset.project === link.dataset.project
+      && (item.dataset.folder || "") === (link.dataset.folder || "")
+    )) ?? link;
+  };
+  const readProjectSessions = (item) => {
+    try {
+      const parsed = JSON.parse(item?.dataset?.sessions || "[]");
+      return Array.isArray(parsed)
+        ? parsed.filter((session) => session && session.id && session.href)
+        : [];
+    } catch {
+      return [];
+    }
+  };
+  const paintSessionTokens = (sessions, currentId) => {
+    const nav = document.querySelector(".session-traversal");
+    if (!nav) return;
+    nav.replaceChildren();
+    if (!sessions.length) {
+      const empty = document.createElement("span");
+      empty.className = "session-empty";
+      empty.textContent = "no live sessions";
+      nav.append(empty);
+      return;
+    }
+    for (const session of sessions) {
+      const link = document.createElement("a");
+      link.className = session.id === currentId ? "session-token session-token-current" : "session-token";
+      if (session.id === currentId) link.setAttribute("aria-current", "page");
+      link.href = session.href;
+      link.dataset.sessionId = session.id;
+      link.title = session.id;
+      const label = document.createElement("span");
+      label.textContent = session.token || session.id;
+      link.append(label);
+      nav.append(link);
+    }
+  };
+  const rememberOverlaySession = (projectItem, sessionId, href) => {
+    overlaySessionId = sessionId || "";
+    pendingCanonical = href || "";
+    if (projectItem instanceof HTMLElement && sessionId) projectItem.dataset.sessionId = sessionId;
+  };
+  const consoleBasePath = () => {
+    const stream = document.querySelector("#console-stream");
+    try {
+      const current = new URL(stream?.getAttribute("sse-connect") || location.href, location.href);
+      const match = current.pathname.match(/^(.*?)(?:\/project\/|\/session\/)/);
+      if (match?.[1]) return match[1];
+    } catch { /* use the console default */ }
+    return "/qq";
+  };
+  const sessionEventsUrl = (sessionId) =>
+    `${consoleBasePath()}/session/${encodeURIComponent(sessionId)}/events`;
+  const selectionCanonical = (sessionId, projectItem, fallback = "") => {
+    const id = String(sessionId || "");
+    if (!id) return fallback;
+    const project = String(projectItem?.dataset?.project || "");
+    const folder = String(projectItem?.dataset?.folder || "");
+    if (!project) return `${consoleBasePath()}/session/${encodeURIComponent(id)}`;
+    return `${consoleBasePath()}/project/${encodeURIComponent(project)}${folder ? `/${encodeURIComponent(folder)}` : ""}/session/${encodeURIComponent(id)}`;
+  };
+  const normalizedCanonical = (value) => {
+    try {
+      const url = new URL(value, location.href);
+      if (url.origin !== location.origin) return "";
+      return `${url.pathname}${url.search}${url.hash}`;
+    } catch {
+      return "";
+    }
+  };
+  const sessionHistoryState = (sessionId, canonical) => ({
+    ...(history.state && typeof history.state === "object" ? history.state : {}),
+    qqPage: true,
+    qqSession: sessionId,
+    canonical,
+  });
+  const commitSessionLocation = (sessionId, canonical, mode = "push") => {
+    const href = normalizedCanonical(canonical);
+    if (!sessionId || !href) return;
+    committedLocation = new URL(href, location.href).href;
+    if (mode === "none") return;
+    const current = `${location.pathname}${location.search}${location.hash}`;
+    if (current === href) {
+      history.replaceState(sessionHistoryState(sessionId, href), "", href);
+      return;
+    }
+    if (!history.state?.qqPage) {
+      history.replaceState(sessionHistoryState(liveSessionId, current), "", current);
+    }
+    history.pushState(sessionHistoryState(sessionId, href), "", href);
+  };
+  const syncRailAfterSwitch = (meta) => {
+    const rail = document.querySelector("#project-rail");
+    if (!(rail instanceof HTMLElement)) return;
+    const oldProject = rail.dataset.currentProject || "";
+    const oldFolder = rail.dataset.currentFolder || "";
+    rail.dataset.currentProject = String(meta.project || "");
+    rail.dataset.currentFolder = String(meta.folder || "");
+    rail.dataset.currentActive = "true";
+    for (const choice of document.querySelectorAll(".projects-choice[data-project]")) {
+      const item = [...document.querySelectorAll(".active-project-item[data-project]")].find((candidate) => (
+        candidate.dataset.project === choice.dataset.project
+        && (candidate.dataset.folder || "") === (choice.dataset.folder || "")
+      ));
+      if (!(item instanceof HTMLElement)) continue;
+      if (choice.dataset.sessions) item.dataset.sessions = choice.dataset.sessions;
+      else delete item.dataset.sessions;
+      if (choice.dataset.sessionId) item.dataset.sessionId = choice.dataset.sessionId;
+    }
+    const currentProject = [...document.querySelectorAll(".active-project-item[data-project]")].find((item) => (
+      item.dataset.project === String(meta.project || "")
+      && (item.dataset.folder || "") === String(meta.folder || "")
+    ));
+    if (currentProject) {
+      currentProject.dataset.sessionId = meta.id;
+      currentProject.href = meta.canonical;
+      markLinkCurrent(currentProject);
+    }
+    const canonical = normalizedCanonical(meta.canonical);
+    const projectBase = canonical.replace(/\/session\/[^/?#]+$/, "");
+    const create = rail.querySelector("form.new-session");
+    const close = rail.querySelector("#close-session");
+    if (create instanceof HTMLFormElement) create.action = `${projectBase}/sessions`;
+    if (close instanceof HTMLFormElement) close.action = `${canonical}/close`;
+    const child = Boolean(document.querySelector("#session-chrome .session-parent"));
+    if (create instanceof HTMLFormElement) create.hidden = child;
+    if (oldProject !== String(meta.project || "") || oldFolder !== String(meta.folder || "")) {
+      closeDrawer({ updateUrl: false, restoreFocus: false });
+      projectTreeReady = null;
+      treeRequest += 1;
+    }
+  };
+  const liveSwitch = (sessionId, { history: historyMode = "none", exitWhenReady = false, canonical = "" } = {}) => {
+    const id = String(sessionId || "");
+    if (!id || (id === liveSessionId && !bootstrapSwitch)) return false;
+    if (!bootstrapSwitch) persistComposerDraft(composer(), liveSessionId);
+    resetAdoptedSession();
+    const stream = document.querySelector("#console-stream");
+    if (!(stream instanceof HTMLElement)) return false;
+    const generation = ++switchGeneration;
+    const events = sessionEventsUrl(id);
+    const bootstrap = `${events}?bootstrap=session&switch=${generation}`;
+    if (historyMode === "push") commitSessionLocation(id, canonical || pendingCanonical, "push");
+    bootstrapSwitch = {
+      id,
+      generation,
+      sourceUrl: new URL(bootstrap, location.href).href,
+      events,
+      canonical: canonical || pendingCanonical,
+      history: historyMode,
+      exitWhenReady: Boolean(exitWhenReady),
+      meta: null,
+    };
+    stream.setAttribute("aria-busy", "true");
+    closeSseSources();
+    activeSseSource = null;
+    stream.setAttribute("sse-connect", bootstrap);
+    if (typeof globalThis.htmx?.process === "function") globalThis.htmx.process(stream);
+    return true;
+  };
+  const finishLiveSwitch = (payload) => {
+    const state = bootstrapSwitch;
+    if (!state
+      || String(payload?.id || "") !== state.id
+      || String(payload?.generation ?? "") !== String(state.generation)
+      || !state.meta) return false;
+    const meta = state.meta;
+    liveSessionId = state.id;
+    liveSwitchMeta = meta;
+    bootstrapSwitch = null;
+    pendingCanonical = meta.canonical || state.canonical;
+    const stream = document.querySelector("#console-stream");
+    if (stream instanceof HTMLElement) {
+      stream.setAttribute("sse-connect", state.events);
+      stream.removeAttribute("aria-busy");
+    }
+    syncRailAfterSwitch(meta);
+    swapDraft = null;
+    restorePersistedDraft(liveSessionId, { replace: true });
+    anchorTranscript();
+    prepareSession();
+    if (state.history === "push" && normalizedCanonical(meta.canonical)) {
+      const canonical = normalizedCanonical(meta.canonical);
+      history.replaceState(sessionHistoryState(liveSessionId, canonical), "", canonical);
+      committedLocation = new URL(canonical, location.href).href;
+    }
+    const navButton = document.querySelector("#composer-nav");
+    if (navButton instanceof HTMLElement && navMode()) {
+      navButton.setAttribute("aria-pressed", "true");
+      navButton.setAttribute("aria-label", "Switch to session mode");
+      navButton.textContent = "chat";
+    }
+    if (state.exitWhenReady) {
+      paintChairMode(false);
+      commitSessionLocation(liveSessionId, meta.canonical || state.canonical, "push");
+    }
+    return true;
+  };
+  const selectOverlayProject = (item) => {
+    const projectItem = overlayProjectItem(item);
+    if (!(projectItem instanceof HTMLElement)) return false;
+    markLinkCurrent(projectItem);
+    if (item !== projectItem && item instanceof Element) markLinkCurrent(item);
+    const sessions = readProjectSessions(projectItem);
+    const currentId = sessions.some((session) => session.id === overlaySessionId)
+      ? overlaySessionId
+      : (projectItem.dataset.sessionId || sessions[0]?.id || "");
+    paintSessionTokens(sessions, currentId);
+    const selected = sessions.find((session) => session.id === currentId) ?? sessions[0];
+    const canonical = selectionCanonical(selected?.id || currentId, projectItem, selected?.href || projectItem.href);
+    rememberOverlaySession(projectItem, selected?.id || currentId, canonical);
+    if (selected?.id) {
+      liveSwitch(selected.id, {
+        history: navMode() ? "none" : "push",
+        canonical,
+      });
+    }
+    return true;
+  };
+  const selectOverlaySession = (link) => {
+    if (!(link instanceof HTMLElement) || !link.dataset.sessionId) return false;
+    markLinkCurrent(link);
+    const projectItem = document.querySelector(".active-project-item[aria-current='page']");
+    const canonical = selectionCanonical(link.dataset.sessionId, projectItem, link.href);
+    rememberOverlaySession(projectItem, link.dataset.sessionId, canonical);
+    liveSwitch(link.dataset.sessionId, {
+      history: navMode() ? "none" : "push",
+      canonical,
+    });
+    return true;
+  };
+  const paintChairMode = (nav, persist = true) => {
+    if (nav) document.body.classList.add("nav-mode");
+    else document.body.classList.remove("nav-mode");
+    if (nav) {
+      overlaySessionId = "";
+      pendingCanonical = "";
+      const prompt = composer();
+      if (prompt instanceof HTMLTextAreaElement && document.activeElement === prompt) prompt.blur();
+    }
+    syncDrawerChrome();
+    const button = document.querySelector("#composer-nav");
+    if (button instanceof HTMLElement) {
+      button.setAttribute("aria-pressed", String(nav));
+      button.setAttribute("aria-label", nav ? "Switch to session mode" : "Switch to navigation mode");
+      button.textContent = nav ? "chat" : "nav";
+    }
+    if (!persist) return;
+    try { sessionStorage.setItem(CHAIR_MODE_KEY, nav ? "nav" : "session"); } catch { /* private mode */ }
+  };
+  const commitOverlaySession = () => {
+    const desired = overlaySessionId;
+    if (!desired) {
+      paintChairMode(false);
+      return true;
+    }
+    if (bootstrapSwitch?.id === desired) {
+      bootstrapSwitch.exitWhenReady = true;
+      return false;
+    }
+    if (desired !== liveSessionId) return false;
+    const canonical = liveSwitchMeta?.canonical || pendingCanonical || committedLocation;
+    paintChairMode(false);
+    commitSessionLocation(liveSessionId, canonical, "push");
+    return true;
+  };
+  const chairGo = (value, current = null) => {
+    if (current instanceof Element) {
+      if (current.matches(".active-project-item, .projects-choice")) {
+        selectOverlayProject(current);
+        return;
+      }
+      if (current.matches(".session-token")) {
+        selectOverlaySession(current);
+        return;
+      }
+    }
+    void navigatePage(value, current);
+  };
+  const modifiedClick = (event) => event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+  const applyChairMode = (mode, persist = true) => {
+    if (mode === "nav") {
+      paintChairMode(true, persist);
+      return;
+    }
+    if (persist) commitOverlaySession();
+    else paintChairMode(false, false);
+  };
+  const restoreChairMode = () => {
+    let mode = "session";
+    try {
+      if (sessionStorage.getItem(CHAIR_MODE_KEY) === "nav") mode = "nav";
+    } catch { /* private mode */ }
+    applyChairMode(mode, false);
+  };
+  const toggleChairMode = () => applyChairMode(navMode() ? "session" : "nav");
   const openDocumentViewerDialog = () => document.querySelector(".document-viewer-dialog[open]");
   const documentViewerIsOpen = () => Boolean(openDocumentViewerDialog());
   let documentViewerReturnFocus = null;
@@ -972,7 +1458,7 @@
       card.dataset.toolBodyState = "loaded";
       return true;
     } catch {
-      body.innerHTML = '<p class="tool-empty">Tool output is unavailable</p>';
+      body.innerHTML = "<p class=\"tool-empty\">Tool output is unavailable</p>";
       card.dataset.toolBodyState = "error";
       return false;
     }
@@ -1013,16 +1499,13 @@
       .filter((node) => node instanceof HTMLElement && !node.hidden);
   };
   const drawerIsTransient = () => document.body.classList.contains("drawer-drag-active") || document.body.classList.contains("drawer-drag-settling");
-  const navIsTransient = () => document.body.classList.contains("nav-drag-active") || document.body.classList.contains("nav-drag-settling");
-  const panelIsTransient = () => drawerIsTransient() || navIsTransient();
+  const panelIsTransient = () => drawerIsTransient();
   const syncDrawerChrome = () => {
     const drawer = projectDrawer();
     const rail = projectRail();
     const toggle = drawerToggle();
     const backdrop = drawerBackdrop();
     const filesOpen = drawerIsOpen();
-    const navOpen = !desktopChair() && navIsOpen();
-    const anyOpen = filesOpen || navOpen;
     const transient = panelIsTransient();
     toggle?.setAttribute("aria-expanded", String(filesOpen));
     if (drawer) {
@@ -1030,38 +1513,36 @@
       drawer.inert = !filesOpen;
     }
     if (rail) {
-      if (desktopChair()) {
+      if (desktopChair() || navMode()) {
         rail.removeAttribute("aria-hidden");
         rail.inert = filesOpen;
       } else {
-        rail.setAttribute("aria-hidden", String(!navOpen));
-        rail.inert = !navOpen;
+        rail.setAttribute("aria-hidden", "true");
+        rail.inert = true;
       }
     }
     if (backdrop) {
-      backdrop.hidden = !anyOpen && !transient;
-      backdrop.setAttribute("aria-hidden", String(!anyOpen));
-      backdrop.inert = !anyOpen;
+      backdrop.hidden = !filesOpen && !transient;
+      backdrop.setAttribute("aria-hidden", String(!filesOpen));
+      backdrop.inert = !filesOpen;
     }
     for (const node of document.body?.children ?? []) {
       if (node === drawer || node === rail || node === backdrop) continue;
-      node.inert = anyOpen;
+      node.inert = filesOpen;
     }
   };
   let drawerSettleTimer = null;
   const clearDrawerTransient = ({ sync = true } = {}) => {
     if (drawerSettleTimer !== null) clearTimeout(drawerSettleTimer);
     drawerSettleTimer = null;
-    document.body.classList.remove("drawer-drag-active", "drawer-drag-settling", "nav-drag-active", "nav-drag-settling");
+    document.body.classList.remove("drawer-drag-active", "drawer-drag-settling");
     projectDrawer()?.style.removeProperty("transform");
-    projectRail()?.style.removeProperty("transform");
     drawerBackdrop()?.style.removeProperty("opacity");
     if (sync) syncDrawerChrome();
   };
   const openDrawer = ({ updateUrl = true, focus = true, preserveTransient = false } = {}) => {
     const drawer = projectDrawer();
     if (!drawer) return;
-    if (navIsOpen()) closeNav({ restoreFocus: false, preserveTransient: true });
     if (!preserveTransient) clearDrawerTransient({ sync: false });
     if (!drawerIsOpen()) {
       const active = document.activeElement;
@@ -1091,38 +1572,8 @@
     else if (returnFocus?.isConnected && !returnFocus.inert) returnFocus.focus({ preventScroll: true });
     else if (document.activeElement instanceof HTMLElement && drawer.contains(document.activeElement)) document.activeElement.blur();
   };
-  const openNav = ({ focus = false, preserveTransient = false } = {}) => {
-    const rail = projectRail();
-    if (!rail || desktopChair()) return;
-    if (drawerIsOpen()) closeDrawer({ updateUrl: true, restoreFocus: false, preserveTransient: true });
-    if (!preserveTransient) clearDrawerTransient({ sync: false });
-    if (!navIsOpen()) {
-      const active = document.activeElement;
-      navReturnFocus = active instanceof HTMLElement && active !== document.body && !rail.contains(active)
-        ? active
-        : null;
-    }
-    document.body.classList.add("nav-open");
-    syncDrawerChrome();
-    if (focus) {
-      const current = rail.querySelector(".active-project-current, .session-choice-current, .active-project-item, .session-choice");
-      if (current instanceof HTMLElement) current.focus({ preventScroll: true });
-    }
-  };
-  const closeNav = ({ restoreFocus = true, preserveTransient = false } = {}) => {
-    const rail = projectRail();
-    if (!rail || desktopChair()) return;
-    if (!preserveTransient) clearDrawerTransient({ sync: false });
-    const returnFocus = navReturnFocus;
-    navReturnFocus = null;
-    document.body.classList.remove("nav-open");
-    syncDrawerChrome();
-    if (!restoreFocus) return;
-    if (returnFocus?.isConnected && !returnFocus.inert) returnFocus.focus({ preventScroll: true });
-    else if (document.activeElement instanceof HTMLElement && rail.contains(document.activeElement)) document.activeElement.blur();
-  };
   const trapDrawerFocus = (event) => {
-    const panel = drawerIsOpen() ? projectDrawer() : navIsOpen() ? projectRail() : null;
+    const panel = drawerIsOpen() ? projectDrawer() : null;
     const focusable = panelFocusables(panel);
     if (focusable.length === 0) return;
     const first = focusable[0];
@@ -1313,49 +1764,34 @@
       return value.trim().endsWith("ms") ? duration : duration * 1000;
     }));
   };
-  const panelNode = (panel) => (panel === "nav" ? projectRail() : projectDrawer());
   const applySurfaceDrag = (gesture, distance) => {
-    const panel = panelNode(gesture.panel);
+    const panel = projectDrawer();
     const backdrop = drawerBackdrop();
     if (!panel || !backdrop) return;
     gesture.distance = Math.min(gesture.hiddenDistance, Math.max(0, distance));
     const progress = gesture.distance / gesture.hiddenDistance;
-    panel.style.transform = gesture.panel === "nav"
-      ? `translate3d(calc(-105% + ${gesture.distance}px), 0, 0)`
-      : `translate3d(calc(105% - ${gesture.distance}px), 0, 0)`;
+    panel.style.transform = `translate3d(calc(105% - ${gesture.distance}px), 0, 0)`;
     backdrop.style.opacity = String(progress);
-    const dragClass = gesture.panel === "nav" ? "nav-drag-active" : "drawer-drag-active";
-    if (!document.body.classList.contains(dragClass)) {
-      document.body.classList.add(dragClass);
+    if (!document.body.classList.contains("drawer-drag-active")) {
+      document.body.classList.add("drawer-drag-active");
       syncDrawerChrome();
     }
   };
   const settleSurfaceDrag = (gesture, open) => {
-    const panel = panelNode(gesture.panel);
+    const panel = projectDrawer();
     const backdrop = drawerBackdrop();
     if (!panel || !backdrop) {
       clearDrawerTransient();
       return;
     }
-    const dragClass = gesture.panel === "nav" ? "nav-drag-active" : "drawer-drag-active";
-    const settleClass = gesture.panel === "nav" ? "nav-drag-settling" : "drawer-drag-settling";
-    document.body.classList.remove(dragClass);
-    document.body.classList.add(settleClass);
-    if (gesture.panel === "nav") {
-      if (open) {
-        if (navIsOpen()) syncDrawerChrome();
-        else openNav({ preserveTransient: true });
-      } else if (navIsOpen()) closeNav({ preserveTransient: true });
-      else syncDrawerChrome();
-      panel.style.transform = open ? "translate3d(0, 0, 0)" : "translate3d(-105%, 0, 0)";
-    } else {
-      if (open) {
-        if (drawerIsOpen()) syncDrawerChrome();
-        else openDrawer({ preserveTransient: true });
-      } else if (drawerIsOpen()) closeDrawer({ preserveTransient: true });
-      else syncDrawerChrome();
-      panel.style.transform = open ? "translate3d(0, 0, 0)" : "translate3d(105%, 0, 0)";
-    }
+    document.body.classList.remove("drawer-drag-active");
+    document.body.classList.add("drawer-drag-settling");
+    if (open) {
+      if (drawerIsOpen()) syncDrawerChrome();
+      else openDrawer({ preserveTransient: true });
+    } else if (drawerIsOpen()) closeDrawer({ preserveTransient: true });
+    else syncDrawerChrome();
+    panel.style.transform = open ? "translate3d(0, 0, 0)" : "translate3d(105%, 0, 0)";
     panel.getBoundingClientRect();
     backdrop.style.opacity = open ? "1" : "0";
     const settleFor = Math.max(transitionMilliseconds(panel), transitionMilliseconds(backdrop));
@@ -1377,8 +1813,7 @@
     }
     const releaseDelay = performance.now() - gesture.lastAt;
     const velocity = releaseDelay <= 120 ? gesture.velocity : 0;
-    const signed = gesture.panel === "nav" ? velocity : -velocity;
-    const projectedDistance = gesture.distance + signed * 320;
+    const projectedDistance = gesture.distance + (-velocity) * 320;
     settleSurfaceDrag(gesture, projectedDistance >= gesture.hiddenDistance * .42);
   }
   function moveSurfaceGesture(event) {
@@ -1407,18 +1842,14 @@
         return;
       }
       if (closing) {
-        const closeDx = gesture.panel === "nav" ? dx : -dx;
+        const closeDx = -dx;
         if (closeDx > 8) {
           endSurfaceGesture();
           return;
         }
         if (closeDx > -10 || absoluteX <= absoluteY * 1.45) return;
-        gesture.panel = gesture.panel || (dx < 0 ? "nav" : "files");
-      } else {
-        if (absoluteX < 10 || absoluteX <= absoluteY * 1.45) return;
-        gesture.panel = dx > 0 ? "nav" : "files";
-      }
-      const panel = panelNode(gesture.panel);
+      } else if (dx >= 0 || absoluteX < 10 || absoluteX <= absoluteY * 1.45) return;
+      const panel = projectDrawer();
       if (!panel) {
         endSurfaceGesture();
         return;
@@ -1428,7 +1859,7 @@
       gesture.hiddenDistance = gesture.width * 1.05;
       gesture.startDistance = closing ? gesture.hiddenDistance : 0;
     }
-    const openDx = gesture.panel === "nav" ? dx : -dx;
+    const openDx = -dx;
     if (closing) {
       if (absoluteY > Math.max(18, absoluteX * .68)) {
         cancelSurfaceGesture();
@@ -1449,33 +1880,39 @@
     else if (panelIsTransient()) clearDrawerTransient();
     const target = event.target instanceof Element ? event.target : null;
     if (!target || event.defaultPrevented || event.touches.length !== 1 || desktopChair()) return;
-    if (!projectDrawer() && !projectRail()) return;
-    let mode = "open";
-    let panel = "";
-    if (drawerIsOpen()) {
-      if (!target.closest("#project-drawer, #project-drawer-backdrop")) return;
-      mode = "close";
-      panel = "files";
-    } else if (navIsOpen()) {
-      if (!target.closest("#project-rail, #project-drawer-backdrop")) return;
-      mode = "close";
-      panel = "nav";
-    } else if (surfaceGestureBlocked(target)) return;
     const point = event.touches[0];
     const now = performance.now();
-    surfaceGesture = {
-      mode,
-      panel,
-      id: point.identifier,
-      x: point.clientX,
-      y: point.clientY,
-      lastAt: now,
-      distance: 0,
-      startDistance: 0,
-      velocity: 0,
-      horizontal: false,
-      samples: [{ x: point.clientX, at: now }],
-    };
+    if (drawerIsOpen()) {
+      if (!target.closest("#project-drawer, #project-drawer-backdrop")) return;
+      surfaceGesture = {
+        kind: "drawer",
+        mode: "close",
+        id: point.identifier,
+        x: point.clientX,
+        y: point.clientY,
+        lastAt: now,
+        distance: 0,
+        startDistance: 0,
+        velocity: 0,
+        horizontal: false,
+        samples: [{ x: point.clientX, at: now }],
+      };
+    } else if (!projectDrawer() || navMode() || surfaceGestureBlocked(target)) return;
+    else {
+      surfaceGesture = {
+        kind: "drawer",
+        mode: "open",
+        id: point.identifier,
+        x: point.clientX,
+        y: point.clientY,
+        lastAt: now,
+        distance: 0,
+        startDistance: 0,
+        velocity: 0,
+        horizontal: false,
+        samples: [{ x: point.clientX, at: now }],
+      };
+    }
     document.addEventListener("touchmove", moveSurfaceGesture, activeTouchOptions);
     document.addEventListener("touchend", finishSurfaceGesture, { capture: true, passive: true });
     document.addEventListener("touchcancel", finishSurfaceGesture, { capture: true, passive: true });
@@ -1484,9 +1921,28 @@
   window.addEventListener("beforeunload", cancelSurfaceGesture);
   window.addEventListener("popstate", () => {
     cancelSurfaceGesture();
+    const sessionMatch = location.pathname.match(/\/session\/(session-[0-9a-fA-F-]{36})\/?$/);
+    if (history.state?.qqPage && sessionMatch) {
+      const sessionId = sessionMatch[1];
+      committedLocation = location.href;
+      overlaySessionId = sessionId;
+      pendingCanonical = location.href;
+      liveSwitch(sessionId, { history: "none", canonical: location.href });
+      return;
+    }
+    if (history.state?.qqPage) {
+      const gen = ++navGeneration;
+      void prefetchPage(location.href, "high")?.then((page) => {
+        if (gen !== navGeneration) return;
+        if (!page?.html || !adoptPage(page.html, location.href, "none")) throw new Error("adopt");
+      }).catch(() => {
+        if (gen !== navGeneration) return;
+        location.reload();
+      });
+      return;
+    }
     restoreTranscriptView();
   });
-
   let pendingClose = false;
 
   document.addEventListener("change", (event) => {
@@ -1495,6 +1951,27 @@
     if (select.value) openSession(select.value);
   });
 
+  document.addEventListener("pointerdown", (event) => {
+    const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+    if (!(link instanceof HTMLAnchorElement)) return;
+    const picker = link.matches(".active-project-item, .projects-choice, .session-token");
+    if (picker) return;
+    const url = consolePageUrl(link.href);
+    if (!url || (url.pathname === location.pathname && url.search === location.search)) return;
+    abortPrefetchesExcept(url.href);
+    prefetchPage(url.href);
+  }, { capture: true, passive: true });
+  document.addEventListener("click", (event) => {
+    if (event.defaultPrevented || modifiedClick(event)) return;
+    const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+    if (!(link instanceof HTMLAnchorElement) || (link.target && link.target !== "_self") || link.hasAttribute("download")) return;
+    const url = consolePageUrl(link.href);
+    const picker = link.matches(".active-project-item, .projects-choice, .session-token");
+    if (!url) return;
+    if (!picker && url.pathname === location.pathname && url.search === location.search) return;
+    event.preventDefault();
+    void chairGo(url.href, link);
+  }, true);
   document.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;
     const toolCard = target?.closest(".message-tool[data-tool-output]");
@@ -1546,6 +2023,11 @@
       dismiss.closest(".workflows-popup")?.remove();
       return;
     }
+    if (target?.closest("#composer-nav")) {
+      event.preventDefault();
+      toggleChairMode();
+      return;
+    }
     const arm = target?.closest(".close-arm");
     if (arm instanceof HTMLElement) {
       event.preventDefault();
@@ -1589,11 +2071,10 @@
       restoreCloseFocus();
       return;
     }
-    if (drawerIsOpen() || navIsOpen()) {
+    if (drawerIsOpen()) {
       if (event.key === "Escape") {
         event.preventDefault();
-        if (drawerIsOpen()) closeDrawer();
-        else closeNav();
+        closeDrawer();
       } else if (event.key === "Tab") {
         trapDrawerFocus(event);
       }
@@ -1885,6 +2366,23 @@
       providerGapTick = 0;
     }
   };
+  resetAdoptedSession = () => {
+    liveBuffers.clear();
+    if (liveRaf) {
+      cancelAnimationFrame(liveRaf);
+      liveRaf = 0;
+    }
+    if (liveStartTimer) {
+      clearTimeout(liveStartTimer);
+      liveStartTimer = 0;
+    }
+    clearProviderGapTimers();
+    providerGapArmed = false;
+    providerGapAwaiting = false;
+    providerGapStopping = false;
+    providerGapSince = 0;
+    hideProviderGap();
+  };
   const paintProviderGap = () => {
     let gap = providerGapSlot();
     if (!gap) {
@@ -2151,15 +2649,11 @@
   const ownGeneration = ownScript?.dataset.uiGeneration ?? "";
   document.addEventListener("htmx:sseBeforeMessage", (event) => {
     const elt = event.target instanceof HTMLElement ? event.target : event.detail?.target;
-    if (elt instanceof HTMLElement && elt.id === "ui-generation") {
+    const source = typeof EventSource !== "undefined" && event.detail?.target instanceof EventSource
+      ? event.detail.target
+      : null;
+    if (source && source !== activeSseSource) {
       event.preventDefault();
-      const incoming = typeof event.detail?.data === "string"
-        ? event.detail.data
-        : typeof event.data === "string" ? event.data : "";
-      if (ownGeneration && incoming && incoming !== ownGeneration) {
-        persistComposerDraft();
-        location.reload();
-      }
       return;
     }
     const data = typeof event.detail?.data === "string"
@@ -2167,6 +2661,30 @@
       : typeof event.detail?.elt?.id === "string" && typeof event.data === "string"
         ? event.data
         : "";
+    if (elt instanceof HTMLElement && (elt.id === "switch-meta" || elt.id === "switch-ready")) {
+      event.preventDefault();
+      let payload;
+      try { payload = JSON.parse(data); } catch { return; }
+      const state = bootstrapSwitch;
+      if (!state
+        || String(payload?.id || "") !== state.id
+        || String(payload?.generation ?? "") !== String(state.generation)) return;
+      if (elt.id === "switch-meta") {
+        state.meta = payload;
+        return;
+      }
+      finishLiveSwitch(payload);
+      return;
+    }
+    if (elt instanceof HTMLElement && elt.id === "ui-generation") {
+      event.preventDefault();
+      const incoming = data;
+      if (ownGeneration && incoming && incoming !== ownGeneration) {
+        persistComposerDraft();
+        location.reload();
+      }
+      return;
+    }
     if (applyLivePatch(elt, data)) {
       event.preventDefault();
       noteLiveActivity();
@@ -2186,12 +2704,23 @@
   };
   document.addEventListener("htmx:sseOpen", (event) => {
     const source = event.detail?.source;
-    if (!source || typeof source.addEventListener !== "function" || source.qqLiveBound) return;
+    if (!source || typeof source.addEventListener !== "function") return;
+    const stream = document.querySelector("#console-stream");
+    let expected = "";
+    try { expected = new URL(stream?.getAttribute("sse-connect") || "", location.href).href; } catch {}
+    if (source.url && expected && source.url !== expected) {
+      source.close?.();
+      return;
+    }
+    activeSseSource = source;
+    if (source.qqLiveBound) return;
     source.qqLiveBound = true;
     source.addEventListener("live-append", (message) => {
+      if (source !== activeSseSource) return;
       paintLiveChannel("live-append", message.data);
     });
     source.addEventListener("live-tool-append", (message) => {
+      if (source !== activeSseSource) return;
       paintLiveChannel("live-tool-append", message.data);
     });
   });
@@ -2217,7 +2746,7 @@
     restoreTranscriptView();
   });
 
-  const syncInitialChrome = () => {
+  const syncInitialChrome = (options = {}) => {
     adoptFileReturnFromWindowName();
     const keepOpenerFocus = pendingFileReturn();
     if (keepOpenerFocus) {
@@ -2225,9 +2754,10 @@
       transcriptView = { follow: false, top: payload.transcriptTop };
     }
     syncDrawerChrome();
+    restoreChairMode();
     prepareSession();
     restoreActiveProjects();
-    void validateRememberedProjects();
+    if (!options.skipValidate) void validateRememberedProjects();
     if (drawerIsOpen()) requestAnimationFrame(() => openDrawer({ updateUrl: false, focus: !keepOpenerFocus }));
     restoreFileReturnFromHistory();
   };

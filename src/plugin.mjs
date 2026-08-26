@@ -39,6 +39,7 @@ export function apply(ctx, config) {
     caseFileFor: (sessionId) => workflowsOf()?.caseFile?.(sessionId),
     offerFor: (sessionId) => workflowsOf()?.offer?.(sessionId),
     chooseOffer: (sessionId, choice) => workflowsOf()?.choose?.(sessionId, { choice }),
+    caseFor: (sessionId) => workflowsOf()?.caseFile?.(sessionId),
     loginSheetFor: (sessionId) => modelsOf()?.sheetFor?.(sessionId),
     overlayFor: (sessionId) => finderOf()?.overlayFor?.(sessionId),
     chooseOverlay: (sessionId, form) => finderOf()?.chooseOverlay?.(sessionId, form),

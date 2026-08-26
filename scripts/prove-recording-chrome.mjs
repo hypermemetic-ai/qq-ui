@@ -22,12 +22,13 @@ const idle = renderSessionContent({
 }, paths);
 
 assert.match(idle, /id="session-chrome"[^>]*sse-swap="chrome"/);
-assert.match(idle, /class="session-place"/);
+assert.match(idle, /class="session-heading-start"/);
 assert.match(idle, /class="workflows-menu" data-mode="find"/);
 assert.match(idle, /<summary aria-label="Choose workflow"[^>]*>find<\/summary>/);
 assert.match(idle, /class="session-project">qq</);
-assert.match(idle, /class="session-home"[^>]*aria-label="Home"/);
-assert.match(idle, /href="\/qq\/home"/);
+assert.match(idle, /class="session-heading-start"[\s\S]*class="session-project">qq</);
+assert.match(idle, /class="session-heading-start"[\s\S]*class="session-id"/);
+assert.match(idle, /class="session-heading-end"/);
 assert.doesNotMatch(idle, /value="\/workflows none"/);
 assert.doesNotMatch(idle, /value="\/workflows base"/);
 assert.doesNotMatch(idle, /Message this DSH session/);

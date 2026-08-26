@@ -404,7 +404,7 @@ function renderPendingQueue(snapshot, paths) {
   const pending = Array.isArray(snapshot?.conversation?.pending) ? snapshot.conversation.pending : [];
   if (pending.length === 0) return "";
   const action = escapeHtml(paths.queue ?? "");
-  const mutable = snapshot.canMutatePending === true && Boolean(paths.queue);
+  const mutable = !isChildSession(snapshot) && snapshot.canMutatePending === true && Boolean(paths.queue);
   const rows = pending.map((item, index) => {
     const id = escapeHtml(item.id ?? "");
     const steering = item.placement === "steering";
@@ -538,6 +538,41 @@ function sessionSwitchHref(paths, sessionId) {
     : "";
 }
 
+function projectSessionGroups(snapshot, paths) {
+  const groups = new Map();
+  const add = (entry, project, folder) => {
+    const name = String(project ?? "").trim();
+    const id = String(entry?.id ?? "").trim();
+    if (!name || !id || entry?.origin === "subagent") return;
+    const key = `${name}\n${String(folder ?? "").trim()}`;
+    if (!groups.has(key)) groups.set(key, []);
+    const list = groups.get(key);
+    if (list.some((session) => session.id === id)) return;
+    list.push(entry);
+  };
+  for (const entry of Array.isArray(snapshot?.activeProjects) ? snapshot.activeProjects : []) {
+    add(entry, entry.project ?? entry.name, entry.folder);
+  }
+  for (const entry of Array.isArray(snapshot?.sessions) ? snapshot.sessions : []) {
+    add(entry, snapshot.project, snapshot.folder);
+  }
+  if (snapshot?.id && !isChildSession(snapshot)) add(snapshot, snapshot.project, snapshot.folder);
+  const encoded = new Map();
+  for (const [key, rows] of groups) {
+    encoded.set(key, menuSessions(rows).map((session) => ({
+      id: session.id,
+      token: sessionToken(session),
+      href: sessionSwitchHref(paths, session.id),
+    })));
+  }
+  return encoded;
+}
+
+function projectSessionsAttr(sessions) {
+  if (!Array.isArray(sessions) || sessions.length === 0) return "";
+  return ` data-sessions="${escapeHtml(JSON.stringify(sessions))}"`;
+}
+
 function bannerMark(kind) {
   if (kind === "add") {
     return `<svg class="banner-mark" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`;
@@ -579,24 +614,20 @@ function sessionNavigation(snapshot, paths) {
     ? choices.find((session) => session.id === selectedId) ?? snapshot
     : undefined;
   const token = selected ? sessionToken(selected) : "";
-  const sessionItems = choices.map((session) => {
+  const links = choices.map((session) => {
     const current = session.id === selectedId;
-    const href = `${paths.switchSession}?session=${encodeURIComponent(session.id)}`;
-    const close = current && paths.close
-      ? `<button type="button" class="close-arm" aria-label="Close this session">${bannerMark("close")}</button>
-        <form id="close-session" class="close-session close-confirm" action="${escapeHtml(paths.close)}" method="post" hidden>
-          <button type="submit" aria-label="Close this session">close</button>
-        </form>`
-      : "";
-    return `<li class="session-item${current ? " session-item-current" : ""}"><a class="session-choice${current ? " session-choice-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""}>${escapeHtml(sessionToken(session))}</a>${close}</li>`;
+    const href = sessionSwitchHref(paths, session.id);
+    return `<a class="session-token${current ? " session-token-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(session.id)}"><span>${escapeHtml(sessionToken(session))}</span></a>`;
   }).join("");
-  const list = `<nav class="project-sessions" aria-label="Sessions" aria-keyshortcuts="ArrowLeft ArrowRight">
-      ${choices.length > 0 ? `<ol>${sessionItems}</ol>` : '<p class="session-empty">no live sessions</p>'}
-      <div class="session-controls${choices.length === 0 ? " session-controls-empty" : ""}">
-        ${newSessionForm(paths.createSession)}
-      </div>
-    </nav>`;
-  return { token, list };
+  const tokens = `<nav class="session-traversal" aria-label="Sessions" aria-keyshortcuts="ArrowLeft ArrowRight">${links || '<span class="session-empty">no live sessions</span>'}</nav>`;
+  const child = isChildSession(snapshot);
+  const create = child ? "" : newSessionForm(paths.createSession, "session-background-actions");
+  const close = child || !paths.close
+    ? ""
+    : `<form id="close-session" class="close-session session-background-actions" action="${escapeHtml(paths.close)}" method="post" hidden>
+        <button type="submit" aria-label="Close this session">close</button>
+      </form>`;
+  return { token, tokens, create, close };
 }
 
 export function renderLoginSheet(sheet, paths) {
@@ -825,9 +856,9 @@ function activeProjectList(snapshot) {
       recency,
     });
   };
-  if (snapshot?.id) add(snapshot);
   for (const entry of Array.isArray(snapshot?.activeProjects) ? snapshot.activeProjects : []) add(entry);
   for (const entry of Array.isArray(snapshot?.sessions) ? snapshot.sessions : []) add(entry);
+  if (snapshot?.id && !isChildSession(snapshot)) add(snapshot);
   return projects;
 }
 
@@ -843,7 +874,7 @@ function livePlaceSet(snapshot) {
     const key = livePlaceKey(entry);
     if (key) keys.add(key);
   };
-  add(snapshot);
+  if (!isChildSession(snapshot)) add(snapshot);
   for (const entry of Array.isArray(snapshot?.activeProjects) ? snapshot.activeProjects : []) add(entry);
   for (const entry of Array.isArray(snapshot?.sessions) ? snapshot.sessions : []) add(entry);
   return keys;
@@ -852,15 +883,13 @@ function livePlaceSet(snapshot) {
 function activeProjectHref(entry, paths, current) {
   if (current && paths.canonical) return paths.canonical;
   const folderPath = entry.folder ? `/${encodeURIComponent(entry.folder)}` : "";
-  if (entry.sessionId) {
-    return `${paths.projectsBase}/${encodeURIComponent(entry.project)}${folderPath}/session/${encodeURIComponent(entry.sessionId)}`;
-  }
   return `${paths.projectsBase}/${encodeURIComponent(entry.project)}${folderPath}`;
 }
 
 function renderProjectsMenu(snapshot, paths) {
   if (!paths?.projectsBase) return "";
   const projects = activeProjectList(snapshot);
+  const sessionGroups = projectSessionGroups(snapshot, paths);
   const currentProject = String(snapshot?.project ?? "");
   const currentFolder = String(snapshot?.folder ?? "");
   const current = projects.find((entry) => entry.project === currentProject && entry.folder === currentFolder);
@@ -869,7 +898,10 @@ function renderProjectsMenu(snapshot, paths) {
     ? projects.map((entry) => {
         const isCurrent = entry.project === currentProject && entry.folder === currentFolder;
         const href = activeProjectHref(entry, paths, isCurrent);
-        return `<a class="projects-choice${isCurrent ? " projects-choice-current" : ""}" href="${escapeHtml(href)}" data-project="${escapeHtml(entry.project)}" data-folder="${escapeHtml(entry.folder)}"${isCurrent ? ' aria-current="page"' : ""}>${escapeHtml(entry.label)}</a>`;
+        const sessions = sessionGroups.get(`${entry.project}\n${entry.folder}`) ?? [];
+        const sessionId = entry.sessionId || sessions[0]?.id || "";
+        const sessionAttr = sessionId ? ` data-session-id="${escapeHtml(sessionId)}"` : "";
+        return `<a class="projects-choice${isCurrent ? " projects-choice-current" : ""}" href="${escapeHtml(href)}" data-project="${escapeHtml(entry.project)}" data-folder="${escapeHtml(entry.folder)}"${sessionAttr}${projectSessionsAttr(sessions)}${isCurrent ? ' aria-current="page"' : ""}>${escapeHtml(entry.label)}</a>`;
       }).join("")
     : `<p class="session-empty">no live projects</p>`;
   return `<details class="projects-menu">
@@ -883,18 +915,22 @@ function renderProjectsMenu(snapshot, paths) {
 export function renderProjectRail(snapshot, paths, inert = false) {
   if (!paths?.projectsBase) return "";
   const projects = activeProjectList(snapshot);
+  const sessionGroups = projectSessionGroups(snapshot, paths);
   const currentProject = String(snapshot?.project ?? "");
   const currentFolder = String(snapshot?.folder ?? "");
   const rows = projects.map((entry) => {
     const current = entry.project === currentProject && entry.folder === currentFolder;
     const href = activeProjectHref(entry, paths, current);
-    return `<li><a class="active-project-item${current ? " active-project-current" : ""}" href="${escapeHtml(href)}" data-project="${escapeHtml(entry.project)}" data-folder="${escapeHtml(entry.folder)}" data-live="true"${current ? ' aria-current="page"' : ""} title="${escapeHtml(entry.label)}"><span class="active-project-mark" aria-hidden="true"></span><span class="active-project-label">${escapeHtml(entry.label)}</span></a></li>`;
+    const sessions = sessionGroups.get(`${entry.project}\n${entry.folder}`) ?? [];
+    const sessionId = entry.sessionId || sessions[0]?.id || "";
+    const sessionAttr = sessionId ? ` data-session-id="${escapeHtml(sessionId)}"` : "";
+    return `<li><a class="active-project-item${current ? " active-project-current" : ""}" href="${escapeHtml(href)}" data-project="${escapeHtml(entry.project)}" data-folder="${escapeHtml(entry.folder)}" data-live="true"${sessionAttr}${projectSessionsAttr(sessions)}${current ? ' aria-current="page"' : ""} title="${escapeHtml(entry.label)}"><span class="active-project-mark" aria-hidden="true"></span><span class="active-project-label">${escapeHtml(entry.label)}</span></a></li>`;
   }).join("");
   const sessions = sessionNavigation(snapshot, paths);
   const rootUrl = `${paths.canonical}${paths.canonical.includes("?") ? "&" : "?"}drawer=~`;
   return `<aside id="project-rail" class="project-rail" aria-label="Projects" data-current-project="${escapeHtml(currentProject)}" data-current-folder="${escapeHtml(currentFolder)}" data-current-active="${snapshot?.id ? "true" : "false"}"${inert ? " inert" : ""}>
     <nav class="active-projects" aria-label="Active projects" aria-keyshortcuts="ArrowUp ArrowDown"><ol>${rows || '<li class="session-empty">no live projects</li>'}</ol></nav>
-    ${sessions.list}
+    ${sessions.create}${sessions.close}
     <section id="inactive-project-tree" class="inactive-project-tree" aria-label="Files" aria-keyshortcuts="F" data-root-url="${escapeHtml(rootUrl)}" hidden>
       <div class="project-tree-columns" role="tree" aria-label="Project files"><span class="project-tree-loading" role="status">···</span></div>
     </section>
@@ -973,6 +1009,7 @@ function composer(paths, snapshot) {
           </svg>
         </button>
         ${regionShell("composer-turn-controls", "composer-turn-controls", "composer", composerControls(running, findWork), true)}
+        <button id="composer-nav" type="button" aria-pressed="false" aria-label="Switch to navigation mode" title="Navigation">nav</button>
         ${composerCaseButton(snapshot)}
         <button id="composer-submit" type="submit" aria-label="Send"><svg class="composer-enter" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19 6v5H7.83l2.58-2.59L9 7 4 12l5 5 1.41-1.41L7.83 13H21V6h-2z"/></svg></button>
       </div>
@@ -1428,7 +1465,9 @@ export function renderChrome(snapshot, paths, notice = "") {
   const title = child ? "Child transcript" : "Operator console";
   return `<div class="session-heading">
       <div class="session-heading-start">
+        ${renderProjectsMenu(snapshot, paths)}
         ${project ? `<p class="session-project">${escapeHtml(project)}</p>` : ""}
+        ${sessions.tokens}
         ${sessions.token ? `<p class="session-id">${escapeHtml(sessions.token)}</p>` : ""}
         <h1 id="session-heading"><span class="session-heading-title">${title}${face ? ` · ${escapeHtml(face)}` : ""}</span></h1>
       </div>
@@ -1460,7 +1499,7 @@ function transcriptAnchor() {
   return regionShell("transcript-anchor", "transcript-anchor", "transcript", "", true, "beforebegin");
 }
 
-function transcriptSettledInner(snapshot) {
+export function transcriptSettledInner(snapshot) {
   const settled = renderTranscriptSettled(snapshot);
   return `${settled}\n${transcriptAnchor()}`;
 }
@@ -1559,11 +1598,31 @@ export function renderCaseRegion(snapshot) {
   return `${panel}${viewer}`;
 }
 
+export function renderCastPanel(snapshot) {
+  if (snapshot?.sessionMode !== "cast") return "";
+  return `<aside id="cast-panel" class="cast-panel">
+    <p id="cast-hint">this phone fills the TV</p>
+    <input id="cast-pair-code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" enterkeyhint="done" hidden>
+    <button id="cast-toggle" type="button" data-state="idle">cast to TV</button>
+    <div id="cast-audio" class="cast-audio">
+      <span class="cast-audio-label">sound</span>
+      <button type="button" id="cast-audio-tv" data-audio="tv">TV</button>
+      <button type="button" id="cast-audio-phone" data-audio="phone">phone</button>
+    </div>
+    <label id="cast-offset-wrap" class="cast-offset">
+      <span>offset <span id="cast-offset-value">0 ms</span></span>
+      <input id="cast-offset" type="range" min="-400" max="400" step="10" value="0">
+    </label>
+    <p id="cast-error" hidden></p>
+  </aside>`;
+}
+
 export function renderPopups(snapshot, paths, notice = "") {
   if (isChildSession(snapshot)) return renderProgressChip(snapshot?.progress);
   const slash = slashNoticeHtml(snapshot, paths, notice);
   const popupNotice = slash && isPopupMarkup(slash) ? slash : "";
-  return `${renderProgressChip(snapshot?.progress)}
+  return `${renderCastPanel(snapshot)}
+    ${renderProgressChip(snapshot?.progress)}
     ${renderLoginSheet(snapshot?.loginSheet, paths)}
     ${renderOfferPopup(snapshot?.offer, paths, notice)}
     ${renderApprovalPopup(snapshot?.approval, paths, notice)}
@@ -1659,6 +1718,7 @@ export function regionFingerprints(snapshot) {
       snapshot?.overlay?.media?.src ?? "",
       snapshot?.overlay?.chrome === false ? "0" : "1",
       snapshot?.progress?.title ?? "",
+      snapshot?.sessionMode ?? "",
       sessionFindWork(snapshot),
     ]),
   };
@@ -1671,9 +1731,13 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   const popups = regionShell("session-popups", "session-popups", "popups", renderPopups(snapshot, paths, notice), true);
   if (emptyProject) return `${chrome}${popups}`;
   const children = regionShell("session-children", "session-children", "children", renderSessionChildren(snapshot, paths), true);
-  const composerRegion = isChildSession(snapshot)
-    ? ""
-    : regionShell("session-composer", "session-composer", "", renderComposer(snapshot, paths), false);
+  const composerRegion = regionShell(
+    "session-composer",
+    "session-composer",
+    "composer-shell",
+    renderComposer(snapshot, paths),
+    true,
+  );
   return `${chrome}
     <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" data-tool-base="${escapeHtml(paths.canonical ?? "")}" hx-history="false">
       <div id="transcript-log" class="transcript-log" hx-history="false">
@@ -1884,6 +1948,7 @@ function documentHead(assetPaths, title = "qq", options = {}) {
   <script defer src="${escapeHtml(assetPaths.sse)}"></script>
   <script defer src="${escapeHtml(assetPaths.browser)}" data-service-worker="${escapeHtml(assetPaths.serviceWorker)}"${assetPaths.uiGeneration ? ` data-ui-generation="${escapeHtml(assetPaths.uiGeneration)}"` : ""}${assetPaths.uiRevision ? ` data-ui-revision="${escapeHtml(assetPaths.uiRevision)}"` : ""}></script>
   <script defer src="/qq/dictate/client.js"></script>
+  <script defer src="/qq/cast/client.js"></script>
 </head>`;
 }
 
@@ -1946,13 +2011,18 @@ export function renderDocumentViewer(document, options = {}) {
   const closeControl = mode === "dialog"
     ? `<button class="document-viewer-close" type="button" data-document-viewer-close>${escapeHtml(closeLabel)}</button>`
     : `<a class="document-viewer-close" href="${escapeHtml(options.closeHref ?? "#")}">${escapeHtml(closeLabel)}</a>`;
-  const toolbar = `<header class="document-viewer-toolbar">
+  const downloadHref = String(options.downloadHref ?? "");
+  const downloadControl = downloadHref
+    ? `<a class="document-viewer-download" aria-label="Download" download="${escapeHtml(options.downloadName ?? title)}" href="${escapeHtml(downloadHref)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 17v4h14v-4"/></svg></a>`
+    : "";
+  const toolbar = `<header class="document-viewer-toolbar${downloadControl ? " document-viewer-toolbar-with-download" : ""}">
       ${closeControl}
       <div class="document-viewer-identity">
         <p class="document-viewer-kind">${escapeHtml(identity)}</p>
         <h1 id="${escapeHtml(headingId)}" tabindex="-1" title="${escapeHtml(title)}">${escapeHtml(title)}</h1>
         ${path ? `<p class="document-viewer-path" title="${escapeHtml(path)}">${escapeHtml(path)}</p>` : ""}
       </div>
+      ${downloadControl}
     </header>`;
   const content = `<div class="document-viewer-content" data-content-kind="${escapeHtml(kind)}">${renderDocumentContent(document)}</div>`;
   if (mode === "dialog") {
@@ -1988,6 +2058,7 @@ function fileProblem(error) {
 export function renderFilePage(view, paths, assetPaths) {
   const file = view?.file;
   const name = file?.name ?? view?.name ?? "file";
+  const downloadPath = String(view?.path ?? "");
   const problem = view?.error
     ? fileProblem(view.error)
     : file?.kind === "markdown" || file?.kind === "text" || file?.kind === "code"
@@ -2006,6 +2077,10 @@ export function renderFilePage(view, paths, assetPaths) {
     id: "project-file-viewer",
     closeHref: paths.canonical,
     closeLabel: "Back to console",
+    downloadHref: downloadPath && paths.fileDownload
+      ? `${paths.fileDownload}${encodeURIComponent(downloadPath)}`
+      : "",
+    downloadName: name,
   });
   return `<!doctype html>
 <html lang="en">
@@ -2141,7 +2216,9 @@ ${documentHead(assetPaths)}
     <span>Sequential handoff</span>
   </header>
   <main id="console-stream"${backgroundInert}${paths.events ? ` hx-ext="sse" sse-connect="${escapeHtml(paths.events)}"` : ""} hx-history="false">
-    ${paths.events ? `<div id="ui-generation" hidden sse-swap="ui" hx-swap="none"${assetPaths.uiRevision ? ` data-ui-revision="${escapeHtml(assetPaths.uiRevision)}"` : ""}></div>` : ""}
+    ${paths.events ? `<div id="ui-generation" hidden sse-swap="ui" hx-swap="none"${assetPaths.uiRevision ? ` data-ui-revision="${escapeHtml(assetPaths.uiRevision)}"` : ""}></div>
+    <div id="switch-meta" hidden sse-swap="switch-meta" hx-swap="none"></div>
+    <div id="switch-ready" hidden sse-swap="switch-ready" hx-swap="none"></div>` : ""}
     <section id="session-panel" class="session-panel" aria-labelledby="session-heading">${content}</section>
     ${caseRegion}
   </main>

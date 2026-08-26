@@ -13,6 +13,9 @@ import {
   renderSessionRegion as bundledRenderSessionRegion,
   renderTranscriptJunction as bundledRenderTranscriptJunction,
   renderSettledTranscriptAppend as bundledRenderSettledTranscriptAppend,
+  transcriptSettledInner as bundledTranscriptSettledInner,
+  renderLiveNodes as bundledRenderLiveNodes,
+  renderComposer as bundledRenderComposer,
   renderToolBody as bundledRenderToolBody,
   liveTranscriptUpdate as bundledLiveTranscriptUpdate,
   regionFingerprints as bundledRegionFingerprints,
@@ -21,6 +24,8 @@ import {
 
 const MAX_FORM_BYTES = 524_288;
 const DEFAULT_SSE_POLL_MS = 100;
+const LAST_SESSION_COOKIE = "qq-last-session";
+const LAST_SESSION_ID = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 /** Console chat is the architect fold floor: current operator pair plus previous. */
 export const CONSOLE_PAIRS = 2;
 
@@ -319,6 +324,27 @@ function write(res, status, headers, body, head = false) {
   res.end(head ? undefined : body);
 }
 
+function lastSessionCookie(req) {
+  const header = String(req.headers.cookie ?? "");
+  for (const part of header.split(";")) {
+    const trimmed = part.trim();
+    const cut = trimmed.indexOf("=");
+    if (cut < 0) continue;
+    if (trimmed.slice(0, cut) !== LAST_SESSION_COOKIE) continue;
+    const value = trimmed.slice(cut + 1);
+    if (LAST_SESSION_ID.test(value)) return value;
+  }
+  return undefined;
+}
+
+function rememberSessionHeaders(sessionId, extra = {}) {
+  if (!LAST_SESSION_ID.test(String(sessionId ?? ""))) return extra;
+  return {
+    ...extra,
+    "Set-Cookie": `${LAST_SESSION_COOKIE}=${sessionId}; Path=/qq; SameSite=Lax; HttpOnly`,
+  };
+}
+
 function text(res, status, message, head = false) {
   write(res, status, { "Content-Type": "text/plain; charset=utf-8" }, `${message}\n`, head);
 }
@@ -381,6 +407,7 @@ function routes(basePath, sessionId, project, folder) {
       projectsSession: `${basePath}/projects`,
       fileView: `${canonical}/file/`,
       fileOpen: `${canonical}/open/`,
+      fileDownload: `${canonical}/download/`,
       events: sessionId ? `${canonical}/events` : "",
       interrupt: sessionId ? `${canonical}/interrupt` : "",
       prompt: sessionId ? `${canonical}/prompt` : "",
@@ -402,6 +429,7 @@ function routes(basePath, sessionId, project, folder) {
     projectsSession: `${basePath}/projects`,
     fileView: "",
     fileOpen: "",
+    fileDownload: "",
     events: `${canonical}/events`,
     interrupt: `${canonical}/interrupt`,
     prompt: `${canonical}/prompt`,
@@ -439,7 +467,7 @@ function parseSessionRoute(basePath, pathname) {
   return undefined;
 }
 
-const PROJECT_ROUTE_ACTIONS = new Set(["sessions", "session", "file", "open"]);
+const PROJECT_ROUTE_ACTIONS = new Set(["sessions", "session", "file", "open", "download"]);
 
 function parseProjectRoute(basePath, pathname) {
   const prefix = `${basePath}/project/`;
@@ -466,7 +494,7 @@ function parseProjectRoute(basePath, pathname) {
   const base = folder ? { project, folder } : { project };
   if (rest.length === 0) return { ...base, action: "project" };
   if (rest[0] === "sessions" && rest.length === 1) return { ...base, action: "create" };
-  if ((rest[0] === "file" || rest[0] === "open") && rest.length === 2 && rest[1]) {
+  if (["file", "open", "download"].includes(rest[0]) && rest.length === 2 && rest[1]) {
     let filePath;
     try {
       filePath = decodeURIComponent(rest[1]);
@@ -482,7 +510,7 @@ function parseProjectRoute(basePath, pathname) {
     } catch {
       return undefined;
     }
-    if ((rest[2] === "file" || rest[2] === "open") && rest.length === 4 && rest[3]) {
+    if (["file", "open", "download"].includes(rest[2]) && rest.length === 4 && rest[3]) {
       let filePath;
       try {
         filePath = decodeURIComponent(rest[3]);
@@ -518,7 +546,8 @@ function isFileAware(backend) {
   return isProjectAware(backend)
     && typeof backend.listProjectFiles === "function"
     && typeof backend.readProjectFile === "function"
-    && typeof backend.openProjectFile === "function";
+    && typeof backend.openProjectFile === "function"
+    && typeof backend.downloadProjectFile === "function";
 }
 
 function contentDisposition(mode, name) {
@@ -620,8 +649,10 @@ export function createConsoleHandler(backend, options = {}) {
   });
   const streams = new Set();
   const findWork = new Map();
+  let lastViewedSessionId = "";
   const readOffer = typeof options.offerFor === "function" ? options.offerFor : null;
   const chooseOffer = typeof options.chooseOffer === "function" ? options.chooseOffer : null;
+  const readCase = typeof options.caseFor === "function" ? options.caseFor : null;
   const readApproval = typeof options.approvalFor === "function" ? options.approvalFor : null;
   const decideApproval = typeof options.decideApproval === "function" ? options.decideApproval : null;
   const readCaseFile = typeof options.caseFileFor === "function" ? options.caseFileFor : null;
@@ -643,7 +674,17 @@ export function createConsoleHandler(backend, options = {}) {
         /* live project list is optional */
       }
     }
-    if (!snapshot?.id) return next;
+    if (snapshot.origin === "subagent") {
+      if (readProgress) {
+        try {
+          const progress = await readProgress(snapshot.id);
+          if (progress) next = { ...next, progress };
+        } catch {
+          /* passive child progress is optional */
+        }
+      }
+      return next;
+    }
     if (readCaseFile) {
       try {
         const caseFile = await readCaseFile(snapshot.id);
@@ -658,6 +699,14 @@ export function createConsoleHandler(backend, options = {}) {
         if (offer) next = { ...next, offer };
       } catch {
         /* leftover offer is optional */
+      }
+    }
+    if (readCase) {
+      try {
+        const caseFile = await readCase(snapshot.id);
+        if (caseFile) next = { ...next, caseFile };
+      } catch {
+        /* architect case file is optional */
       }
     }
     if (readApproval) {
@@ -701,20 +750,42 @@ export function createConsoleHandler(backend, options = {}) {
     return next;
   }
 
+  async function projectsSessions(snapshot) {
+    if (snapshot?.origin !== "subagent") {
+      return [{
+        id: snapshot.id,
+        createdAt: snapshot.createdAt ?? 0,
+        scope: "projects",
+        context: "projects",
+        ...(snapshot.alias ? { alias: snapshot.alias } : {}),
+      }];
+    }
+    if (!snapshot.parent) return [];
+    try {
+      const parent = await backend.read(snapshot.parent);
+      if (parent?.origin === "subagent" || parent?.scope !== "projects") return [];
+      return [{
+        id: parent.id,
+        createdAt: parent.createdAt ?? 0,
+        scope: "projects",
+        context: "projects",
+        ...(parent.alias ? { alias: parent.alias } : {}),
+      }];
+    } catch {
+      return [];
+    }
+  }
+
   async function view(sessionId) {
     const snapshot = await backend.read(sessionId);
     const available = snapshot.scope === "home" && typeof backend.listHome === "function"
       ? await backend.listHome()
       : snapshot.scope === "projects"
-        ? [{
-            id: snapshot.id,
-            createdAt: snapshot.createdAt ?? 0,
-            scope: "projects",
-            context: "projects",
-            ...(snapshot.alias ? { alias: snapshot.alias } : {}),
-          }]
+        ? await projectsSessions(snapshot)
         : await backend.list(snapshot.project, snapshot.folder ?? "");
-    if (snapshot.id && !available.some((session) => session.id === snapshot.id)) {
+    if (snapshot.id
+      && snapshot.origin !== "subagent"
+      && !available.some((session) => session.id === snapshot.id)) {
       available.unshift({
         id: snapshot.id,
         createdAt: 0,
@@ -724,6 +795,15 @@ export function createConsoleHandler(backend, options = {}) {
       });
     }
     return withSheets({ ...snapshot, sessions: available });
+  }
+
+  async function assertChairMutation(sessionId) {
+    const snapshot = await backend.read(sessionId);
+    if (snapshot?.origin !== "subagent") return snapshot;
+    const error = new Error("Child sessions are observe-only");
+    error.status = 403;
+    error.code = "child-observe-only";
+    throw error;
   }
 
   async function projectView(project, folder) {
@@ -790,6 +870,22 @@ export function createConsoleHandler(backend, options = {}) {
     throw error;
   }
 
+  function isMissingSession(error) {
+    if (errorStatus(error) !== 404) return false;
+    const code = error?.code;
+    return code === "inactive" || code === "not-found" || code === undefined;
+  }
+
+  async function liveProjectLocation(project, folder, search = "") {
+    const rows = typeof backend.list === "function"
+      ? await backend.list(project, folder ?? "")
+      : [];
+    if (rows[0]?.id) {
+      return `${routes(basePath, rows[0].id, project, folder).canonical}${search}`;
+    }
+    return `${routes(basePath, "", project, folder).canonical}${search}`;
+  }
+
   const SHEET_KEYS = Object.freeze([
     "caseFile", "offer", "approval", "loginSheet", "overlay", "progress",
     "sessionMode", "workflows", "activeProjects", "findWork",
@@ -803,8 +899,8 @@ export function createConsoleHandler(backend, options = {}) {
     return sheets;
   }
 
-  async function loadSheets(sessionId) {
-    return sheetFields(await withSheets({ id: sessionId }));
+  async function loadSheets(snapshot) {
+    return sheetFields(await withSheets(snapshot));
   }
 
   function watch(sessionId, listener, extra = {}) {
@@ -814,7 +910,7 @@ export function createConsoleHandler(backend, options = {}) {
     const intervalMs = extra.intervalMs ?? ssePollMs;
     const hasSheets = Boolean(
       readCaseFile || readOffer || readOverlay || readProgress || readApproval || readLoginSheet
-      || inFindMode || sessionModeFor || workflowsFor,
+      || inFindMode || sessionModeFor || workflowsFor || readCase,
     );
     let cancelled = false;
     let sheets = {};
@@ -836,16 +932,18 @@ export function createConsoleHandler(backend, options = {}) {
     let sheetFp;
     const tickSheets = async () => {
       if (cancelled || !hasSheets) return;
-      try {
-        const next = await loadSheets(sessionId);
-        const fingerprint = JSON.stringify(next);
-        if (fingerprint !== sheetFp) {
-          sheetFp = fingerprint;
-          sheets = next;
-          deliver(lastSnapshot);
+      if (lastSnapshot) {
+        try {
+          const next = await loadSheets(lastSnapshot);
+          const fingerprint = JSON.stringify(next);
+          if (fingerprint !== sheetFp) {
+            sheetFp = fingerprint;
+            sheets = next;
+            deliver(lastSnapshot);
+          }
+        } catch (error) {
+          try { listener(error); } catch {}
         }
-      } catch (error) {
-        try { listener(error); } catch {}
       }
       if (cancelled) return;
       timer = setTimeout(tickSheets, intervalMs);
@@ -930,6 +1028,9 @@ export function createConsoleHandler(backend, options = {}) {
     renderSessionRegion: bundledRenderSessionRegion,
     renderTranscriptJunction: bundledRenderTranscriptJunction,
     renderSettledTranscriptAppend: bundledRenderSettledTranscriptAppend,
+    transcriptSettledInner: bundledTranscriptSettledInner,
+    renderLiveNodes: bundledRenderLiveNodes,
+    renderComposer: bundledRenderComposer,
     renderToolBody: bundledRenderToolBody,
     liveTranscriptUpdate: bundledLiveTranscriptUpdate,
     renderMutationOob: bundledRenderMutationOob,
@@ -1182,20 +1283,26 @@ export function createConsoleHandler(backend, options = {}) {
       return;
     }
 
-    const projectRoute = parseProjectRoute(basePath, url.pathname);
+    let projectRoute = parseProjectRoute(basePath, url.pathname);
     if (projectRoute) {
       if (!isProjectAware(backend)) {
         text(res, 404, "Not found", head);
         return;
       }
-      const known = backend.listProjects().find((entry) => entry.name === projectRoute.project);
+      const catalog = backend.listProjects();
+      let known = catalog.find((entry) => entry.name === projectRoute.project);
       if (!known) {
         text(res, 404, "qq: project not found", head);
         return;
       }
       if (projectRoute.folder && !(known.folders ?? []).some((entry) => entry.name === projectRoute.folder)) {
-        text(res, 404, "qq: project folder not found", head);
-        return;
+        const child = catalog.find((entry) => entry.name === projectRoute.folder);
+        if (!child) {
+          text(res, 404, "qq: project folder not found", head);
+          return;
+        }
+        projectRoute = { ...projectRoute, project: child.name, folder: undefined };
+        known = child;
       }
       if (projectRoute.action === "file") {
         if (req.method !== "GET" && !head) {
@@ -1248,6 +1355,23 @@ export function createConsoleHandler(backend, options = {}) {
         }
         return;
       }
+      if (projectRoute.action === "download") {
+        if (req.method !== "GET" && !head) {
+          write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
+          return;
+        }
+        try {
+          const downloaded = await backend.downloadProjectFile(projectRoute.project, groupedFilePath(projectRoute), { includeBody: !head });
+          write(res, 200, {
+            "Content-Type": downloaded.mediaType,
+            "Content-Length": String(downloaded.size),
+            "Content-Disposition": contentDisposition(downloaded.disposition, downloaded.name),
+          }, downloaded.body ?? Buffer.alloc(0), head);
+        } catch (error) {
+          text(res, errorStatus(error), errorMessage(error), head);
+        }
+        return;
+      }
       if (projectRoute.action === "create") {
         if (req.method !== "POST") {
           write(res, 405, { Allow: "POST", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
@@ -1262,22 +1386,19 @@ export function createConsoleHandler(backend, options = {}) {
       }
       if (projectRoute.action === "project" && (req.method === "GET" || head)) {
         try {
-          const groupedPicker = known.grouped === true && !projectRoute.folder;
-          if (!groupedPicker) {
-            const rows = await backend.list(projectRoute.project, projectRoute.folder ?? "");
-            if (rows[0]) {
-              write(
-                res,
-                303,
-                {
-                  Location: routes(basePath, rows[0].id, projectRoute.project, projectRoute.folder).canonical + url.search,
-                  "Content-Type": "text/plain; charset=utf-8",
-                },
-                "See other\n",
-                head,
-              );
-              return;
-            }
+          const rows = await backend.list(projectRoute.project, projectRoute.folder ?? "");
+          if (rows[0]) {
+            write(
+              res,
+              303,
+              {
+                Location: routes(basePath, rows[0].id, projectRoute.project, projectRoute.folder).canonical + url.search,
+                "Content-Type": "text/plain; charset=utf-8",
+              },
+              "See other\n",
+              head,
+            );
+            return;
           }
           const snapshot = await projectView(projectRoute.project, projectRoute.folder);
           const paths = routes(basePath, "", projectRoute.project, projectRoute.folder);
@@ -1299,6 +1420,27 @@ export function createConsoleHandler(backend, options = {}) {
     if ((rootPage || selected?.action === "page") && (req.method === "GET" || head)) {
       try {
         if (rootPage && isProjectAware(backend)) {
+          const remembered = lastSessionCookie(req) || lastViewedSessionId;
+          if (remembered && typeof backend.read === "function") {
+            try {
+              const snapshot = await backend.read(remembered);
+              if (snapshot?.id) {
+                write(
+                  res,
+                  303,
+                  {
+                    Location: `${routes(basePath, snapshot.id, snapshot.project, snapshot.folder).canonical}${url.search}`,
+                    "Content-Type": "text/plain; charset=utf-8",
+                  },
+                  "See other\n",
+                  head,
+                );
+                return;
+              }
+            } catch {
+              /* fall through to the latest live session */
+            }
+          }
           const rows = typeof backend.list === "function" ? await backend.list() : [];
           if (rows.length > 0) {
             const location = `${routes(basePath, rows[0].id, rows[0].project, rows[0].folder).canonical}${url.search}`;
@@ -1311,18 +1453,20 @@ export function createConsoleHandler(backend, options = {}) {
             );
             return;
           }
-          const homeProject = encodeProject(backend.defaultProject);
-          const homeFolder = backend.defaultFolder ? `/${encodeProject(backend.defaultFolder)}` : "";
-          write(
-            res,
-            303,
-            {
-              Location: `${basePath}/project/${homeProject}${homeFolder}${url.search}`,
-              "Content-Type": "text/plain; charset=utf-8",
-            },
-            "See other\n",
-            head,
-          );
+          if (typeof backend.createHome === "function" || typeof backend.latestHome === "function") {
+            write(
+              res,
+              303,
+              {
+                Location: `${basePath}/home${url.search}`,
+                "Content-Type": "text/plain; charset=utf-8",
+              },
+              "See other\n",
+              head,
+            );
+            return;
+          }
+          text(res, 404, "No live session", head);
           return;
         }
         if (selected?.sessionId && isProjectAware(backend) && !projectRoute) {
@@ -1351,9 +1495,24 @@ export function createConsoleHandler(backend, options = {}) {
         const drawer = await drawerView(snapshot.project, url, false, snapshot.folder);
         const { renderPage } = await loadRender();
         const body = renderPage(consoleFoldWindow({ ...snapshot, drawer }), paths, pageAssetPaths());
-        write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, body, head);
+        if (snapshot.id) lastViewedSessionId = snapshot.id;
+        write(
+          res,
+          200,
+          rememberSessionHeaders(snapshot.id, { "Content-Type": "text/html; charset=utf-8" }),
+          body,
+          head,
+        );
       } catch (error) {
         if (await fallbackProjectsResponse(req, res, head, url)) return;
+        if (projectRoute?.project && isMissingSession(error)) {
+          try {
+            navigationResponse(req, res, await liveProjectLocation(projectRoute.project, projectRoute.folder, url.search), head);
+            return;
+          } catch {
+            /* fall through to the unavailable page */
+          }
+        }
         text(res, errorStatus(error), `DSH session unavailable: ${errorMessage(error)}`, head);
       }
       return;
@@ -1364,6 +1523,11 @@ export function createConsoleHandler(backend, options = {}) {
         write(res, 405, { Allow: "GET", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
         return;
       }
+      const bootstrapSession = url.searchParams.get("bootstrap") === "session";
+      const switchValue = String(url.searchParams.get("switch") ?? "");
+      const switchGeneration = /^\d+$/.test(switchValue) && Number.isSafeInteger(Number(switchValue))
+        ? Number(switchValue)
+        : switchValue;
       let snapshot;
       try {
         snapshot = await view(selected.sessionId);
@@ -1380,13 +1544,18 @@ export function createConsoleHandler(backend, options = {}) {
         return;
       }
       const paths = routes(basePath, snapshot.id, snapshot.project, snapshot.folder);
-      res.writeHead(200, {
+      const streamHeaders = {
         ...SECURITY_HEADERS,
         "Content-Type": "text/event-stream; charset=utf-8",
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
-      });
+      };
+      res.writeHead(200, bootstrapSession
+        ? rememberSessionHeaders(snapshot.id, streamHeaders)
+        : streamHeaders);
       res.flushHeaders?.();
+      res.socket?.setNoDelay?.(true);
+      if (bootstrapSession && snapshot.id) lastViewedSessionId = snapshot.id;
       let closed = false;
       let keepalive;
       let stop;
@@ -1409,7 +1578,9 @@ export function createConsoleHandler(backend, options = {}) {
       let initialized = false;
       let lastUiGeneration = readUiGeneration(liveAssets);
       let tick = Promise.resolve();
-      res.write(sseEvent("ui", lastUiGeneration));
+      let bootstrapping = bootstrapSession;
+      let bufferedObservation = null;
+      if (!bootstrapSession) res.write(sseEvent("ui", lastUiGeneration));
       const writeLiveFrames = (next) => {
         if (closed || res.destroyed || res.writableEnded) return;
         const liveUpdate = liveRender.liveTranscriptUpdate(liveState, next);
@@ -1420,7 +1591,7 @@ export function createConsoleHandler(backend, options = {}) {
         }
         if (typeof res.flush === "function") res.flush();
       };
-      stop = watch(selected.sessionId, (error, next) => {
+      const writeObservation = (error, next) => {
         if (closed || res.destroyed || res.writableEnded) {
           close();
           return;
@@ -1480,7 +1651,63 @@ export function createConsoleHandler(backend, options = {}) {
           settledKeys = append.keys;
           initialized = true;
         }).catch(() => {});
+      };
+      stop = watch(selected.sessionId, (error, next) => {
+        if (bootstrapping) {
+          bufferedObservation = { error, next };
+          return;
+        }
+        writeObservation(error, next);
       });
+      if (bootstrapSession) {
+        tick = tick.then(async () => {
+          if (closed || res.destroyed || res.writableEnded) return;
+          let render;
+          try {
+            render = await loadRender();
+          } catch (error) {
+            res.write(sseEvent("console-error", errorMessage(error)));
+            close();
+            return;
+          }
+          const surface = consoleFoldWindow(snapshot);
+          const append = render.renderSettledTranscriptAppend(null, surface);
+          liveState = render.liveTranscriptUpdate(null, surface).state;
+          fingerprints = render.regionFingerprints(surface);
+          settledKeys = append.keys;
+          initialized = true;
+          const meta = {
+            id: snapshot.id,
+            generation: switchGeneration,
+            canonical: paths.canonical,
+            project: snapshot.project ?? "",
+            folder: snapshot.folder ?? "",
+          };
+          res.write(sseEvent("switch-meta", JSON.stringify(meta)));
+          res.write(sseEvent("chrome", render.renderSessionRegion("chrome", surface, paths)));
+          res.write(sseEvent("transcript-reset", render.transcriptSettledInner(surface)));
+          res.write(sseEvent("live", render.renderLiveNodes(surface)));
+          res.write(sseEvent("queue", render.renderSessionRegion("queue", surface, paths)));
+          res.write(sseEvent("children", render.renderSessionRegion("children", surface, paths)));
+          res.write(sseEvent("popups", render.renderSessionRegion("popups", surface, paths)));
+          res.write(sseEvent("case", render.renderSessionRegion("case", surface, paths)));
+          res.write(sseEvent("composer-shell", render.renderComposer(surface, paths)));
+          res.write(sseEvent("switch-ready", JSON.stringify({
+            id: snapshot.id,
+            generation: switchGeneration,
+          })));
+          res.write(sseEvent("ui", lastUiGeneration));
+          if (typeof res.flush === "function") res.flush();
+          bootstrapping = false;
+          const buffered = bufferedObservation;
+          bufferedObservation = null;
+          if (buffered) writeObservation(buffered.error, buffered.next);
+        }).catch((error) => {
+          if (closed || res.destroyed || res.writableEnded) return;
+          res.write(sseEvent("console-error", errorMessage(error)));
+          close();
+        });
+      }
       keepalive = setInterval(() => {
         if (closed || res.destroyed || res.writableEnded) {
           close();
@@ -1583,6 +1810,10 @@ export function createConsoleHandler(backend, options = {}) {
       } catch (error) {
         findWork.delete(selected.sessionId);
         const message = errorMessage(error);
+        if (error?.code === "child-observe-only") {
+          text(res, errorStatus(error), message);
+          return;
+        }
         if (errorStatus(error) === 409 && isHtmx(req)) {
           try {
             await conflictResponse(req, res, selected.sessionId, message);
@@ -1647,6 +1878,10 @@ export function createConsoleHandler(backend, options = {}) {
         await mutationResponse(req, res, selected.sessionId, "", bundledMutationRegionNames);
       } catch (error) {
         const message = errorMessage(error);
+        if (error?.code === "child-observe-only") {
+          text(res, errorStatus(error), message);
+          return;
+        }
         if (isHtmx(req)) {
           try {
             await mutationResponse(req, res, selected.sessionId, message, bundledMutationRegionNames);
