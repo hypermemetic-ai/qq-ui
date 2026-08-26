@@ -991,7 +991,7 @@
       return [];
     }
   };
-  const paintSessionTokens = (sessions, currentId) => {
+  const paintSessionTokens = (sessions, currentId, projectItem = null) => {
     const nav = document.querySelector(".session-traversal");
     if (!nav) return;
     nav.replaceChildren();
@@ -1000,7 +1000,6 @@
       empty.className = "session-empty";
       empty.textContent = "no live sessions";
       nav.append(empty);
-      return;
     }
     for (const session of sessions) {
       const link = document.createElement("a");
@@ -1013,6 +1012,24 @@
       label.textContent = session.token || session.id;
       link.append(label);
       nav.append(link);
+    }
+    const create = document.querySelector("form.new-session");
+    if (create instanceof HTMLFormElement && !create.hidden) {
+      const form = document.createElement("form");
+      form.className = "new-session";
+      const project = projectItem?.dataset?.project || document.querySelector(".active-project-item[aria-current='page']")?.dataset?.project || "";
+      const folder = projectItem?.dataset?.folder || document.querySelector(".active-project-item[aria-current='page']")?.dataset?.folder || "";
+      const canonicalBase = project
+        ? `${consoleBasePath()}/project/${encodeURIComponent(project)}${folder ? `/${encodeURIComponent(folder)}` : ""}/sessions`
+        : create.action;
+      form.action = canonicalBase;
+      form.method = "post";
+      const button = document.createElement("button");
+      button.type = "submit";
+      button.setAttribute("aria-label", "New session");
+      button.innerHTML = '<svg class="banner-mark" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
+      form.append(button);
+      nav.append(form);
     }
   };
   const rememberOverlaySession = (projectItem, sessionId, href) => {
@@ -1166,12 +1183,6 @@
       history.replaceState(sessionHistoryState(liveSessionId, canonical), "", canonical);
       committedLocation = new URL(canonical, location.href).href;
     }
-    const navButton = document.querySelector("#composer-nav");
-    if (navButton instanceof HTMLElement && navMode()) {
-      navButton.setAttribute("aria-pressed", "true");
-      navButton.setAttribute("aria-label", "Switch to session mode");
-      navButton.textContent = "chat";
-    }
     if (state.exitWhenReady) {
       paintChairMode(false);
       commitSessionLocation(liveSessionId, meta.canonical || state.canonical, "push");
@@ -1187,7 +1198,7 @@
     const currentId = sessions.some((session) => session.id === overlaySessionId)
       ? overlaySessionId
       : (projectItem.dataset.sessionId || sessions[0]?.id || "");
-    paintSessionTokens(sessions, currentId);
+    paintSessionTokens(sessions, currentId, projectItem);
     const selected = sessions.find((session) => session.id === currentId) ?? sessions[0];
     const canonical = selectionCanonical(selected?.id || currentId, projectItem, selected?.href || projectItem.href);
     rememberOverlaySession(projectItem, selected?.id || currentId, canonical);
@@ -1221,12 +1232,6 @@
       if (prompt instanceof HTMLTextAreaElement && document.activeElement === prompt) prompt.blur();
     }
     syncDrawerChrome();
-    const button = document.querySelector("#composer-nav");
-    if (button instanceof HTMLElement) {
-      button.setAttribute("aria-pressed", String(nav));
-      button.setAttribute("aria-label", nav ? "Switch to session mode" : "Switch to navigation mode");
-      button.textContent = nav ? "chat" : "nav";
-    }
     if (!persist) return;
     try { sessionStorage.setItem(CHAIR_MODE_KEY, nav ? "nav" : "session"); } catch { /* private mode */ }
   };
@@ -1834,18 +1839,31 @@
     if (!gesture || !point) return;
     endSurfaceGesture();
     if (!gesture.horizontal || event.type === "touchcancel") {
-      if (gesture.horizontal) settleSurfaceDrag(gesture, gesture.mode === "close");
+      if (gesture.horizontal && gesture.kind === "drawer") settleSurfaceDrag(gesture, gesture.mode === "close");
       return;
     }
-    const travel = Math.abs(gesture.distance - (gesture.startDistance ?? 0));
-    if (travel < 12) {
-      settleSurfaceDrag(gesture, gesture.mode === "close");
+    if (gesture.kind === "nav") {
+      const dx = point.clientX - gesture.x;
+      const releaseDelay = performance.now() - gesture.lastAt;
+      const velocity = releaseDelay <= 120 ? gesture.velocity : 0;
+      if (gesture.mode === "open") {
+        if (dx >= 30 || velocity >= 0.25) applyChairMode("nav");
+      } else if (gesture.mode === "close") {
+        if (dx <= -30 || velocity <= -0.25) commitOverlaySession();
+      }
       return;
     }
-    const releaseDelay = performance.now() - gesture.lastAt;
-    const velocity = releaseDelay <= 120 ? gesture.velocity : 0;
-    const projectedDistance = gesture.distance + (-velocity) * 320;
-    settleSurfaceDrag(gesture, projectedDistance >= gesture.hiddenDistance * .42);
+    if (gesture.kind === "drawer") {
+      const travel = Math.abs(gesture.distance - (gesture.startDistance ?? 0));
+      if (travel < 12) {
+        settleSurfaceDrag(gesture, gesture.mode === "close");
+        return;
+      }
+      const releaseDelay = performance.now() - gesture.lastAt;
+      const velocity = releaseDelay <= 120 ? gesture.velocity : 0;
+      const projectedDistance = gesture.distance + (-velocity) * 320;
+      settleSurfaceDrag(gesture, projectedDistance >= gesture.hiddenDistance * .42);
+    }
   }
   function moveSurfaceGesture(event) {
     const gesture = surfaceGesture;
@@ -1863,7 +1881,6 @@
     const dy = point.clientY - gesture.y;
     const absoluteX = Math.abs(dx);
     const absoluteY = Math.abs(dy);
-    const closing = gesture.mode === "close";
     gesture.samples.push({ x: point.clientX, at: now });
     const cutoff = now - 120;
     while (gesture.samples.length > 1 && gesture.samples[0].at < cutoff) gesture.samples.shift();
@@ -1872,39 +1889,76 @@
         endSurfaceGesture();
         return;
       }
-      if (closing) {
+      if (gesture.kind === "nav") {
+        const closeDx = dx;
+        if (closeDx > 8) {
+          endSurfaceGesture();
+          return;
+        }
+        if (closeDx > -10 || absoluteX <= absoluteY * 1.45) return;
+        gesture.horizontal = true;
+      } else if (gesture.kind === "drawer") {
         const closeDx = -dx;
         if (closeDx > 8) {
           endSurfaceGesture();
           return;
         }
         if (closeDx > -10 || absoluteX <= absoluteY * 1.45) return;
-      } else if (dx >= 0 || absoluteX < 10 || absoluteX <= absoluteY * 1.45) return;
-      const panel = projectDrawer();
-      if (!panel) {
-        endSurfaceGesture();
-        return;
+        const panel = projectDrawer();
+        if (!panel) {
+          endSurfaceGesture();
+          return;
+        }
+        gesture.horizontal = true;
+        gesture.width = Math.max(1, panel.getBoundingClientRect().width || 1);
+        gesture.hiddenDistance = gesture.width * 1.05;
+        gesture.startDistance = gesture.hiddenDistance;
+      } else {
+        if (dx < -10 && absoluteX > absoluteY * 1.45) {
+          const panel = projectDrawer();
+          if (!panel) {
+            endSurfaceGesture();
+            return;
+          }
+          gesture.kind = "drawer";
+          gesture.mode = "open";
+          gesture.horizontal = true;
+          gesture.width = Math.max(1, panel.getBoundingClientRect().width || 1);
+          gesture.hiddenDistance = gesture.width * 1.05;
+          gesture.startDistance = 0;
+        } else if (dx > 10 && absoluteX > absoluteY * 1.45) {
+          gesture.kind = "nav";
+          gesture.mode = "open";
+          gesture.horizontal = true;
+        } else {
+          return;
+        }
       }
-      gesture.horizontal = true;
-      gesture.width = Math.max(1, panel.getBoundingClientRect().width || 1);
-      gesture.hiddenDistance = gesture.width * 1.05;
-      gesture.startDistance = closing ? gesture.hiddenDistance : 0;
     }
-    const openDx = -dx;
-    if (closing) {
-      if (absoluteY > Math.max(18, absoluteX * .68)) {
+    if (gesture.kind === "drawer") {
+      const closing = gesture.mode === "close";
+      const openDx = -dx;
+      if (closing) {
+        if (absoluteY > Math.max(18, absoluteX * .68)) {
+          cancelSurfaceGesture();
+          return;
+        }
+      } else if (openDx <= 0 || absoluteY > Math.max(18, openDx * .68)) {
         cancelSurfaceGesture();
         return;
       }
-    } else if (openDx <= 0 || absoluteY > Math.max(18, openDx * .68)) {
-      cancelSurfaceGesture();
-      return;
+      event.preventDefault();
+      const anchor = gesture.samples[0];
+      gesture.velocity = (point.clientX - anchor.x) / Math.max(1, now - anchor.at);
+      gesture.lastAt = now;
+      applySurfaceDrag(gesture, closing ? gesture.startDistance + openDx : openDx);
+    } else if (gesture.kind === "nav") {
+      event.preventDefault();
+      const anchor = gesture.samples[0];
+      gesture.velocity = (point.clientX - anchor.x) / Math.max(1, now - anchor.at);
+      gesture.lastAt = now;
+      gesture.distance = dx;
     }
-    event.preventDefault();
-    const anchor = gesture.samples[0];
-    gesture.velocity = (point.clientX - anchor.x) / Math.max(1, now - anchor.at);
-    gesture.lastAt = now;
-    applySurfaceDrag(gesture, closing ? gesture.startDistance + openDx : openDx);
   }
   document.addEventListener("touchstart", (event) => {
     if (surfaceGesture) cancelSurfaceGesture();
@@ -1913,7 +1967,21 @@
     if (!target || event.defaultPrevented || event.touches.length !== 1 || desktopChair()) return;
     const point = event.touches[0];
     const now = performance.now();
-    if (drawerIsOpen()) {
+    if (navMode()) {
+      surfaceGesture = {
+        kind: "nav",
+        mode: "close",
+        id: point.identifier,
+        x: point.clientX,
+        y: point.clientY,
+        lastAt: now,
+        distance: 0,
+        startDistance: 0,
+        velocity: 0,
+        horizontal: false,
+        samples: [{ x: point.clientX, at: now }],
+      };
+    } else if (drawerIsOpen()) {
       if (!target.closest("#project-drawer, #project-drawer-backdrop")) return;
       surfaceGesture = {
         kind: "drawer",
@@ -1928,10 +1996,10 @@
         horizontal: false,
         samples: [{ x: point.clientX, at: now }],
       };
-    } else if (!projectDrawer() || navMode() || surfaceGestureBlocked(target)) return;
+    } else if (surfaceGestureBlocked(target)) return;
     else {
       surfaceGesture = {
-        kind: "drawer",
+        kind: "surface",
         mode: "open",
         id: point.identifier,
         x: point.clientX,
@@ -2054,9 +2122,14 @@
       dismiss.closest(".workflows-popup")?.remove();
       return;
     }
-    if (target?.closest("#composer-nav")) {
+    if (!desktopChair() && target?.closest(".session-heading-start, .session-project, .session-mobile-id, .session-place")) {
       event.preventDefault();
       toggleChairMode();
+      return;
+    }
+    if (navMode() && !target?.closest("#project-rail, .session-traversal")) {
+      event.preventDefault();
+      commitOverlaySession();
       return;
     }
     const arm = target?.closest(".close-arm");

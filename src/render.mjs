@@ -619,9 +619,9 @@ function sessionNavigation(snapshot, paths) {
     const href = sessionSwitchHref(paths, session.id);
     return `<a class="session-token${current ? " session-token-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(session.id)}"><span>${escapeHtml(sessionToken(session))}</span></a>`;
   }).join("");
-  const tokens = `<nav class="session-traversal" aria-label="Sessions" aria-keyshortcuts="ArrowLeft ArrowRight">${links || '<span class="session-empty">no live sessions</span>'}</nav>`;
   const child = isChildSession(snapshot);
-  const create = child ? "" : newSessionForm(paths.createSession, "session-background-actions");
+  const create = child || !paths.createSession ? "" : newSessionForm(paths.createSession);
+  const tokens = `<nav class="session-traversal" aria-label="Sessions" aria-keyshortcuts="ArrowLeft ArrowRight">${links || '<span class="session-empty">no live sessions</span>'}${create}</nav>`;
   const close = child || !paths.close
     ? ""
     : `<form id="close-session" class="close-session session-background-actions" action="${escapeHtml(paths.close)}" method="post" hidden>
@@ -1009,7 +1009,6 @@ function composer(paths, snapshot) {
           </svg>
         </button>
         ${regionShell("composer-turn-controls", "composer-turn-controls", "composer", composerControls(running, findWork), true)}
-        <button id="composer-nav" type="button" aria-pressed="false" aria-label="Switch to navigation mode" title="Navigation">nav</button>
         ${composerCaseButton(snapshot)}
         <button id="composer-submit" type="submit" aria-label="Send"><svg class="composer-enter" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19 6v5H7.83l2.58-2.59L9 7 4 12l5 5 1.41-1.41L7.83 13H21V6h-2z"/></svg></button>
       </div>
