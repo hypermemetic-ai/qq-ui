@@ -1266,6 +1266,13 @@
     }
     void navigatePage(value, current);
   };
+  const closeMobileRailAfterAction = () => {
+    if (desktopChair() || !navMode()) return;
+    commitOverlaySession();
+    // A live switch commits its destination when bootstrap is ready, but the
+    // mobile rail should not remain open while that work finishes.
+    if (navMode()) paintChairMode(false);
+  };
   const modifiedClick = (event) => event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
   const applyChairMode = (mode, persist = true) => {
     if (mode === "nav") {
@@ -2052,6 +2059,15 @@
     if (select.value) openSession(select.value);
   });
 
+  document.addEventListener("submit", (event) => {
+    const form = event.target;
+    if (desktopChair() || !navMode() || !(form instanceof HTMLFormElement)
+      || !form.matches(".session-traversal .new-session")) return;
+    // Observe the native submission rather than replacing the button's action.
+    // This keeps pointer and keyboard activation single-shot.
+    paintChairMode(false);
+  });
+
   document.addEventListener("pointerdown", (event) => {
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
     if (!(link instanceof HTMLAnchorElement)) return;
@@ -2070,8 +2086,11 @@
     const picker = link.matches(".active-project-item, .projects-choice, .session-token");
     if (!url) return;
     if (!picker && url.pathname === location.pathname && url.search === location.search) return;
+    const closesMobileRail = picker && !desktopChair() && navMode()
+      && Boolean(link.closest("#project-rail, .session-traversal"));
     event.preventDefault();
     void chairGo(url.href, link);
+    if (closesMobileRail) closeMobileRailAfterAction();
   }, true);
   document.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;
@@ -2124,7 +2143,9 @@
       dismiss.closest(".workflows-popup")?.remove();
       return;
     }
-    if (!desktopChair() && target?.closest(".session-heading-start, .session-project, .session-mobile-id, .session-place")) {
+    const traversalAction = target?.closest(".session-traversal a[href], .session-traversal button, .session-traversal input, .session-traversal select, .session-traversal textarea, .session-traversal [role=button], .session-traversal [role=link]");
+    if (!desktopChair() && !traversalAction
+      && target?.closest(".session-heading-start, .session-project, .session-mobile-id, .session-place")) {
       event.preventDefault();
       toggleChairMode();
       return;
