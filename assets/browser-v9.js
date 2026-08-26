@@ -1274,7 +1274,7 @@
 
   const surfaceGestureBlocked = (target) => {
     if (documentViewerIsOpen()) return true;
-    if (target.closest("#project-drawer, #project-rail, #project-drawer-backdrop, .document-viewer, .message-text, form, a, button, input, textarea, select, option, label, summary, audio, video, [contenteditable]:not([contenteditable=\"false\"]), [role=button], [role=link], [role=textbox], [role=slider], [role=spinbutton], [role=switch], [role=tab], [role=checkbox], [role=radio]")) return true;
+    if (target.closest("#project-drawer, #project-rail, #project-drawer-backdrop, .document-viewer, form, a, button, input, textarea, select, option, label, summary, audio, video, [contenteditable]:not([contenteditable=\"false\"]), [role=button], [role=link], [role=textbox], [role=slider], [role=spinbutton], [role=switch], [role=tab], [role=checkbox], [role=radio]")) return true;
     for (let node = target; node; node = node.parentElement) {
       if (!(node instanceof HTMLElement)) continue;
       const style = getComputedStyle(node);
