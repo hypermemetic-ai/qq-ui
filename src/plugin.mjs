@@ -36,6 +36,7 @@ export function apply(ctx, config) {
       String(form?.get?.("approvalId") ?? ""),
       String(form?.get?.("outcome") ?? ""),
     ),
+    caseFileFor: (sessionId) => workflowsOf()?.caseFile?.(sessionId),
     offerFor: (sessionId) => workflowsOf()?.offer?.(sessionId),
     chooseOffer: (sessionId, choice) => workflowsOf()?.choose?.(sessionId, { choice }),
     loginSheetFor: (sessionId) => modelsOf()?.sheetFor?.(sessionId),

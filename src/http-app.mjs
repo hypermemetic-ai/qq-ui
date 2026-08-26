@@ -624,6 +624,7 @@ export function createConsoleHandler(backend, options = {}) {
   const chooseOffer = typeof options.chooseOffer === "function" ? options.chooseOffer : null;
   const readApproval = typeof options.approvalFor === "function" ? options.approvalFor : null;
   const decideApproval = typeof options.decideApproval === "function" ? options.decideApproval : null;
+  const readCaseFile = typeof options.caseFileFor === "function" ? options.caseFileFor : null;
   const readLoginSheet = typeof options.loginSheetFor === "function" ? options.loginSheetFor : null;
   const readOverlay = typeof options.overlayFor === "function" ? options.overlayFor : null;
   const chooseOverlay = typeof options.chooseOverlay === "function" ? options.chooseOverlay : null;
@@ -643,6 +644,14 @@ export function createConsoleHandler(backend, options = {}) {
       }
     }
     if (!snapshot?.id) return next;
+    if (readCaseFile) {
+      try {
+        const caseFile = await readCaseFile(snapshot.id);
+        if (caseFile) next = { ...next, caseFile };
+      } catch {
+        /* working memory casefile is optional */
+      }
+    }
     if (readOffer) {
       try {
         const offer = await readOffer(snapshot.id);
@@ -782,7 +791,7 @@ export function createConsoleHandler(backend, options = {}) {
   }
 
   const SHEET_KEYS = Object.freeze([
-    "offer", "approval", "loginSheet", "overlay", "progress",
+    "caseFile", "offer", "approval", "loginSheet", "overlay", "progress",
     "sessionMode", "workflows", "activeProjects", "findWork",
   ]);
 
@@ -804,7 +813,7 @@ export function createConsoleHandler(backend, options = {}) {
     }
     const intervalMs = extra.intervalMs ?? ssePollMs;
     const hasSheets = Boolean(
-      readOffer || readOverlay || readProgress || readApproval || readLoginSheet
+      readCaseFile || readOffer || readOverlay || readProgress || readApproval || readLoginSheet
       || inFindMode || sessionModeFor || workflowsFor,
     );
     let cancelled = false;
@@ -868,6 +877,36 @@ export function createConsoleHandler(backend, options = {}) {
       "See other\n",
       head,
     );
+  }
+
+  async function fallbackProjectsResponse(req, res, head = false, url = null) {
+    const search = url?.search ?? "";
+    if (typeof backend.createProjects === "function") {
+      try {
+        const projects = await backend.createProjects();
+        navigationResponse(req, res, `${routes(basePath, projects.id).canonical}${search}`, head);
+        return true;
+      } catch {}
+    }
+    if (typeof backend.list === "function") {
+      try {
+        const rows = await backend.list();
+        if (rows.length > 0) {
+          const location = `${routes(basePath, rows[0].id, rows[0].project, rows[0].folder).canonical}${search}`;
+          navigationResponse(req, res, location, head);
+          return true;
+        }
+      } catch {}
+    }
+    if (isProjectAware(backend)) {
+      try {
+        const homeProject = encodeProject(backend.defaultProject);
+        const homeFolder = backend.defaultFolder ? `/${encodeProject(backend.defaultFolder)}` : "";
+        navigationResponse(req, res, `${basePath}/project/${homeProject}${homeFolder}${search}`, head);
+        return true;
+      } catch {}
+    }
+    return false;
   }
 
   async function conflictResponse(req, res, sessionId, message) {
@@ -1062,6 +1101,7 @@ export function createConsoleHandler(backend, options = {}) {
         const sessionId = String(url.searchParams.get("session") ?? "");
         navigationResponse(req, res, await liveLocation(sessionId), head);
       } catch (error) {
+        if (await fallbackProjectsResponse(req, res, head, url)) return;
         text(res, errorStatus(error), `DSH session unavailable: ${errorMessage(error)}`, head);
       }
       return;
@@ -1313,6 +1353,7 @@ export function createConsoleHandler(backend, options = {}) {
         const body = renderPage(consoleFoldWindow({ ...snapshot, drawer }), paths, pageAssetPaths());
         write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, body, head);
       } catch (error) {
+        if (await fallbackProjectsResponse(req, res, head, url)) return;
         text(res, errorStatus(error), `DSH session unavailable: ${errorMessage(error)}`, head);
       }
       return;
