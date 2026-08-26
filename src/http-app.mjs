@@ -546,8 +546,7 @@ function isFileAware(backend) {
   return isProjectAware(backend)
     && typeof backend.listProjectFiles === "function"
     && typeof backend.readProjectFile === "function"
-    && typeof backend.openProjectFile === "function"
-    && typeof backend.downloadProjectFile === "function";
+    && typeof backend.openProjectFile === "function";
 }
 
 function contentDisposition(mode, name) {
@@ -1361,11 +1360,14 @@ export function createConsoleHandler(backend, options = {}) {
           return;
         }
         try {
-          const downloaded = await backend.downloadProjectFile(projectRoute.project, groupedFilePath(projectRoute), { includeBody: !head });
+          const downloadHandler = typeof backend.downloadProjectFile === "function"
+            ? backend.downloadProjectFile.bind(backend)
+            : backend.openProjectFile.bind(backend);
+          const downloaded = await downloadHandler(projectRoute.project, groupedFilePath(projectRoute), { includeBody: !head });
           write(res, 200, {
-            "Content-Type": downloaded.mediaType,
+            "Content-Type": downloaded.mediaType ?? "application/octet-stream",
             "Content-Length": String(downloaded.size),
-            "Content-Disposition": contentDisposition(downloaded.disposition, downloaded.name),
+            "Content-Disposition": contentDisposition("attachment", downloaded.name),
           }, downloaded.body ?? Buffer.alloc(0), head);
         } catch (error) {
           text(res, errorStatus(error), errorMessage(error), head);
