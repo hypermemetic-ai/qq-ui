@@ -44,7 +44,7 @@ export function consoleFoldWindow(snapshot) {
 
 const SECURITY_HEADERS = Object.freeze({
   "Cache-Control": "no-store",
-  "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+  "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; media-src 'self' data:; connect-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   "Cross-Origin-Opener-Policy": "same-origin",
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
