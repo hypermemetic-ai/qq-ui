@@ -851,6 +851,93 @@
     const heading = viewer.querySelector("h1");
     if (heading instanceof HTMLElement) heading.focus({ preventScroll: true });
   };
+  const TOOL_INLINE_VIEWPORT_RATIO = 0.42;
+  const toolInlineLimit = () => {
+    const height = Number(window.visualViewport?.height)
+      || Number(window.innerHeight)
+      || Number(document.documentElement?.clientHeight)
+      || 720;
+    return height * TOOL_INLINE_VIEWPORT_RATIO;
+  };
+  const toolLayoutFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+  const measureToolBody = (card, body) => {
+    const rectWidth = Number(card.getBoundingClientRect?.().width)
+      || Number(card.clientWidth)
+      || Number(window.innerWidth)
+      || 320;
+    let horizontalPadding = 0;
+    try {
+      const style = getComputedStyle(card);
+      horizontalPadding = (Number.parseFloat(style.paddingLeft) || 0)
+        + (Number.parseFloat(style.paddingRight) || 0);
+    } catch { /* the full card width is a safe fallback */ }
+    card.style.setProperty("--tool-measure-width", `${Math.max(1, rectWidth - horizontalPadding)}px`);
+    card.classList.add("tool-measuring");
+    const height = Math.max(Number(body.scrollHeight) || 0, Number(body.getBoundingClientRect?.().height) || 0);
+    card.classList.remove("tool-measuring");
+    card.style.removeProperty("--tool-measure-width");
+    return height;
+  };
+  const toolOutputUrl = (card) => {
+    const href = String(card.dataset.toolHref ?? "").replace(/^\/+/, "");
+    if (!href) return null;
+    const transcript = card.closest("#transcript[data-tool-base]");
+    const base = String(transcript?.dataset.toolBase ?? "") || location.pathname;
+    const url = new URL(base, location.href);
+    url.hash = "";
+    url.search = "";
+    url.pathname = `${url.pathname.replace(/\/+$/, "")}/${href}`;
+    return url;
+  };
+  const presentToolBody = async (card, summary) => {
+    const body = card.querySelector(":scope > .tool-body");
+    if (!(body instanceof HTMLElement)) return;
+    await toolLayoutFrame();
+    if (!card.isConnected) return;
+    const viewer = body.querySelector(".document-viewer-dialog");
+    const inlineHeight = measureToolBody(card, body) + 12;
+    if (!(viewer instanceof HTMLElement) || inlineHeight <= toolInlineLimit()) {
+      card.open = true;
+      return;
+    }
+    card.open = false;
+    openDocumentViewer(viewer, summary);
+  };
+  const loadToolBody = async (card) => {
+    const body = card.querySelector(":scope > .tool-body");
+    if (!(body instanceof HTMLElement)) return false;
+    if (card.dataset.toolBodyState === "loaded") return true;
+    if (card.dataset.toolBodyState === "loading") return false;
+    const url = toolOutputUrl(card);
+    if (!url) return false;
+    card.dataset.toolBodyState = "loading";
+    card.setAttribute("aria-busy", "true");
+    try {
+      const response = await fetch(url, { headers: { Accept: "text/html", "HX-Request": "true" } });
+      if (!response.ok) throw new Error(`tool output ${response.status}`);
+      body.innerHTML = await response.text();
+      globalThis.htmx?.process?.(body);
+      card.dataset.toolBodyState = "loaded";
+      return true;
+    } catch {
+      body.innerHTML = '<p class="tool-empty">Tool output is unavailable</p>';
+      card.dataset.toolBodyState = "error";
+      return false;
+    } finally {
+      card.removeAttribute("aria-busy");
+    }
+  };
+  const activateToolCard = async (card, summary) => {
+    if (!(card instanceof HTMLDetailsElement)) return;
+    if (card.open) {
+      card.open = false;
+      return;
+    }
+    const ready = await loadToolBody(card);
+    if (!card.isConnected) return;
+    if (!ready && card.dataset.toolBodyState !== "error") return;
+    await presentToolBody(card, summary);
+  };
   document.addEventListener("close", (event) => {
     const viewer = event.target;
     if (!(viewer instanceof HTMLElement) || !viewer.classList.contains("document-viewer-dialog")) return;
@@ -1354,6 +1441,14 @@
 
   document.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;
+    const toolCard = target?.closest(".message-tool[data-tool-output]");
+    const toolSummary = toolCard?.querySelector(":scope > summary[data-tool-output-summary]");
+    if (toolCard instanceof HTMLDetailsElement && toolSummary instanceof HTMLElement
+      && (!toolCard.open || toolSummary.contains(target))) {
+      event.preventDefault();
+      void activateToolCard(toolCard, toolSummary);
+      return;
+    }
     const fileLink = target?.closest("a.drawer-entry[data-file-path][href]");
     if (fileLink instanceof HTMLElement && event.button === 0 && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
       recordFileReturnFromLink(fileLink);

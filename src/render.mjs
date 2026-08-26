@@ -179,14 +179,13 @@ function renderToolDocument(node, title, seq) {
   const card = node?.resultView?.card ?? node?.callView?.card ?? "generic";
   const kind = card === "terminal" ? "terminal" : card === "diff" ? "diff" : card === "read" ? "code" : "text";
   const id = `tool-output-${safeDocumentId(node?.callId ?? seq)}`;
-  return `<div class="tool-output-actions">${renderDocumentViewerTrigger(id, "Open full output")}</div>
-    ${renderDocumentViewer({
-      title,
-      identity: "complete tool output",
-      kind,
-      language: node?.resultView?.language,
-      text,
-    }, { mode: "dialog", id, closeLabel: "Close" })}`;
+  return renderDocumentViewer({
+    title,
+    identity: "complete tool output",
+    kind,
+    language: node?.resultView?.language,
+    text,
+  }, { mode: "dialog", id, closeLabel: "Close" });
 }
 
 function contextLabel(source) {
@@ -267,14 +266,15 @@ function renderConversationNode(node) {
                 : "Failed";
     const tone = failed || stopped ? "bad" : node.status === "running" ? "running" : "ok";
     const callId = String(node.callId ?? "");
-    const lazy = !node.expanded && node.status !== "running" && callId.length > 0;
-    const href = lazy && node.inner !== true ? `tool/${encodeURIComponent(callId)}` : "";
-    const lazyAttrs = lazy && href
-      ? ` hx-get="${escapeHtml(href)}" hx-trigger="toggle once" hx-target="find .tool-body" hx-swap="innerHTML"`
+    const interactive = node.status !== "running";
+    const deferred = interactive && !node.expanded && callId.length > 0;
+    const href = deferred ? `tool/${encodeURIComponent(callId)}` : "";
+    const interactionAttrs = interactive
+      ? ` data-tool-output data-tool-body-state="${deferred ? "idle" : "loaded"}"${href ? ` data-tool-href="${escapeHtml(href)}"` : ""}`
       : "";
-    const body = lazy ? "" : renderToolBody(node);
-    return `<details class="message message-tool tool-${escapeHtml(node.status)} tool-tone-${tone}" data-seq="${seq}" data-call-id="${escapeHtml(callId)}" data-card="${escapeHtml(card)}"${node.expanded ? " open" : ""}${lazyAttrs}>
-      <summary><strong>${escapeHtml(title)}</strong><span class="tool-status tool-status-${tone}">${escapeHtml(status)}</span>${argument}</summary>
+    const body = deferred ? "" : renderToolBody(node);
+    return `<details class="message message-tool tool-${escapeHtml(node.status)} tool-tone-${tone}" data-seq="${seq}" data-call-id="${escapeHtml(callId)}" data-card="${escapeHtml(card)}"${node.expanded ? " open" : ""}${interactionAttrs}>
+      <summary${interactive ? ' data-tool-output-summary' : ""}><strong>${escapeHtml(title)}</strong><span class="tool-status tool-status-${tone}">${escapeHtml(status)}</span>${argument}</summary>
       <div class="message-body tool-body">${body}</div>
     </details>`;
   }
@@ -1544,7 +1544,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   const popups = regionShell("session-popups", "session-popups", "popups", renderPopups(snapshot, paths, notice), true);
   if (emptyProject) return `${chrome}${popups}`;
   return `${chrome}
-    <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
+    <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" data-tool-base="${escapeHtml(paths.canonical ?? "")}" hx-history="false">
       <div id="transcript-log" class="transcript-log" hx-history="false">
         ${regionShell("transcript-settled", "transcript-settled", "transcript-reset", transcriptSettledInner(snapshot), true)}
         <div id="transcript-live" class="transcript-live">${renderTranscriptLive(snapshot, paths)}</div>
@@ -1818,7 +1818,8 @@ export function renderDocumentViewer(document, options = {}) {
   </main>`;
 }
 
-/** The only built-in entry affordance; content surfaces are never tap targets. */
+/** Explicit entry affordance for standalone document previews. Tool output cards
+ *  use their summary row as the adaptive inline/full-screen entry. */
 export function renderDocumentViewerTrigger(viewerId, label = "Open full screen") {
   return `<button class="document-viewer-trigger" type="button" aria-haspopup="dialog" aria-controls="${escapeHtml(viewerId)}" data-document-viewer-open="${escapeHtml(viewerId)}">${escapeHtml(label)}</button>`;
 }

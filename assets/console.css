@@ -936,6 +936,28 @@ details.session-menu.session-controls {
   gap: .2rem .45rem;
   color: #a8bac5;
 }
+.message-tool[data-tool-output]:not([open]) { cursor: pointer; }
+.message-tool:not([open]) > summary {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+.message-tool:not([open]) > summary strong {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.message-tool:not([open]) > summary .tool-argument { flex: 1 1 0; }
+.message-tool[data-tool-body-state="loading"] > summary { opacity: .72; }
+.message-tool.tool-measuring > .tool-body {
+  display: block !important;
+  position: fixed;
+  top: 0;
+  left: -200vw;
+  width: var(--tool-measure-width, 20rem);
+  visibility: hidden;
+  pointer-events: none;
+}
 .message-tool > summary strong {
   color: #d8e5ec;
   font-weight: 700;
@@ -976,20 +998,6 @@ details.session-menu.session-controls {
   margin: .55rem 0 0;
   color: #8fa0aa;
   font-size: .72rem;
-}
-.tool-output-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: .65rem;
-}
-.message-tool .tool-output-actions .document-viewer-trigger {
-  min-height: 2.15rem;
-  padding: .38rem .58rem;
-  border-color: rgba(184, 207, 218, .18);
-  background: rgba(0, 0, 0, .18);
-  color: #c4d5dd;
-  font-size: .7rem;
-  font-weight: 650;
 }
 .tool-empty { margin: 0; color: #8fa0aa; font-style: italic; }
 

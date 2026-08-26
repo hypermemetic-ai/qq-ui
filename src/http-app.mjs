@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  codeDispatchNodes as bundledCodeDispatchNodes,
   renderDocumentViewerProofPage as bundledRenderDocumentViewerProofPage,
   renderFilePage as bundledRenderFilePage,
   renderPage as bundledRenderPage,
@@ -873,6 +874,7 @@ export function createConsoleHandler(backend, options = {}) {
   }
 
   const bundledRender = Object.freeze({
+    codeDispatchNodes: bundledCodeDispatchNodes,
     renderDocumentViewerProofPage: bundledRenderDocumentViewerProofPage,
     renderFilePage: bundledRenderFilePage,
     renderPage: bundledRenderPage,
@@ -1452,13 +1454,14 @@ export function createConsoleHandler(backend, options = {}) {
           return;
         }
         const callId = String(selected.callId ?? "");
+        const { codeDispatchNodes, renderToolBody } = await loadRender();
         const node = (snapshot.conversation?.nodes ?? []).find((item) =>
-          item?.kind === "tool" && item.callId === callId);
+          item?.kind === "tool" && item.callId === callId)
+          ?? codeDispatchNodes(snapshot.events).find((item) => item.callId === callId);
         if (!node) {
           text(res, 404, "qq: tool output is not available", head);
           return;
         }
-        const { renderToolBody } = await loadRender();
         write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, renderToolBody(node), head);
       } catch (error) {
         text(res, errorStatus(error), `DSH session unavailable: ${errorMessage(error)}`, head);
