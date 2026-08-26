@@ -22,12 +22,65 @@ function safeType(value) {
   return typeof value === "string" ? value : "unknown";
 }
 
+function mediaAttachment(block) {
+  return block?.attachment && typeof block.attachment === "object" ? block.attachment : {};
+}
+
+function declaredMediaType(block) {
+  const attachment = mediaAttachment(block);
+  const value = String(block?.mediaType ?? block?.mimeType ?? attachment.mediaType ?? attachment.mimeType ?? "").trim();
+  if (/^(?:image|audio|video)\/[a-z0-9.+-]+$/i.test(value)) return value.toLowerCase();
+  if (block?.type === "image") return "image/png";
+  return "";
+}
+
+function safeMediaSource(block) {
+  const attachment = mediaAttachment(block);
+  const mediaType = declaredMediaType(block);
+  const data = block?.data ?? attachment.data;
+  if (mediaType && typeof data === "string" && data.trim()) {
+    const base64 = data.replace(/\s+/g, "");
+    if (/^[a-z0-9+/]+=*$/i.test(base64)) return `data:${mediaType};base64,${base64}`;
+  }
+  const candidate = String(
+    block?.url ?? block?.src ?? attachment.url ?? attachment.src
+      ?? (typeof block?.attachment === "string" ? block.attachment : ""),
+  ).trim();
+  if (!candidate || /^(?:javascript|vbscript):/i.test(candidate)) return "";
+  if (/^data:/i.test(candidate)) {
+    return /^data:(?:image|audio|video)\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+$/i.test(candidate) ? candidate : "";
+  }
+  return /^(?:https?:\/\/|\/|\.\.?\/)/i.test(candidate) ? candidate : "";
+}
+
+function mediaDimensions(block) {
+  const attachment = mediaAttachment(block);
+  const width = Number(block?.width ?? attachment.width);
+  const height = Number(block?.height ?? attachment.height);
+  return {
+    width: Number.isFinite(width) && width > 0 ? Math.round(width) : null,
+    height: Number.isFinite(height) && height > 0 ? Math.round(height) : null,
+  };
+}
+
+function mediaBlock(block, scope = "attachment") {
+  const type = block?.type === "audio" || block?.type === "video" ? block.type : "image";
+  const source = safeMediaSource(block);
+  const { width, height } = mediaDimensions(block);
+  const dimensions = width && height ? ` ${width}×${height}` : "";
+  if (!source) return `<p class="attachment ${escapeHtml(scope)}-media-unavailable">${escapeHtml(`${type[0].toUpperCase()}${type.slice(1)} attachment${dimensions}`)}</p>`;
+  const dimensionAttrs = `${width ? ` width="${width}"` : ""}${height ? ` height="${height}"` : ""}`;
+  const label = String(block?.name ?? mediaAttachment(block).name ?? `${type} attachment`);
+  const content = type === "image"
+    ? `<img src="${escapeHtml(source)}" alt="${escapeHtml(label)}" decoding="async"${dimensionAttrs}>`
+    : type === "video"
+      ? `<video src="${escapeHtml(source)}" controls preload="metadata" playsinline${dimensionAttrs}>${escapeHtml(label)}</video>`
+      : `<audio src="${escapeHtml(source)}" controls preload="metadata">${escapeHtml(label)}</audio>`;
+  return `<figure class="attachment ${escapeHtml(scope)}-media ${escapeHtml(scope)}-media-${type}">${content}</figure>`;
+}
+
 function attachmentBlock(block) {
-  const attachment = block?.attachment ?? {};
-  const dimensions = Number.isFinite(attachment.width) && Number.isFinite(attachment.height)
-    ? ` ${attachment.width}×${attachment.height}`
-    : "";
-  return `<p class="attachment">Image attachment${escapeHtml(dimensions)}</p>`;
+  return mediaBlock(block);
 }
 
 function contentBlocks(blocks, { markdown = false, empty = true } = {}) {
@@ -141,15 +194,21 @@ function toolViewBlocks(view) {
   return [];
 }
 
+function isMediaBlock(block) {
+  return block?.type === "image" || block?.type === "audio" || block?.type === "video";
+}
+
 function toolContentBlocks(node) {
   const preferred = toolViewBlocks(node?.resultView);
-  return preferred.length > 0 ? preferred : (Array.isArray(node?.content) ? node.content : []);
+  const content = Array.isArray(node?.content) ? node.content : [];
+  if (content.some(isMediaBlock)) return content;
+  return preferred.length > 0 ? preferred : content;
 }
 
 function renderToolContent(node) {
   const rendered = toolContentBlocks(node).map((block) => {
     if (block?.type === "text") return renderToolText(block.text ?? "");
-    if (block?.type === "image") return attachmentBlock(block);
+    if (isMediaBlock(block)) return mediaBlock(block, "tool");
     return `<p class="empty-content">Unsupported tool output: ${escapeHtml(safeType(block?.type))}</p>`;
   }).join("");
   if (rendered) return rendered;
@@ -170,14 +229,17 @@ function safeDocumentId(value) {
 }
 
 function renderToolDocument(node, title, seq) {
-  const text = toolContentBlocks(node)
+  const blocks = toolContentBlocks(node);
+  const text = blocks
     .filter((block) => block?.type === "text")
     .map((block) => String(block.text ?? ""))
     .filter(Boolean)
     .join("\n\n");
-  if (!text) return "";
+  const media = blocks.filter(isMediaBlock);
+  if (!text && media.length === 0) return "";
   const card = node?.resultView?.card ?? node?.callView?.card ?? "generic";
-  const kind = card === "terminal" ? "terminal" : card === "diff" ? "diff" : card === "read" ? "code" : "text";
+  const textKind = card === "terminal" ? "terminal" : card === "diff" ? "diff" : card === "read" ? "code" : "text";
+  const kind = media.length > 0 ? (text ? "mixed" : "media") : textKind;
   const id = `tool-output-${safeDocumentId(node?.callId ?? seq)}`;
   return renderDocumentViewer({
     title,
@@ -185,6 +247,8 @@ function renderToolDocument(node, title, seq) {
     kind,
     language: node?.resultView?.language,
     text,
+    blocks,
+    textKind,
   }, { mode: "dialog", id, closeLabel: "Close" });
 }
 
@@ -1769,21 +1833,38 @@ function documentState(document) {
   </section>`;
 }
 
-function renderDocumentContent(document) {
-  const state = documentState(document);
-  if (state) return state;
-  const kind = String(document?.kind ?? "text").toLocaleLowerCase("en-US");
-  const text = String(document?.text ?? "");
+function renderDocumentText(text, kind, language) {
   if (kind === "markdown") return renderMarkdownText(text, "document-prose");
   if (kind === "code" || kind === "diff") {
-    return renderHighlightedCode(text, kind === "diff" ? "diff" : document?.language);
+    return renderHighlightedCode(text, kind === "diff" ? "diff" : language);
   }
   return `<pre class="document-pre document-${kind === "terminal" ? "terminal" : "text"}">${escapeHtml(text)}</pre>`;
 }
 
+function renderDocumentBlocks(document) {
+  const kind = String(document?.textKind ?? document?.kind ?? "text").toLocaleLowerCase("en-US");
+  return document.blocks.map((block) => {
+    if (block?.type === "text") {
+      return `<section class="document-block document-block-text">${renderDocumentText(String(block.text ?? ""), kind, document?.language)}</section>`;
+    }
+    if (isMediaBlock(block)) {
+      return `<section class="document-block document-block-media">${mediaBlock(block, "document")}</section>`;
+    }
+    return `<p class="document-state">Unsupported document content: ${escapeHtml(safeType(block?.type))}</p>`;
+  }).join("");
+}
+
+function renderDocumentContent(document) {
+  const state = documentState(document);
+  if (state) return state;
+  if (Array.isArray(document?.blocks) && document.blocks.length > 0) return renderDocumentBlocks(document);
+  const kind = String(document?.kind ?? "text").toLocaleLowerCase("en-US");
+  return renderDocumentText(String(document?.text ?? ""), kind, document?.language);
+}
+
 /**
  * Plugin-blind full-screen reader. Callers provide only identity, state, and a
- * content kind: markdown, text, code, diff, or terminal.
+ * content kind: markdown, text, code, diff, terminal, media, or mixed.
  */
 export function renderDocumentViewer(document, options = {}) {
   const mode = options.mode === "dialog" ? "dialog" : "page";

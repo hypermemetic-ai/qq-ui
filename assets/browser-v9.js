@@ -859,7 +859,53 @@
       || 720;
     return height * TOOL_INLINE_VIEWPORT_RATIO;
   };
+  const TOOL_MEDIA_WAIT_MS = 1_600;
   const toolLayoutFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+  const boundedToolMediaWait = (promise) => new Promise((resolve) => {
+    let settled = false;
+    const finish = (ready) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(ready);
+    };
+    const timer = setTimeout(() => finish(false), TOOL_MEDIA_WAIT_MS);
+    Promise.resolve(promise).then(() => finish(true), () => finish(true));
+  });
+  const waitForToolMediaEvent = (node, readyEvents) => new Promise((resolve) => {
+    let settled = false;
+    const done = (ready) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      for (const eventName of readyEvents) node.removeEventListener(eventName, onReady);
+      node.removeEventListener("error", onReady);
+      resolve(ready);
+    };
+    const onReady = () => done(true);
+    const timer = setTimeout(() => done(false), TOOL_MEDIA_WAIT_MS);
+    for (const eventName of readyEvents) node.addEventListener(eventName, onReady, { once: true });
+    node.addEventListener("error", onReady, { once: true });
+  });
+  const waitForToolMediaNode = async (node) => {
+    if (node.tagName === "IMG") {
+      if (!node.complete && !await waitForToolMediaEvent(node, ["load"])) return false;
+      if (typeof node.decode === "function") {
+        try { return boundedToolMediaWait(node.decode()); } catch { return true; }
+      }
+      return true;
+    }
+    if (node.tagName === "VIDEO" && Number(node.readyState) < 1) {
+      return waitForToolMediaEvent(node, ["loadedmetadata"]);
+    }
+    return true;
+  };
+  const waitForToolMedia = async (body) => {
+    const readiness = await Promise.all(
+      [...body.querySelectorAll("img, video")].map(waitForToolMediaNode),
+    );
+    return readiness.every(Boolean);
+  };
   const measureToolBody = (card, body) => {
     const rectWidth = Number(card.getBoundingClientRect?.().width)
       || Number(card.clientWidth)
@@ -893,8 +939,15 @@
     const body = card.querySelector(":scope > .tool-body");
     if (!(body instanceof HTMLElement)) return;
     await toolLayoutFrame();
+    const mediaReady = await waitForToolMedia(body);
+    await toolLayoutFrame();
     if (!card.isConnected) return;
     const viewer = body.querySelector(".document-viewer-dialog");
+    if (!mediaReady && viewer instanceof HTMLElement) {
+      card.open = false;
+      openDocumentViewer(viewer, summary);
+      return;
+    }
     const inlineHeight = measureToolBody(card, body) + 12;
     if (!(viewer instanceof HTMLElement) || inlineHeight <= toolInlineLimit()) {
       card.open = true;
@@ -911,7 +964,6 @@
     const url = toolOutputUrl(card);
     if (!url) return false;
     card.dataset.toolBodyState = "loading";
-    card.setAttribute("aria-busy", "true");
     try {
       const response = await fetch(url, { headers: { Accept: "text/html", "HX-Request": "true" } });
       if (!response.ok) throw new Error(`tool output ${response.status}`);
@@ -923,8 +975,6 @@
       body.innerHTML = '<p class="tool-empty">Tool output is unavailable</p>';
       card.dataset.toolBodyState = "error";
       return false;
-    } finally {
-      card.removeAttribute("aria-busy");
     }
   };
   const activateToolCard = async (card, summary) => {
@@ -933,10 +983,16 @@
       card.open = false;
       return;
     }
-    const ready = await loadToolBody(card);
-    if (!card.isConnected) return;
-    if (!ready && card.dataset.toolBodyState !== "error") return;
-    await presentToolBody(card, summary);
+    if (card.dataset.toolBodyState === "loading") return;
+    card.setAttribute("aria-busy", "true");
+    try {
+      const ready = await loadToolBody(card);
+      if (!card.isConnected) return;
+      if (!ready && card.dataset.toolBodyState !== "error") return;
+      await presentToolBody(card, summary);
+    } finally {
+      card.removeAttribute("aria-busy");
+    }
   };
   document.addEventListener("close", (event) => {
     const viewer = event.target;

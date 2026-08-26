@@ -999,6 +999,21 @@ details.session-menu.session-controls {
   color: #8fa0aa;
   font-size: .72rem;
 }
+.tool-media {
+  width: 100%;
+  margin: .6rem 0 0;
+  color: inherit;
+  font-style: normal;
+}
+.tool-output-preview + .tool-media { margin-top: .75rem; }
+.tool-media img,
+.tool-media video {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+}
+.tool-media audio { display: block; width: 100%; }
 .tool-empty { margin: 0; color: #8fa0aa; font-style: italic; }
 
 .message-command:not(details),
@@ -2082,6 +2097,21 @@ body.document-page {
   padding: clamp(.9rem, 2.5vw, 1.8rem) max(clamp(.85rem, 2.5vw, 1.8rem), env(safe-area-inset-right)) max(clamp(1rem, 3vw, 2rem), env(safe-area-inset-bottom)) max(clamp(.85rem, 2.5vw, 1.8rem), env(safe-area-inset-left));
   overflow-x: hidden;
 }
+.document-block + .document-block { margin-top: 1rem; }
+.document-media {
+  width: 100%;
+  margin: 0;
+  color: inherit;
+  font-style: normal;
+}
+.document-media img,
+.document-media video {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+}
+.document-media audio { display: block; width: 100%; }
 
 .document-prose,
 .document-code,
