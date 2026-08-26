@@ -816,6 +816,9 @@ details.session-menu.session-controls {
 .message-body { min-width: 0; }
 
 .message-text {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.55;
