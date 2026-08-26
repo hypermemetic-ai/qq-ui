@@ -930,7 +930,7 @@ export function renderProjectRail(snapshot, paths, inert = false) {
   const rootUrl = `${paths.canonical}${paths.canonical.includes("?") ? "&" : "?"}drawer=~`;
   return `<aside id="project-rail" class="project-rail" aria-label="Projects" data-current-project="${escapeHtml(currentProject)}" data-current-folder="${escapeHtml(currentFolder)}" data-current-active="${snapshot?.id ? "true" : "false"}"${inert ? " inert" : ""}>
     <nav class="active-projects" aria-label="Active projects" aria-keyshortcuts="ArrowUp ArrowDown"><ol>${rows || '<li class="session-empty">no live projects</li>'}</ol></nav>
-    ${sessions.create}${sessions.close}
+    ${sessions.close}
     <section id="inactive-project-tree" class="inactive-project-tree" aria-label="Files" aria-keyshortcuts="F" data-root-url="${escapeHtml(rootUrl)}" hidden>
       <div class="project-tree-columns" role="tree" aria-label="Project files"><span class="project-tree-loading" role="status">···</span></div>
     </section>
