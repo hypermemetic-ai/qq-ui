@@ -533,7 +533,23 @@ function isHtmx(req) {
 }
 
 function isNavigateResult(result) {
-  return Boolean(result && typeof result === "object" && result.kind === "navigate" && result.id);
+  return Boolean(
+    result
+    && typeof result === "object"
+    && result.kind === "navigate"
+    && (result.id || (result.action === "close" && result.id === null)),
+  );
+}
+
+function closeNavigationLocation(basePath, backend, closed) {
+  return closed.id
+    ? routes(basePath, closed.id, closed.project, closed.folder).canonical
+    : routes(
+        basePath,
+        "",
+        closed.project || (isProjectAware(backend) ? backend.defaultProject : undefined),
+        closed.folder || (isProjectAware(backend) ? backend.defaultFolder : undefined),
+      ).canonical;
 }
 
 function sseEvent(name, data) {
@@ -1500,7 +1516,10 @@ export function createConsoleHandler(backend, options = {}) {
           const result = await backend.prompt(selected.sessionId, prompt);
           findWork.delete(selected.sessionId);
           if (isNavigateResult(result)) {
-            navigationResponse(req, res, routes(basePath, result.id, result.project, result.folder).canonical);
+            const next = result.action === "close"
+              ? closeNavigationLocation(basePath, backend, result)
+              : routes(basePath, result.id, result.project, result.folder).canonical;
+            navigationResponse(req, res, next);
             return;
           }
           await mutationResponse(req, res, selected.sessionId, typeof result === "string" ? result : "");
@@ -1599,15 +1618,7 @@ export function createConsoleHandler(backend, options = {}) {
         }
         await readForm(req);
         const closed = await backend.close(selected.sessionId);
-        const next = closed.id
-          ? routes(basePath, closed.id, closed.project, closed.folder).canonical
-          : routes(
-            basePath,
-            "",
-            closed.project || (isProjectAware(backend) ? backend.defaultProject : undefined),
-            closed.folder || (isProjectAware(backend) ? backend.defaultFolder : undefined),
-          ).canonical;
-        navigationResponse(req, res, next);
+        navigationResponse(req, res, closeNavigationLocation(basePath, backend, closed));
       } catch (error) {
         const message = errorMessage(error);
         if (errorStatus(error) === 409) {
