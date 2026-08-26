@@ -1877,7 +1877,9 @@ export function renderProjectDrawer(drawer, paths, livePlaces = new Set()) {
       ? `<span aria-current="page" title="${escapeHtml(label)}">${escapeHtml(label)}</span>${startSession}`
       : `<a href="${escapeHtml(href)}" title="${escapeHtml(label)}">${escapeHtml(label)}</a>`}</li>`;
   }).join("");
-  const title = "files";
+  const title = paths.projectsSession
+    ? `<a href="${escapeHtml(paths.projectsSession)}">projects</a>`
+    : "projects";
   const upPath = drawer.scope === "projects"
     ? ""
     : drawer.path
