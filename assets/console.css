@@ -982,6 +982,7 @@ details.session-menu.session-controls {
 .message-context > summary {
   position: relative;
   justify-content: flex-start;
+  flex-wrap: nowrap;
   gap: .45rem;
   min-width: 0;
   padding-left: 1rem;
@@ -1001,28 +1002,16 @@ details.session-menu.session-controls {
   transform-origin: center;
 }
 .message-context[open] > summary::before { transform: translateY(-50%) rotate(45deg); }
-.context-heading {
-  display: inline-flex;
-  flex: 0 1 auto;
-  align-items: baseline;
-  gap: .35rem;
-  max-width: min(45%, 16rem);
-  min-width: 0;
-  overflow: hidden;
-}
-.context-heading strong {
+.message-context > summary strong {
+  flex-shrink: 0;
+  min-width: auto;
   color: #b8b8b8;
   font-size: .78rem;
-}
-.context-producer {
-  min-width: 0;
-  overflow: hidden;
-  color: #727272;
-  text-overflow: ellipsis;
+  overflow-wrap: normal;
   white-space: nowrap;
 }
 .context-preview {
-  flex: 1 1 auto;
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   color: #929292;
@@ -1031,48 +1020,23 @@ details.session-menu.session-controls {
 }
 .message-context > summary time { flex: 0 0 auto; }
 .message-context .message-body {
-  padding-left: 1rem;
-  color: #f0f0f0;
+  width: 100%;
+  color: #f4f4f4;
   font-size: 1rem;
 }
 .message-context .message-text {
   color: inherit;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 .context-sender {
   margin: 0 0 .4rem;
-  color: #888;
+  color: #aaa;
   font-size: .78rem;
   line-height: 1.4;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
-.context-sender span { color: #aaa; }
-.context-source {
-  display: grid;
-  gap: .2rem;
-  margin: .65rem 0 0;
-  padding-top: .55rem;
-  border-top: 1px solid #1d1d1d;
-  color: #888;
-  font-size: .76rem;
-  line-height: 1.35;
-}
-.context-source div {
-  display: grid;
-  grid-template-columns: minmax(4rem, 9rem) minmax(0, 1fr);
-  gap: .6rem;
-}
-.context-source dt {
-  color: #666;
-  overflow-wrap: anywhere;
-}
-.context-source dd {
-  min-width: 0;
-  margin: 0;
-  color: #999;
-  overflow-wrap: anywhere;
-}
+.context-sender span { color: inherit; }
 
 .message-text {
   white-space: pre-wrap;

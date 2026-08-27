@@ -258,7 +258,6 @@ function renderToolDocument(node, title, seq) {
 
 const CONTEXT_PREVIEW_CHARS = 140;
 const SHORT_NOTICE_CHARS = 240;
-const CONTEXT_SOURCE_HEADER_KEYS = new Set(["kind", "plugin", "summary"]);
 
 function contextText(content) {
   if (!Array.isArray(content)) return "";
@@ -270,9 +269,22 @@ function contextText(content) {
 }
 
 function contextForm(source) {
-  if (source?.form === "relay") return { key: "relay", label: "Relay" };
-  if (source?.form === "notice") return { key: "notice", label: "Notice" };
-  return { key: "inject", label: "Inject" };
+  switch (source?.form) {
+    case "relay":
+      return { key: "relay", label: "Relay" };
+    case "notice":
+      return { key: "notice", label: "Notice" };
+    case "snapshot":
+      return { key: "snapshot", label: "Context" };
+    case "instructions":
+      return { key: "instructions", label: "Instructions" };
+    case "catalog":
+      return { key: "catalog", label: "Catalog" };
+    case "recall":
+      return { key: "recall", label: "Recall" };
+    default:
+      return { key: "context", label: "Context" };
+  }
 }
 
 function oneLinePreview(value) {
@@ -288,11 +300,18 @@ function oneLinePreview(value) {
 
 // This is a model-facing plain-text contract, not HTML for the console. Only
 // its mail-body is operator content; the surrounding instructions stay hidden.
-function wrappedMailBody(text) {
-  const envelope = String(text ?? "").trim().match(
-    /^<agent-mail(?:\s[^>]*)?>\s*[\s\S]*?<mail-body>\s*([\s\S]*?)\s*<\/mail-body>[\s\S]*?<\/agent-mail>$/i,
+function wrappedRelay(text) {
+  const value = String(text ?? "").trim();
+  const envelope = value.match(
+    /^<agent-mail(?:\s([^>]*))?>\s*[\s\S]*?<mail-body>\s*([\s\S]*?)\s*<\/mail-body>[\s\S]*?<\/agent-mail>$/i,
   );
-  return envelope ? envelope[1].trim() : null;
+  if (!envelope) return null;
+  const attributes = envelope[1] ?? "";
+  const senderSessionId = attributes.match(/(?:^|\s)from=(?:"([^"]*)"|'([^']*)')/i);
+  return {
+    body: envelope[2].trim(),
+    senderSessionId: String(senderSessionId?.[1] ?? senderSessionId?.[2] ?? "").trim(),
+  };
 }
 
 function legacyRelay(text) {
@@ -309,59 +328,43 @@ function legacyRelay(text) {
   };
 }
 
-function compactSourceValue(value) {
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
-  if (value === null) return "null";
-  if (!value || typeof value !== "object") return "";
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "";
-  }
-}
-
-function renderContextSource(source) {
-  if (!source || typeof source !== "object") return "";
-  const rows = Object.entries(source).flatMap(([key, value]) => {
-    if (CONTEXT_SOURCE_HEADER_KEYS.has(key)) return [];
-    const display = compactSourceValue(value);
-    return display ? [[key, display]] : [];
-  });
-  if (rows.length === 0) return "";
-  return `<dl class="context-source">${rows.map(([key, value]) => (
-    `<div><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></div>`
-  )).join("")}</dl>`;
-}
-
 function contextCard(node) {
   const source = node?.source && typeof node.source === "object" ? node.source : {};
   const form = contextForm(source);
-  const plugin = String(source.plugin ?? source.kind ?? "system").trim() || "system";
   const modelText = contextText(node?.content);
   let body = modelText.trim();
   let senderSessionId = "";
+  let preview = "";
   if (form.key === "relay") {
-    const wrapped = wrappedMailBody(modelText);
-    const legacy = legacyRelay(wrapped ?? modelText);
-    body = legacy.body;
-    senderSessionId = String(source.senderSessionId ?? "").trim() || legacy.senderSessionId;
+    const wrapped = wrappedRelay(modelText);
+    if (wrapped) {
+      body = wrapped.body;
+      senderSessionId = String(source.senderSessionId ?? "").trim() || wrapped.senderSessionId;
+    } else {
+      const legacy = legacyRelay(modelText);
+      body = legacy.body;
+      senderSessionId = String(source.senderSessionId ?? "").trim() || legacy.senderSessionId;
+    }
+    preview = oneLinePreview(body);
+  } else if (form.key === "notice") {
+    preview = oneLinePreview(source.summary);
   }
-  const preferredPreview = String(source.summary ?? "").trim();
-  const preview = oneLinePreview(preferredPreview || body || `${form.label} from ${plugin}`);
   const open = form.key === "relay" || (form.key === "notice" && body.length <= SHORT_NOTICE_CHARS);
-  return { source, form, plugin, body, senderSessionId, preview, open };
+  return { form, body, senderSessionId, preview, open };
 }
 
 function renderContextCard(node, seq) {
   const card = contextCard(node);
-  const source = card.form.key === "inject" ? renderContextSource(card.source) : "";
   const sender = card.senderSessionId
     ? `<p class="context-sender">From <span>${escapeHtml(card.senderSessionId)}</span></p>`
     : "";
+  const preview = card.preview
+    ? `<span class="context-preview">${escapeHtml(card.preview)}</span>`
+    : "";
   const body = card.body ? renderMessageText(card.body) : '<p class="empty-content">No message content</p>';
   return `<details class="message message-context context-${card.form.key}" data-seq="${seq}"${card.open ? " open" : ""}>
-      <summary><span class="context-heading"><strong>${escapeHtml(card.form.label)}</strong><span class="context-producer">${escapeHtml(card.plugin)}</span></span><span class="context-preview">${escapeHtml(card.preview)}</span>${timeElement(node.time)}</summary>
-      <div class="message-body context-body">${sender}${body}${source}</div>
+      <summary><strong>${escapeHtml(card.form.label)}</strong>${preview}${timeElement(node.time)}</summary>
+      <div class="message-body context-body">${sender}${body}</div>
     </details>`;
 }
 
