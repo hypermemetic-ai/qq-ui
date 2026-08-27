@@ -979,6 +979,101 @@ details.session-menu.session-controls {
 .message time { color: #555; }
 .message-body { min-width: 0; }
 
+.message-context > summary {
+  position: relative;
+  justify-content: flex-start;
+  gap: .45rem;
+  min-width: 0;
+  padding-left: 1rem;
+  list-style: none;
+}
+.message-context > summary::-webkit-details-marker { display: none; }
+.message-context > summary::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: .15rem;
+  width: .38rem;
+  height: .38rem;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-50%) rotate(-45deg);
+  transform-origin: center;
+}
+.message-context[open] > summary::before { transform: translateY(-50%) rotate(45deg); }
+.context-heading {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: baseline;
+  gap: .35rem;
+  max-width: min(45%, 16rem);
+  min-width: 0;
+  overflow: hidden;
+}
+.context-heading strong {
+  color: #b8b8b8;
+  font-size: .78rem;
+}
+.context-producer {
+  min-width: 0;
+  overflow: hidden;
+  color: #727272;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.context-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: #929292;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.message-context > summary time { flex: 0 0 auto; }
+.message-context .message-body {
+  padding-left: 1rem;
+  color: #f0f0f0;
+  font-size: 1rem;
+}
+.message-context .message-text {
+  color: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.context-sender {
+  margin: 0 0 .4rem;
+  color: #888;
+  font-size: .78rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.context-sender span { color: #aaa; }
+.context-source {
+  display: grid;
+  gap: .2rem;
+  margin: .65rem 0 0;
+  padding-top: .55rem;
+  border-top: 1px solid #1d1d1d;
+  color: #888;
+  font-size: .76rem;
+  line-height: 1.35;
+}
+.context-source div {
+  display: grid;
+  grid-template-columns: minmax(4rem, 9rem) minmax(0, 1fr);
+  gap: .6rem;
+}
+.context-source dt {
+  color: #666;
+  overflow-wrap: anywhere;
+}
+.context-source dd {
+  min-width: 0;
+  margin: 0;
+  color: #999;
+  overflow-wrap: anywhere;
+}
+
 .message-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

@@ -256,8 +256,113 @@ function renderToolDocument(node, title, seq) {
   }, { mode: "dialog", id, closeLabel: "Close" });
 }
 
-function contextLabel(source) {
-  return source?.plugin ?? source?.kind ?? "system";
+const CONTEXT_PREVIEW_CHARS = 140;
+const SHORT_NOTICE_CHARS = 240;
+const CONTEXT_SOURCE_HEADER_KEYS = new Set(["kind", "plugin", "summary"]);
+
+function contextText(content) {
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((block) => block?.type === "text")
+    .map((block) => String(block.text ?? ""))
+    .join("\n")
+    .replace(/\r\n?/g, "\n");
+}
+
+function contextForm(source) {
+  if (source?.form === "relay") return { key: "relay", label: "Relay" };
+  if (source?.form === "notice") return { key: "notice", label: "Notice" };
+  return { key: "inject", label: "Inject" };
+}
+
+function oneLinePreview(value) {
+  const line = String(value ?? "")
+    .split("\n")
+    .find((candidate) => candidate.trim())
+    ?.replace(/\s+/g, " ")
+    .trim() ?? "";
+  const characters = [...line];
+  if (characters.length <= CONTEXT_PREVIEW_CHARS) return line;
+  return `${characters.slice(0, CONTEXT_PREVIEW_CHARS - 1).join("").trimEnd()}…`;
+}
+
+// This is a model-facing plain-text contract, not HTML for the console. Only
+// its mail-body is operator content; the surrounding instructions stay hidden.
+function wrappedMailBody(text) {
+  const envelope = String(text ?? "").trim().match(
+    /^<agent-mail(?:\s[^>]*)?>\s*[\s\S]*?<mail-body>\s*([\s\S]*?)\s*<\/mail-body>[\s\S]*?<\/agent-mail>$/i,
+  );
+  return envelope ? envelope[1].trim() : null;
+}
+
+function legacyRelay(text) {
+  const value = String(text ?? "");
+  const match = value.match(/^\s*From session\s+([^\n:]+)\s*:[ \t]*([^\n]*)(?:\n|$)/i);
+  if (!match) return { body: value.trim(), senderSessionId: "" };
+  const canonical = match[1].match(/session-[0-9a-f-]+/i)?.[0];
+  const address = match[1].replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const inlineBody = match[2].trim();
+  const remainingBody = value.slice(match[0].length).trim();
+  return {
+    body: [inlineBody, remainingBody].filter(Boolean).join("\n"),
+    senderSessionId: canonical ?? address,
+  };
+}
+
+function compactSourceValue(value) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value === null) return "null";
+  if (!value || typeof value !== "object") return "";
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+}
+
+function renderContextSource(source) {
+  if (!source || typeof source !== "object") return "";
+  const rows = Object.entries(source).flatMap(([key, value]) => {
+    if (CONTEXT_SOURCE_HEADER_KEYS.has(key)) return [];
+    const display = compactSourceValue(value);
+    return display ? [[key, display]] : [];
+  });
+  if (rows.length === 0) return "";
+  return `<dl class="context-source">${rows.map(([key, value]) => (
+    `<div><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></div>`
+  )).join("")}</dl>`;
+}
+
+function contextCard(node) {
+  const source = node?.source && typeof node.source === "object" ? node.source : {};
+  const form = contextForm(source);
+  const plugin = String(source.plugin ?? source.kind ?? "system").trim() || "system";
+  const modelText = contextText(node?.content);
+  let body = modelText.trim();
+  let senderSessionId = "";
+  if (form.key === "relay") {
+    const wrapped = wrappedMailBody(modelText);
+    const legacy = legacyRelay(wrapped ?? modelText);
+    body = legacy.body;
+    senderSessionId = String(source.senderSessionId ?? "").trim() || legacy.senderSessionId;
+  }
+  const preferredPreview = String(source.summary ?? "").trim();
+  const preview = oneLinePreview(preferredPreview || body || `${form.label} from ${plugin}`);
+  const open = form.key === "relay" || (form.key === "notice" && body.length <= SHORT_NOTICE_CHARS);
+  return { source, form, plugin, body, senderSessionId, preview, open };
+}
+
+function renderContextCard(node, seq) {
+  const card = contextCard(node);
+  const source = card.form.key === "inject" ? renderContextSource(card.source) : "";
+  const sender = card.senderSessionId
+    ? `<p class="context-sender">From <span>${escapeHtml(card.senderSessionId)}</span></p>`
+    : "";
+  const body = card.body ? renderMessageText(card.body) : '<p class="empty-content">No message content</p>';
+  return `<details class="message message-context context-${card.form.key}" data-seq="${seq}"${card.open ? " open" : ""}>
+      <summary><span class="context-heading"><strong>${escapeHtml(card.form.label)}</strong><span class="context-producer">${escapeHtml(card.plugin)}</span></span><span class="context-preview">${escapeHtml(card.preview)}</span>${timeElement(node.time)}</summary>
+      <div class="message-body context-body">${sender}${body}${source}</div>
+    </details>`;
 }
 
 function renderConversationNode(node) {
@@ -272,10 +377,7 @@ function renderConversationNode(node) {
     </article>`;
   }
   if (node?.kind === "context") {
-    return `<details class="message message-context" data-seq="${seq}">
-      <summary><strong>${escapeHtml(contextLabel(node.source))}</strong>${timeElement(node.time)}</summary>
-      <div class="message-body">${contentBlocks(node.content)}</div>
-    </details>`;
+    return renderContextCard(node, seq);
   }
   if (node?.kind === "assistant") {
     const streaming = node.status === "streaming";
