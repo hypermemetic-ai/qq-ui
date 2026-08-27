@@ -7,7 +7,14 @@
 // Operator POST may grant `allowed-once` or reject; abort and plugin dispose
 // settle `cancelled`. Grants apply only to the requested action.
 
-import { isRootOperatorAgent } from "../../core/src/session.mjs";
+function isRootOperatorAgent(agent) {
+  const session = agent?.session;
+  if (!/^session-[0-9a-f-]{36}$/i.test(session?.id ?? "")) return false;
+  const header = session.header ?? {};
+  if (header.parentSession || header.parentId || header.parent || header.parent_session) return false;
+  if (header.origin === "subagent" || String(session.id).includes("/")) return false;
+  return true;
+}
 
 const OPERATOR_OUTCOMES = new Set(["allowed-once", "rejected"]);
 

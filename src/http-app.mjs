@@ -241,7 +241,7 @@ export function readUiGeneration(liveAssets = false) {
   return liveAssets ? liveGenerationStamp() : BOOT_GENERATION;
 }
 
-const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL("../", import.meta.url));
 const BOOT_STARTED_AT = new Date().toISOString();
 
 export function readUiRevision(cwd = REPO_ROOT) {

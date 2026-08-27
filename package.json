@@ -19,7 +19,7 @@
     "README.md"
   ],
   "dependencies": {
-    "@hypermemetic-ai/qq": "file:../core",
+    "@hypermemetic-ai/qq": "file:../qq-core",
     "highlight.js": "11.12.0",
     "markdown-it": "15.0.0"
   }
