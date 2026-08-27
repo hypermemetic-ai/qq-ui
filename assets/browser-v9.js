@@ -1154,13 +1154,22 @@
       treeRequest += 1;
     }
   };
+  const canLiveSwitch = () => {
+    const stream = document.querySelector("#console-stream");
+    if (!(stream instanceof HTMLElement)
+      || !liveSessionId
+      || !stream.hasAttribute("sse-connect")
+      || !document.querySelector("#switch-meta")
+      || !document.querySelector("#switch-ready")) return false;
+    return true;
+  };
   const liveSwitch = (sessionId, { history: historyMode = "none", exitWhenReady = false, canonical = "" } = {}) => {
     const id = String(sessionId || "");
     if (!id || (id === liveSessionId && !bootstrapSwitch)) return false;
+    if (!canLiveSwitch()) return false;
+    const stream = document.querySelector("#console-stream");
     if (!bootstrapSwitch) persistComposerDraft(composer(), liveSessionId);
     resetAdoptedSession();
-    const stream = document.querySelector("#console-stream");
-    if (!(stream instanceof HTMLElement)) return false;
     const generation = ++switchGeneration;
     const events = sessionEventsUrl(id);
     const bootstrap = `${events}?bootstrap=session&switch=${generation}`;
@@ -1216,6 +1225,10 @@
     }
     return true;
   };
+  const liveSwitchOrNavigate = (sessionId, options, href) => {
+    if (canLiveSwitch()) liveSwitch(sessionId, options);
+    else void navigatePage(href);
+  };
   const selectOverlayProject = (item) => {
     const projectItem = overlayProjectItem(item);
     if (!(projectItem instanceof HTMLElement)) return false;
@@ -1229,10 +1242,10 @@
         return true;
       }
       rememberOverlaySession(projectItem, sessionId, projectItem.href);
-      liveSwitch(sessionId, {
+      liveSwitchOrNavigate(sessionId, {
         history: navMode() ? "none" : "push",
         canonical: projectItem.href,
-      });
+      }, projectItem.href);
       return true;
     }
     const sessions = readProjectSessions(projectItem);
@@ -1243,12 +1256,14 @@
     const selected = sessions.find((session) => session.id === currentId) ?? sessions[0];
     const canonical = selectionCanonical(selected?.id || currentId, projectItem, selected?.href || projectItem.href);
     rememberOverlaySession(projectItem, selected?.id || currentId, canonical);
-    if (selected?.id) {
-      liveSwitch(selected.id, {
-        history: navMode() ? "none" : "push",
-        canonical,
-      });
+    if (!selected?.id) {
+      void navigatePage(projectItem.href);
+      return true;
     }
+    liveSwitchOrNavigate(selected.id, {
+      history: navMode() ? "none" : "push",
+      canonical,
+    }, projectItem.href);
     return true;
   };
   const selectOverlaySession = (link) => {
@@ -1294,14 +1309,8 @@
   };
   const chairGo = (value, current = null) => {
     if (current instanceof Element) {
-      if (current.matches(".active-project-item, .projects-choice")) {
-        selectOverlayProject(current);
-        return;
-      }
-      if (current.matches(LIVE_SESSION_PICKER)) {
-        selectOverlaySession(current);
-        return;
-      }
+      if (current.matches(".active-project-item, .projects-choice") && selectOverlayProject(current)) return;
+      if (current.matches(LIVE_SESSION_PICKER) && selectOverlaySession(current)) return;
     }
     void navigatePage(value, current);
   };

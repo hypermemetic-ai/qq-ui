@@ -570,15 +570,38 @@ function isNavigateResult(result) {
   );
 }
 
-function closeNavigationLocation(basePath, backend, closed) {
-  return closed.id
-    ? routes(basePath, closed.id, closed.project, closed.folder).canonical
-    : routes(
-        basePath,
-        "",
-        closed.project || (isProjectAware(backend) ? backend.defaultProject : undefined),
-        closed.folder || (isProjectAware(backend) ? backend.defaultFolder : undefined),
-      ).canonical;
+async function closeNavigationLocation(
+  basePath,
+  backend,
+  closed,
+  { closedSessionId = "", rememberedSessionIds = [] } = {},
+) {
+  if (closed?.id) {
+    return routes(basePath, closed.id, closed.project, closed.folder).canonical;
+  }
+
+  let remaining = [];
+  if (typeof backend.list === "function") {
+    try {
+      const listed = await backend.list();
+      if (Array.isArray(listed)) remaining = listed;
+    } catch {
+      /* the projects chair remains a safe fallback when discovery is unavailable */
+    }
+  }
+  const closingId = String(closedSessionId ?? "");
+  const liveRow = (sessionId) => {
+    const id = String(sessionId ?? "");
+    if (!id || id === closingId) return undefined;
+    return remaining.find((row) => String(row?.id ?? "") === id);
+  };
+  for (const remembered of rememberedSessionIds) {
+    const row = liveRow(remembered);
+    if (row) return routes(basePath, row.id, row.project, row.folder).canonical;
+  }
+  const first = remaining.find((row) => row?.id && String(row.id) !== closingId);
+  if (first) return routes(basePath, first.id, first.project, first.folder).canonical;
+  return `${basePath}/projects`;
 }
 
 function sseEvent(name, data) {
@@ -1805,7 +1828,10 @@ export function createConsoleHandler(backend, options = {}) {
           findWork.delete(selected.sessionId);
           if (isNavigateResult(result)) {
             const next = result.action === "close"
-              ? closeNavigationLocation(basePath, backend, result)
+              ? await closeNavigationLocation(basePath, backend, result, {
+                  closedSessionId: selected.sessionId,
+                  rememberedSessionIds: [lastSessionCookie(req), lastViewedSessionId],
+                })
               : routes(basePath, result.id, result.project, result.folder).canonical;
             navigationResponse(req, res, next);
             return;
@@ -1915,7 +1941,11 @@ export function createConsoleHandler(backend, options = {}) {
         }
         await readForm(req);
         const closed = await backend.close(selected.sessionId);
-        navigationResponse(req, res, closeNavigationLocation(basePath, backend, closed));
+        const location = await closeNavigationLocation(basePath, backend, closed, {
+          closedSessionId: selected.sessionId,
+          rememberedSessionIds: [lastSessionCookie(req), lastViewedSessionId],
+        });
+        navigationResponse(req, res, location);
       } catch (error) {
         const message = errorMessage(error);
         if (errorStatus(error) === 409) {

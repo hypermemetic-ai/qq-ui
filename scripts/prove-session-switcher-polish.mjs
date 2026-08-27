@@ -219,7 +219,294 @@ await withFixture(async (base) => {
   );
 });
 
+const closeAId = "session-63a11000-0000-4000-8000-0000000000da";
+const closeBId = "session-63a11000-0000-4000-8000-0000000000db";
+const closeCId = "session-63a11000-0000-4000-8000-0000000000dc";
+
+function closeFixture(initialRows, { promptCloses = false } = {}) {
+  let rows = structuredClone(initialRows);
+  const snapshots = () => new Map(rows.map((row) => [row.id, {
+    ...row,
+    events: [],
+    agentStatus: "idle",
+    conversation: { nodes: [], pending: [] },
+  }]));
+  const closeSession = async (id) => {
+    const closing = rows.find((row) => row.id === id);
+    rows = rows.filter((row) => row.id !== id);
+    const sameProject = rows.find((row) => (
+      row.project === closing?.project && String(row.folder ?? "") === String(closing?.folder ?? "")
+    ));
+    return {
+      id: sameProject?.id ?? "",
+      project: closing?.project ?? "",
+      ...(closing?.folder ? { folder: closing.folder } : {}),
+    };
+  };
+  const backend = {
+    defaultProject: "alpha",
+    defaultFolder: "",
+    listProjects: () => [
+      { name: "alpha", label: "alpha" },
+      { name: "bravo", label: "bravo" },
+      { name: "charlie", label: "charlie" },
+      { name: "empty", label: "empty" },
+    ],
+    read: async (id) => {
+      const snapshot = snapshots().get(id);
+      if (!snapshot) {
+        const error = new Error("missing session");
+        error.status = 404;
+        throw error;
+      }
+      return structuredClone(snapshot);
+    },
+    list: async (...args) => args.length === 0
+      ? structuredClone(rows)
+      : structuredClone(rows.filter((row) => (
+          row.project === args[0] && String(row.folder ?? "") === String(args[1] ?? "")
+        ))),
+    observe(id, listener) {
+      const snapshot = snapshots().get(id);
+      if (snapshot) listener(null, structuredClone(snapshot));
+      return () => {};
+    },
+    create: async (project, folder = "") => ({
+      id: closeAId,
+      project,
+      ...(folder ? { folder } : {}),
+      events: [],
+    }),
+    createProjects: async () => ({
+      id: "session-63a11000-0000-4000-8000-0000000000dd",
+      scope: "projects",
+      events: [],
+    }),
+    prompt: async (id) => {
+      if (!promptCloses) return snapshots().get(id);
+      const closed = await closeSession(id);
+      return { ...closed, kind: "navigate", action: "close", id: closed.id || null };
+    },
+    interrupt: async (id) => snapshots().get(id),
+    close: closeSession,
+  };
+  return createConsoleHandler(backend);
+}
+
+async function withCloseFixture(rows, run, options = {}) {
+  const handler = closeFixture(rows, options);
+  const server = createServer(handler);
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const { port } = server.address();
+  try {
+    return await run(`http://127.0.0.1:${port}`);
+  } finally {
+    handler.dispose();
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+const closeRowA = { id: closeAId, project: "alpha", alias: "10" };
+const closeRowB = { id: closeBId, project: "bravo", alias: "20" };
+const closeRowC = { id: closeCId, project: "charlie", alias: "30" };
+
+await withCloseFixture([closeRowA, closeRowC, closeRowB], async (base) => {
+  const response = await fetch(`${base}/qq/project/alpha/session/${closeAId}/close`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      cookie: `qq-last-session=${closeBId}`,
+    },
+    body: "",
+    redirect: "manual",
+  });
+  assert.equal(response.status, 303);
+  assert.equal(
+    response.headers.get("location"),
+    `/qq/project/bravo/session/${closeBId}`,
+    "closing a project's last session prefers a still-live cookie chair over the first global row",
+  );
+});
+
+await withCloseFixture([
+  closeRowA,
+  { id: "session-63a11000-0000-4000-8000-0000000000de", project: "alpha", alias: "11" },
+  closeRowB,
+], async (base) => {
+  const response = await fetch(`${base}/qq/project/alpha/session/${closeAId}/close`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      cookie: `qq-last-session=${closeBId}`,
+    },
+    body: "",
+    redirect: "manual",
+  });
+  assert.equal(response.status, 303);
+  assert.equal(
+    response.headers.get("location"),
+    "/qq/project/alpha/session/session-63a11000-0000-4000-8000-0000000000de",
+    "the same-project remainder returned by close stays first",
+  );
+});
+
+await withCloseFixture([closeRowA, closeRowC, closeRowB], async (base) => {
+  const viewed = await fetch(`${base}/qq/project/bravo/session/${closeBId}`);
+  assert.equal(viewed.status, 200);
+  const response = await fetch(`${base}/qq/project/alpha/session/${closeAId}/close`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      cookie: `qq-last-session=${closeAId}`,
+    },
+    body: "",
+    redirect: "manual",
+  });
+  assert.equal(response.status, 303);
+  assert.equal(
+    response.headers.get("location"),
+    `/qq/project/bravo/session/${closeBId}`,
+    "a closing cookie is ignored and a still-live last-viewed chair wins",
+  );
+});
+
+await withCloseFixture([closeRowA, closeRowC, closeRowB], async (base) => {
+  const response = await fetch(`${base}/qq/project/alpha/session/${closeAId}/close`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: "",
+    redirect: "manual",
+  });
+  assert.equal(response.status, 303);
+  assert.equal(
+    response.headers.get("location"),
+    `/qq/project/charlie/session/${closeCId}`,
+    "without live remembered chairs the first remaining global row wins",
+  );
+});
+
+await withCloseFixture([closeRowA, closeRowC, closeRowB], async (base) => {
+  const response = await fetch(`${base}/qq/project/alpha/session/${closeAId}/close`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      cookie: `qq-last-session=${closeBId}`,
+      "hx-request": "true",
+    },
+    body: "",
+    redirect: "manual",
+  });
+  assert.equal(response.status, 200);
+  assert.equal(
+    response.headers.get("hx-redirect"),
+    `/qq/project/bravo/session/${closeBId}`,
+    "HTMX close uses HX-Redirect for the same live-chair destination",
+  );
+});
+
+await withCloseFixture([closeRowA, closeRowC, closeRowB], async (base) => {
+  const response = await fetch(`${base}/qq/project/alpha/session/${closeAId}/prompt`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      cookie: `qq-last-session=${closeBId}`,
+    },
+    body: "prompt=%2Fclose",
+    redirect: "manual",
+  });
+  assert.equal(response.status, 303);
+  assert.equal(
+    response.headers.get("location"),
+    `/qq/project/bravo/session/${closeBId}`,
+    "close navigate-results use the live-chair resolver too",
+  );
+}, { promptCloses: true });
+
+await withCloseFixture([closeRowA], async (base) => {
+  const response = await fetch(`${base}/qq/project/alpha/session/${closeAId}/close`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: "",
+    redirect: "manual",
+  });
+  assert.equal(response.status, 303);
+  assert.equal(
+    response.headers.get("location"),
+    "/qq/projects",
+    "closing the final live session leaves the operator on the projects chair",
+  );
+});
+
+await withCloseFixture([closeRowB], async (base) => {
+  const response = await fetch(`${base}/qq/project/empty`, { redirect: "manual" });
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.doesNotMatch(html, /\bsse-connect=/, "an empty project has no SSE connection");
+  assert.doesNotMatch(html, /id="switch-(?:meta|ready)"/,
+    "an empty project has no live-switch bootstrap targets");
+  assert.match(html, new RegExp(`class="active-project-item[^"]*"[^>]*href="/qq/project/bravo"[^>]*data-session-id="${closeBId}"`),
+    "the empty surface still renders a selectable live project");
+  assert.match(html, /class="new-session" action="\/qq\/project\/empty\/sessions"/,
+    "the empty project's new-session action remains available");
+
+  const liveProject = await fetch(`${base}/qq/project/bravo`, { redirect: "manual" });
+  assert.equal(liveProject.status, 303);
+  assert.equal(liveProject.headers.get("location"), `/qq/project/bravo/session/${closeBId}`,
+    "navigating a live project's href opens one of its sessions");
+
+  const created = await fetch(`${base}/qq/project/empty/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: "",
+    redirect: "manual",
+  });
+  assert.equal(created.status, 303);
+  assert.equal(created.headers.get("location"), `/qq/project/empty/session/${closeAId}`,
+    "the empty project's new-session form remains operational");
+});
+
 const browser = readFileSync(new URL("../assets/browser-v9.js", import.meta.url), "utf8");
+const canLiveSwitchSource = browser.match(/const canLiveSwitch = \(\) => \{[\s\S]*?\n  \};/);
+assert.ok(canLiveSwitchSource, "live-switch capability is explicit");
+assert.match(canLiveSwitchSource[0], /hasAttribute\("sse-connect"\)/,
+  "live switching refuses a console without an SSE connection");
+assert.match(canLiveSwitchSource[0], /!liveSessionId/,
+  "live switching refuses a console without a current session identity");
+assert.match(canLiveSwitchSource[0], /#switch-meta/,
+  "live switching refuses a console without switch-meta");
+assert.match(canLiveSwitchSource[0], /#switch-ready/,
+  "live switching refuses a console without switch-ready");
+const liveSwitchSource = browser.match(/const liveSwitch = \(sessionId,[\s\S]*?\n  \};/);
+assert.ok(liveSwitchSource, "live switching exists");
+assert.match(liveSwitchSource[0], /!canLiveSwitch\(\)/,
+  "live switching refuses a console that cannot live-switch");
+assert.match(liveSwitchSource[0], /id === liveSessionId && !bootstrapSwitch\)\) return false/,
+  "already-live remains a no-op inside liveSwitch");
+const switchOrNavigate = browser.match(/const liveSwitchOrNavigate = \([\s\S]*?\n  \};/);
+assert.ok(switchOrNavigate, "empty-surface fallback is shared");
+assert.match(switchOrNavigate[0], /if \(canLiveSwitch\(\)\) liveSwitch/,
+  "href fallback runs only when the console cannot live-switch");
+assert.match(switchOrNavigate[0], /else void navigatePage/,
+  "a surface without SSE infrastructure navigates the project href");
+assert.doesNotMatch(switchOrNavigate[0], /if \(!liveSwitch\(/,
+  "already-live liveSwitch false is not treated as cannot-switch");
+const selectProjectSource = browser.match(/const selectOverlayProject = \(item\) => \{([\s\S]*?)\n  \};/);
+assert.ok(selectProjectSource, "overlay project selection exists");
+assert.match(selectProjectSource[1], /liveSwitchOrNavigate\(sessionId,[\s\S]*?projectItem\.href/,
+  "re-selecting the projects chair uses the capability-gated fallback");
+assert.match(selectProjectSource[1], /liveSwitchOrNavigate\(selected\.id,[\s\S]*?projectItem\.href/,
+  "project selection navigates its href when live switching cannot run");
+assert.doesNotMatch(selectProjectSource[1], /if \(!liveSwitch\(/,
+  "overlay project clicks do not full-navigate merely because the session is already live");
+assert.match(selectProjectSource[1], /if \(!selected\?\.id\)[\s\S]*?navigatePage\(projectItem\.href/,
+  "a project without a session navigates to its empty page instead of becoming a no-op");
+const chairGoSource = browser.match(/const chairGo = \(value, current = null\) => \{([\s\S]*?)\n  \};/);
+assert.ok(chairGoSource, "chair navigation exists");
+assert.match(chairGoSource[1], /selectOverlayProject\(current\)\) return;[\s\S]*?navigatePage\(value, current\)/,
+  "chair navigation falls through to page navigation when project selection declines");
 const syncRail = browser.match(/const syncRailAfterSwitch = \(meta\) => \{([\s\S]*?)\n  \};/);
 assert.ok(syncRail, "post-switch rail synchronization exists");
 assert.match(syncRail[1], /meta\.scope === "projects"/);
