@@ -1615,7 +1615,7 @@ export function renderCaseRegion(snapshot) {
   if (!doc || typeof doc !== "object") return "";
   const text = String(doc.text ?? "");
   const title = doc.title || "Working memory";
-  const panel = `<aside class="case-panel" aria-label="Working memory">${renderMarkdownText(text, "document-prose case-prose")}</aside>`;
+  const panel = `<aside class="case-panel" aria-label="working memory"><p class="case-identity">working memory</p>${renderMarkdownText(text, "case-prose")}</aside>`;
   const viewer = renderDocumentViewer({
     title,
     identity: doc.identity || "working memory",
