@@ -224,6 +224,7 @@
     return links;
   };
   const sessionIds = () => sessionLinks().map((link) => link.dataset.sessionId).filter(Boolean);
+  const LIVE_SESSION_PICKER = ".session-token[data-session-id], .session-parent a[data-session-id], .session-child[data-session-id]";
   const openSession = (sessionId) => {
     if (!sessionId || sessionId === viewingSessionId()) return;
     const link = sessionLinks().find((entry) => entry.dataset.sessionId === sessionId);
@@ -361,7 +362,8 @@
     return node.isContentEditable;
   };
 
-  const activeProjectItems = () => [...document.querySelectorAll(".active-project-item[href]")];
+  const activeProjectItems = () => [...document.querySelectorAll(".active-project-item[data-project][href]")];
+  const projectRailItems = () => [...document.querySelectorAll(".active-project-item[href]")];
   const projectIdentity = (entry) => `${String(entry?.project ?? "")}\n${String(entry?.folder ?? "")}`;
   const projectStorageKey = () => {
     const consolePath = location.pathname.replace(/\/(?:projects|project|session)(?:\/.*)?$/, "") || "/";
@@ -439,6 +441,8 @@
   const restoreListOrder = (list, items, keyOf) => {
     const remembered = readRememberedProjects();
     if (!list || !remembered.length || items.length < 2) return;
+    const movable = new Set(items.map((item) => item.closest("li") ?? item));
+    const fixed = [...list.children].filter((item) => !movable.has(item));
     const rows = new Map(items.map((item) => [keyOf(item), item.closest("li") ?? item]));
     const next = [];
     const used = new Set();
@@ -453,7 +457,7 @@
       if (used.has(key) || !row) continue;
       next.push(row);
     }
-    if (next.length) list.replaceChildren(...next);
+    if (next.length) list.replaceChildren(...fixed, ...next);
   };
   const restoreActiveProjects = () => {
     const rail = document.querySelector("#project-rail");
@@ -511,7 +515,7 @@
     }));
   };
   const neighborProject = (delta) => {
-    const projects = activeProjectItems();
+    const projects = projectRailItems();
     if (projects.length < 2) return;
     const current = projects.findIndex((project) => project.matches('[aria-current="page"]'));
     const index = current < 0 ? 0 : current;
@@ -977,6 +981,9 @@
   const overlayProjectItem = (link) => {
     if (!(link instanceof Element)) return null;
     if (link.matches(".active-project-item")) return link;
+    if (link.matches(".projects-session-choice")) {
+      return document.querySelector(".projects-session-item") ?? link;
+    }
     if (!link.matches(".projects-choice") || !link.dataset.project) return null;
     return [...document.querySelectorAll(".active-project-item")].find((item) => (
       item.dataset.project === link.dataset.project
@@ -1093,8 +1100,12 @@
     if (!(rail instanceof HTMLElement)) return;
     const oldProject = rail.dataset.currentProject || "";
     const oldFolder = rail.dataset.currentFolder || "";
-    rail.dataset.currentProject = String(meta.project || "");
-    rail.dataset.currentFolder = String(meta.folder || "");
+    const project = String(meta.project || "");
+    const folder = String(meta.folder || "");
+    const projectsScope = meta.scope === "projects";
+    const child = meta.origin === "subagent" && Boolean(meta.parent);
+    rail.dataset.currentProject = project;
+    rail.dataset.currentFolder = folder;
     rail.dataset.currentActive = "true";
     for (const choice of document.querySelectorAll(".projects-choice[data-project]")) {
       const item = [...document.querySelectorAll(".active-project-item[data-project]")].find((candidate) => (
@@ -1107,23 +1118,37 @@
       if (choice.dataset.sessionId) item.dataset.sessionId = choice.dataset.sessionId;
     }
     const currentProject = [...document.querySelectorAll(".active-project-item[data-project]")].find((item) => (
-      item.dataset.project === String(meta.project || "")
-      && (item.dataset.folder || "") === String(meta.folder || "")
+      item.dataset.project === project && (item.dataset.folder || "") === folder
     ));
-    if (currentProject) {
-      currentProject.dataset.sessionId = meta.id;
-      currentProject.href = meta.canonical;
-      markLinkCurrent(currentProject);
+    const projectsItem = document.querySelector(".projects-session-item");
+    const projectsChoice = document.querySelector(".projects-session-choice");
+    if (projectsScope) {
+      const projectsId = child ? String(meta.parent || "") : String(meta.id || "");
+      if (projectsId) {
+        if (projectsItem instanceof HTMLElement) projectsItem.dataset.sessionId = projectsId;
+        if (projectsChoice instanceof HTMLElement) projectsChoice.dataset.sessionId = projectsId;
+      }
+      markGroupCurrent(".active-project-item[href]", "active-project-current", projectsItem);
+      markGroupCurrent(".projects-choice[href]", "projects-choice-current", projectsChoice);
+    } else {
+      if (currentProject) {
+        currentProject.dataset.sessionId = meta.id;
+        currentProject.href = meta.canonical;
+      }
+      markGroupCurrent(".active-project-item[href]", "active-project-current", currentProject);
+      const currentChoice = [...document.querySelectorAll(".projects-choice[data-project]")].find((choice) => (
+        choice.dataset.project === project && (choice.dataset.folder || "") === folder
+      ));
+      markGroupCurrent(".projects-choice[href]", "projects-choice-current", currentChoice);
     }
     const canonical = normalizedCanonical(meta.canonical);
     const projectBase = canonical.replace(/\/session\/[^/?#]+$/, "");
-    const create = rail.querySelector("form.new-session");
+    const create = document.querySelector(".session-traversal form.new-session") || rail.querySelector("form.new-session");
     const close = rail.querySelector("#close-session");
-    if (create instanceof HTMLFormElement) create.action = `${projectBase}/sessions`;
+    if (create instanceof HTMLFormElement && !projectsScope) create.action = `${projectBase}/sessions`;
     if (close instanceof HTMLFormElement) close.action = `${canonical}/close`;
-    const child = Boolean(document.querySelector("#session-chrome .session-parent"));
-    if (create instanceof HTMLFormElement) create.hidden = child;
-    if (oldProject !== String(meta.project || "") || oldFolder !== String(meta.folder || "")) {
+    if (create instanceof HTMLFormElement) create.hidden = child || projectsScope;
+    if (oldProject !== project || oldFolder !== folder) {
       closeDrawer({ updateUrl: false, restoreFocus: false });
       projectTreeReady = null;
       treeRequest += 1;
@@ -1196,6 +1221,20 @@
     if (!(projectItem instanceof HTMLElement)) return false;
     markLinkCurrent(projectItem);
     if (item !== projectItem && item instanceof Element) markLinkCurrent(item);
+    if (projectItem.matches(".projects-session-item") || item?.matches?.(".projects-session-choice")) {
+      const sessionId = projectItem.dataset.sessionId || item?.dataset?.sessionId || "";
+      paintSessionTokens([], "", projectItem);
+      if (!sessionId) {
+        void navigatePage(projectItem.href);
+        return true;
+      }
+      rememberOverlaySession(projectItem, sessionId, projectItem.href);
+      liveSwitch(sessionId, {
+        history: navMode() ? "none" : "push",
+        canonical: projectItem.href,
+      });
+      return true;
+    }
     const sessions = readProjectSessions(projectItem);
     const currentId = sessions.some((session) => session.id === overlaySessionId)
       ? overlaySessionId
@@ -1259,7 +1298,7 @@
         selectOverlayProject(current);
         return;
       }
-      if (current.matches(".session-token")) {
+      if (current.matches(LIVE_SESSION_PICKER)) {
         selectOverlaySession(current);
         return;
       }
@@ -2070,7 +2109,7 @@
   document.addEventListener("pointerdown", (event) => {
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
     if (!(link instanceof HTMLAnchorElement)) return;
-    const picker = link.matches(".active-project-item, .projects-choice, .session-token");
+    const picker = link.matches(`.active-project-item, .projects-choice, ${LIVE_SESSION_PICKER}`);
     if (picker) return;
     const url = consolePageUrl(link.href);
     if (!url || (url.pathname === location.pathname && url.search === location.search)) return;
@@ -2082,7 +2121,7 @@
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
     if (!(link instanceof HTMLAnchorElement) || (link.target && link.target !== "_self") || link.hasAttribute("download")) return;
     const url = consolePageUrl(link.href);
-    const picker = link.matches(".active-project-item, .projects-choice, .session-token");
+    const picker = link.matches(`.active-project-item, .projects-choice, ${LIVE_SESSION_PICKER}`);
     if (!url) return;
     if (!picker && url.pathname === location.pathname && url.search === location.search) return;
     const closesMobileRail = picker && !desktopChair() && navMode()

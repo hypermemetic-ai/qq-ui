@@ -541,6 +541,7 @@ function sessionSwitchHref(paths, sessionId) {
 function projectSessionGroups(snapshot, paths) {
   const groups = new Map();
   const add = (entry, project, folder) => {
+    if (entry?.scope === "projects") return;
     const name = String(project ?? "").trim();
     const id = String(entry?.id ?? "").trim();
     if (!name || !id || entry?.origin === "subagent") return;
@@ -581,7 +582,9 @@ function bannerMark(kind) {
 }
 
 function pickerSessions(sessions) {
-  return (Array.isArray(sessions) ? sessions : []).filter((session) => session?.origin !== "subagent");
+  return (Array.isArray(sessions) ? sessions : []).filter((session) => (
+    session?.origin !== "subagent" && session?.scope !== "projects"
+  ));
 }
 
 function menuSessions(sessions) {
@@ -608,7 +611,9 @@ function newSessionForm(action, extraClass = "") {
 }
 
 function sessionNavigation(snapshot, paths) {
-  const choices = menuSessions(snapshot.sessions);
+  const child = isChildSession(snapshot);
+  const projects = snapshot?.scope === "projects";
+  const choices = child || projects ? [] : menuSessions(snapshot.sessions);
   const selectedId = String(snapshot.id ?? "");
   const selected = selectedId
     ? choices.find((session) => session.id === selectedId) ?? snapshot
@@ -619,9 +624,9 @@ function sessionNavigation(snapshot, paths) {
     const href = sessionSwitchHref(paths, session.id);
     return `<a class="session-token${current ? " session-token-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(session.id)}"><span>${escapeHtml(sessionToken(session))}</span></a>`;
   }).join("");
-  const child = isChildSession(snapshot);
-  const create = child || !paths.createSession ? "" : newSessionForm(paths.createSession);
-  const tokens = `<nav class="session-traversal" aria-label="Sessions" aria-keyshortcuts="ArrowLeft ArrowRight">${links || '<span class="session-empty">no live sessions</span>'}${create}</nav>`;
+  const create = child || projects || !paths.createSession ? "" : newSessionForm(paths.createSession);
+  const empty = child || projects ? "" : '<span class="session-empty">no live sessions</span>';
+  const tokens = `<nav class="session-traversal" aria-label="Sessions" aria-keyshortcuts="ArrowLeft ArrowRight">${links || empty}${create}</nav>`;
   const close = child || !paths.close
     ? ""
     : `<form id="close-session" class="close-session session-background-actions" action="${escapeHtml(paths.close)}" method="post" hidden>
@@ -825,10 +830,34 @@ function renderHomeLink(snapshot, paths) {
   </a>`;
 }
 
+function projectsSessionId(snapshot) {
+  const listed = (Array.isArray(snapshot?.sessions) ? snapshot.sessions : []).find((session) => (
+    session?.scope === "projects" && session?.origin !== "subagent" && session?.id
+  ));
+  if (listed?.id) return String(listed.id);
+  if (snapshot?.scope === "projects" && snapshot?.origin !== "subagent" && snapshot?.id) {
+    return String(snapshot.id);
+  }
+  return "";
+}
+
+function projectsSessionLink(snapshot, paths, kind) {
+  if (!paths?.projectsSession) return "";
+  const current = snapshot?.scope === "projects";
+  const sessionId = projectsSessionId(snapshot);
+  const sessionAttr = sessionId ? ` data-session-id="${escapeHtml(sessionId)}"` : "";
+  const currentAttr = current ? ' aria-current="page"' : "";
+  if (kind === "menu") {
+    return `<a class="projects-choice projects-session-choice${current ? " projects-choice-current" : ""}" href="${escapeHtml(paths.projectsSession)}" data-scope="projects"${sessionAttr}${currentAttr}>projects</a>`;
+  }
+  return `<a class="active-project-item projects-session-item${current ? " active-project-current" : ""}" href="${escapeHtml(paths.projectsSession)}" data-scope="projects"${sessionAttr}${currentAttr} title="projects"><span class="active-project-mark" aria-hidden="true"></span><span class="active-project-label">projects</span></a>`;
+}
+
 function activeProjectList(snapshot) {
   const projects = [];
   const seen = new Map();
   const add = (entry) => {
+    if (entry?.scope === "projects") return;
     const project = String(entry?.project ?? entry?.name ?? "").trim();
     if (!project) return;
     const folder = String(entry?.folder ?? "").trim();
@@ -858,7 +887,7 @@ function activeProjectList(snapshot) {
   };
   for (const entry of Array.isArray(snapshot?.activeProjects) ? snapshot.activeProjects : []) add(entry);
   for (const entry of Array.isArray(snapshot?.sessions) ? snapshot.sessions : []) add(entry);
-  if (snapshot?.id && !isChildSession(snapshot)) add(snapshot);
+  if (snapshot?.id && snapshot?.scope !== "projects" && !isChildSession(snapshot)) add(snapshot);
   return projects;
 }
 
@@ -871,10 +900,11 @@ function livePlaceKey(entry) {
 function livePlaceSet(snapshot) {
   const keys = new Set();
   const add = (entry) => {
+    if (entry?.scope === "projects") return;
     const key = livePlaceKey(entry);
     if (key) keys.add(key);
   };
-  if (!isChildSession(snapshot)) add(snapshot);
+  if (snapshot?.scope !== "projects" && !isChildSession(snapshot)) add(snapshot);
   for (const entry of Array.isArray(snapshot?.activeProjects) ? snapshot.activeProjects : []) add(entry);
   for (const entry of Array.isArray(snapshot?.sessions) ? snapshot.sessions : []) add(entry);
   return keys;
@@ -890,13 +920,13 @@ function renderProjectsMenu(snapshot, paths) {
   if (!paths?.projectsBase) return "";
   const projects = activeProjectList(snapshot);
   const sessionGroups = projectSessionGroups(snapshot, paths);
-  const currentProject = String(snapshot?.project ?? "");
-  const currentFolder = String(snapshot?.folder ?? "");
+  const currentProject = snapshot?.scope === "projects" ? "" : String(snapshot?.project ?? "");
+  const currentFolder = snapshot?.scope === "projects" ? "" : String(snapshot?.folder ?? "");
   const current = projects.find((entry) => entry.project === currentProject && entry.folder === currentFolder);
   const summary = current?.label || placeName(snapshot) || "projects";
-  const links = projects.length > 0
+  const projectLinks = projects.length > 0
     ? projects.map((entry) => {
-        const isCurrent = entry.project === currentProject && entry.folder === currentFolder;
+        const isCurrent = snapshot?.scope !== "projects" && entry.project === currentProject && entry.folder === currentFolder;
         const href = activeProjectHref(entry, paths, isCurrent);
         const sessions = sessionGroups.get(`${entry.project}\n${entry.folder}`) ?? [];
         const sessionId = entry.sessionId || sessions[0]?.id || "";
@@ -907,7 +937,8 @@ function renderProjectsMenu(snapshot, paths) {
   return `<details class="projects-menu">
     <summary aria-label="Projects">${escapeHtml(summary)}</summary>
     <div class="projects-menu-list">
-      ${links}
+      ${projectsSessionLink(snapshot, paths, "menu")}
+      ${projectLinks}
     </div>
   </details>`;
 }
@@ -916,10 +947,10 @@ export function renderProjectRail(snapshot, paths, inert = false) {
   if (!paths?.projectsBase) return "";
   const projects = activeProjectList(snapshot);
   const sessionGroups = projectSessionGroups(snapshot, paths);
-  const currentProject = String(snapshot?.project ?? "");
-  const currentFolder = String(snapshot?.folder ?? "");
+  const currentProject = snapshot?.scope === "projects" ? "" : String(snapshot?.project ?? "");
+  const currentFolder = snapshot?.scope === "projects" ? "" : String(snapshot?.folder ?? "");
   const rows = projects.map((entry) => {
-    const current = entry.project === currentProject && entry.folder === currentFolder;
+    const current = snapshot?.scope !== "projects" && entry.project === currentProject && entry.folder === currentFolder;
     const href = activeProjectHref(entry, paths, current);
     const sessions = sessionGroups.get(`${entry.project}\n${entry.folder}`) ?? [];
     const sessionId = entry.sessionId || sessions[0]?.id || "";
@@ -929,7 +960,7 @@ export function renderProjectRail(snapshot, paths, inert = false) {
   const sessions = sessionNavigation(snapshot, paths);
   const rootUrl = `${paths.canonical}${paths.canonical.includes("?") ? "&" : "?"}drawer=~`;
   return `<aside id="project-rail" class="project-rail" aria-label="Projects" data-current-project="${escapeHtml(currentProject)}" data-current-folder="${escapeHtml(currentFolder)}" data-current-active="${snapshot?.id ? "true" : "false"}"${inert ? " inert" : ""}>
-    <nav class="active-projects" aria-label="Active projects" aria-keyshortcuts="ArrowUp ArrowDown"><ol>${rows || '<li class="session-empty">no live projects</li>'}</ol></nav>
+    <nav class="active-projects" aria-label="Active projects" aria-keyshortcuts="ArrowUp ArrowDown">${projectsSessionLink(snapshot, paths, "rail")}<ol>${rows || '<li class="session-empty">no live projects</li>'}</ol></nav>
     ${sessions.close}
     <section id="inactive-project-tree" class="inactive-project-tree" aria-label="Files" aria-keyshortcuts="F" data-root-url="${escapeHtml(rootUrl)}" hidden>
       <div class="project-tree-columns" role="tree" aria-label="Project files"><span class="project-tree-loading" role="status">···</span></div>
@@ -1022,13 +1053,10 @@ function renderParentNav(snapshot, paths) {
   const href = sessionSwitchHref(paths, snapshot.parent);
   const face = sessionToken({ id: snapshot.parent, alias: snapshot.parentAlias });
   const parentLink = href
-    ? `<a href="${escapeHtml(href)}"><span aria-hidden="true">←</span><span>parent ${escapeHtml(face)}</span></a>`
+    ? `<a href="${escapeHtml(href)}" data-session-id="${escapeHtml(snapshot.parent)}"><span aria-hidden="true">←</span><span>parent ${escapeHtml(face)}</span></a>`
     : "";
-  const close = paths?.close
-    ? `<form class="session-parent-close" action="${escapeHtml(paths.close)}" method="post"><button type="submit" aria-label="Close this session">${bannerMark("close")}</button></form>`
-    : "";
-  return (parentLink || close)
-    ? `<nav class="session-parent" aria-label="Parent session">${parentLink}${close}</nav>`
+  return parentLink
+    ? `<nav class="session-parent" aria-label="Parent session">${parentLink}</nav>`
     : "";
 }
 
@@ -1042,7 +1070,7 @@ export function renderSessionChildren(snapshot, paths) {
     if (!href) return "";
     const face = sessionToken(child);
     const status = child?.status === "running" ? "running" : "idle";
-    return `<li><a class="session-child" href="${escapeHtml(href)}" data-child-session="${escapeHtml(child.id ?? "")}"><span class="session-child-face">${escapeHtml(face)}</span><span class="session-child-status" data-status="${status}">${status}</span></a></li>`;
+    return `<li><a class="session-child" href="${escapeHtml(href)}" data-session-id="${escapeHtml(child.id ?? "")}" data-child-session="${escapeHtml(child.id ?? "")}"><span class="session-child-face">${escapeHtml(face)}</span><span class="session-child-status" data-status="${status}">${status}</span></a></li>`;
   }).filter(Boolean).join("");
   return rows ? `<nav class="session-child-list" aria-label="Child sessions"><ol>${rows}</ol></nav>` : "";
 }

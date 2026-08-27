@@ -906,14 +906,16 @@ export function createConsoleHandler(backend, options = {}) {
     if (typeof backend.observe !== "function") {
       throw new Error("qq-ui: qq service observe() is required");
     }
-    const intervalMs = extra.intervalMs ?? ssePollMs;
+    const { initialSnapshot = null, ...observeOptions } = extra;
+    const intervalMs = observeOptions.intervalMs ?? ssePollMs;
     const hasSheets = Boolean(
-      readCaseFile || readOffer || readOverlay || readProgress || readApproval || readLoginSheet
+      typeof backend.list === "function"
+      || readCaseFile || readOffer || readOverlay || readProgress || readApproval || readLoginSheet
       || inFindMode || sessionModeFor || workflowsFor || readCase,
     );
     let cancelled = false;
-    let sheets = {};
-    let lastSnapshot = null;
+    let sheets = sheetFields(initialSnapshot);
+    let lastSnapshot = initialSnapshot;
     const deliver = (snapshot) => {
       if (cancelled || !snapshot) return;
       try { listener(null, { ...snapshot, ...sheets }); } catch {}
@@ -926,7 +928,7 @@ export function createConsoleHandler(backend, options = {}) {
       }
       lastSnapshot = snapshot;
       deliver(snapshot);
-    }, { intervalMs, ...extra });
+    }, { ...observeOptions, intervalMs });
     let timer;
     let sheetFp;
     const tickSheets = async () => {
@@ -1660,7 +1662,7 @@ export function createConsoleHandler(backend, options = {}) {
           return;
         }
         writeObservation(error, next);
-      });
+      }, { initialSnapshot: snapshot });
       if (bootstrapSession) {
         tick = tick.then(async () => {
           if (closed || res.destroyed || res.writableEnded) return;
@@ -1684,6 +1686,9 @@ export function createConsoleHandler(backend, options = {}) {
             canonical: paths.canonical,
             project: snapshot.project ?? "",
             folder: snapshot.folder ?? "",
+            scope: snapshot.scope ?? "",
+            origin: snapshot.origin ?? "",
+            parent: snapshot.parent ?? "",
           };
           res.write(sseEvent("switch-meta", JSON.stringify(meta)));
           res.write(sseEvent("chrome", render.renderSessionRegion("chrome", surface, paths)));

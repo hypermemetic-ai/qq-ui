@@ -159,9 +159,7 @@ main { min-height: 0; }
 .session-child:hover,
 .session-child:focus-visible,
 .session-parent a:hover,
-.session-parent a:focus-visible,
-.session-parent-close button:hover,
-.session-parent-close button:focus-visible {
+.session-parent a:focus-visible {
   color: #fff;
   outline: none;
 }
@@ -173,27 +171,6 @@ main { min-height: 0; }
 
 .session-parent a { gap: .45rem; }
 
-.session-parent-close {
-  margin: 0;
-  flex: none;
-}
-
-.session-parent-close button {
-  display: flex;
-  width: auto;
-  min-width: 2.35rem;
-  height: 2.35rem;
-  min-height: 2.35rem;
-  align-items: center;
-  justify-content: center;
-  padding: .32rem .45rem;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: #d8d8d8;
-  line-height: 1;
-  cursor: pointer;
-}
 
 .session-heading {
   position: relative;
@@ -2685,6 +2662,15 @@ body.document-page {
   min-width: 0;
   min-height: 0;
 }
+.project-rail .projects-session-item {
+  margin-bottom: .25rem;
+  border-bottom: 1px solid #1a1a1a;
+}
+
+.projects-menu-list .projects-session-choice {
+  border-bottom: 1px solid #1a1a1a;
+}
+
 .project-rail .active-projects ol,
 .project-rail .project-sessions ol {
   display: grid;
