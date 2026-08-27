@@ -1076,12 +1076,6 @@ details.session-menu.session-controls {
 
 .assistant-reasoning .message-text { line-height: 1.48; }
 
-/* Live reasoning stays. Settled reasoning is dropped from the view; the
-   model still gets encrypted replay, not this summary text. */
-.assistant-reasoning:not([aria-busy="true"]) {
-  display: none;
-}
-
 .provider-gap {
   position: absolute;
   left: 0;

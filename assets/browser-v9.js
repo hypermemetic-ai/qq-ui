@@ -1770,14 +1770,13 @@
 
   const surfaceGestureBlocked = (target) => {
     if (documentViewerIsOpen()) return true;
-    if (target.closest("#project-drawer, #project-rail, #project-drawer-backdrop, .document-viewer, form, a, button, input, textarea, select, option, label, summary, audio, video, [contenteditable]:not([contenteditable=\"false\"]), [role=button], [role=link], [role=textbox], [role=slider], [role=spinbutton], [role=switch], [role=tab], [role=checkbox], [role=radio]")) return true;
+    if (target.closest("#project-drawer, #project-rail, #project-drawer-backdrop, .document-viewer, #session-chrome, .session-children, #composer, .session-composer, .session-popups")) return true;
+    const transcript = target.closest("#transcript");
+    // Transcript controls stay native for taps; only a horizontal lock takes the gesture.
+    if (!transcript && target.closest("form, a, button, input, textarea, select, option, label, summary, audio, video, [contenteditable]:not([contenteditable=\"false\"]), [role=button], [role=link], [role=textbox], [role=slider], [role=spinbutton], [role=switch], [role=tab], [role=checkbox], [role=radio]")) return true;
     for (let node = target; node; node = node.parentElement) {
       if (!(node instanceof HTMLElement)) continue;
-      const style = getComputedStyle(node);
-      const overflowX = style.overflowX;
-      const overflowY = style.overflowY;
-      const vertical = overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay";
-      if (vertical) continue;
+      const overflowX = getComputedStyle(node).overflowX;
       if ((overflowX === "auto" || overflowX === "scroll") && node.scrollWidth > node.clientWidth + 1) return true;
     }
     return false;

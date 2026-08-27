@@ -24,6 +24,6 @@
     "markdown-it": "15.0.0"
   },
   "scripts": {
-    "test": "node --check src/plugin.mjs"
+    "test": "node --check src/plugin.mjs && node scripts/prove-reasoning-transcript-gestures.mjs"
   }
 }
