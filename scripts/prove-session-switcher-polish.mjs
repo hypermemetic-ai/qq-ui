@@ -469,17 +469,39 @@ await withCloseFixture([closeRowB], async (base) => {
 });
 
 const browser = readFileSync(new URL("../assets/browser-v9.js", import.meta.url), "utf8");
+const canLiveSwitchSource = browser.match(/const canLiveSwitch = \(\) => \{[\s\S]*?\n  \};/);
+assert.ok(canLiveSwitchSource, "live-switch capability is explicit");
+assert.match(canLiveSwitchSource[0], /hasAttribute\("sse-connect"\)/,
+  "live switching refuses a console without an SSE connection");
+assert.match(canLiveSwitchSource[0], /!liveSessionId/,
+  "live switching refuses a console without a current session identity");
+assert.match(canLiveSwitchSource[0], /#switch-meta/,
+  "live switching refuses a console without switch-meta");
+assert.match(canLiveSwitchSource[0], /#switch-ready/,
+  "live switching refuses a console without switch-ready");
 const liveSwitchSource = browser.match(/const liveSwitch = \(sessionId,[\s\S]*?\n  \};/);
 assert.ok(liveSwitchSource, "live switching exists");
-assert.match(liveSwitchSource[0], /hasAttribute\("sse-connect"\)/,
-  "live switching refuses a console without an SSE connection");
-assert.match(liveSwitchSource[0], /!liveSessionId/,
-  "live switching refuses a console without a current session identity");
+assert.match(liveSwitchSource[0], /!canLiveSwitch\(\)/,
+  "live switching refuses a console that cannot live-switch");
+assert.match(liveSwitchSource[0], /id === liveSessionId && !bootstrapSwitch\)\) return false/,
+  "already-live remains a no-op inside liveSwitch");
+const switchOrNavigate = browser.match(/const liveSwitchOrNavigate = \([\s\S]*?\n  \};/);
+assert.ok(switchOrNavigate, "empty-surface fallback is shared");
+assert.match(switchOrNavigate[0], /if \(canLiveSwitch\(\)\) liveSwitch/,
+  "href fallback runs only when the console cannot live-switch");
+assert.match(switchOrNavigate[0], /else void navigatePage/,
+  "a surface without SSE infrastructure navigates the project href");
+assert.doesNotMatch(switchOrNavigate[0], /if \(!liveSwitch\(/,
+  "already-live liveSwitch false is not treated as cannot-switch");
 const selectProjectSource = browser.match(/const selectOverlayProject = \(item\) => \{([\s\S]*?)\n  \};/);
 assert.ok(selectProjectSource, "overlay project selection exists");
-assert.match(selectProjectSource[1], /if \(!liveSwitch\([\s\S]*?navigatePage\(projectItem\.href/,
+assert.match(selectProjectSource[1], /liveSwitchOrNavigate\(sessionId,[\s\S]*?projectItem\.href/,
+  "re-selecting the projects chair uses the capability-gated fallback");
+assert.match(selectProjectSource[1], /liveSwitchOrNavigate\(selected\.id,[\s\S]*?projectItem\.href/,
   "project selection navigates its href when live switching cannot run");
-assert.match(selectProjectSource[1], /else void navigatePage\(projectItem\.href\)|if \(!selected\?\.id\)[\s\S]*?navigatePage\(projectItem\.href/,
+assert.doesNotMatch(selectProjectSource[1], /if \(!liveSwitch\(/,
+  "overlay project clicks do not full-navigate merely because the session is already live");
+assert.match(selectProjectSource[1], /if \(!selected\?\.id\)[\s\S]*?navigatePage\(projectItem\.href/,
   "a project without a session navigates to its empty page instead of becoming a no-op");
 const chairGoSource = browser.match(/const chairGo = \(value, current = null\) => \{([\s\S]*?)\n  \};/);
 assert.ok(chairGoSource, "chair navigation exists");

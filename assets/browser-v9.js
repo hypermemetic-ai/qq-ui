@@ -1154,15 +1154,20 @@
       treeRequest += 1;
     }
   };
-  const liveSwitch = (sessionId, { history: historyMode = "none", exitWhenReady = false, canonical = "" } = {}) => {
-    const id = String(sessionId || "");
-    if (!id || (id === liveSessionId && !bootstrapSwitch)) return false;
+  const canLiveSwitch = () => {
     const stream = document.querySelector("#console-stream");
     if (!(stream instanceof HTMLElement)
       || !liveSessionId
       || !stream.hasAttribute("sse-connect")
       || !document.querySelector("#switch-meta")
       || !document.querySelector("#switch-ready")) return false;
+    return true;
+  };
+  const liveSwitch = (sessionId, { history: historyMode = "none", exitWhenReady = false, canonical = "" } = {}) => {
+    const id = String(sessionId || "");
+    if (!id || (id === liveSessionId && !bootstrapSwitch)) return false;
+    if (!canLiveSwitch()) return false;
+    const stream = document.querySelector("#console-stream");
     if (!bootstrapSwitch) persistComposerDraft(composer(), liveSessionId);
     resetAdoptedSession();
     const generation = ++switchGeneration;
@@ -1220,6 +1225,10 @@
     }
     return true;
   };
+  const liveSwitchOrNavigate = (sessionId, options, href) => {
+    if (canLiveSwitch()) liveSwitch(sessionId, options);
+    else void navigatePage(href);
+  };
   const selectOverlayProject = (item) => {
     const projectItem = overlayProjectItem(item);
     if (!(projectItem instanceof HTMLElement)) return false;
@@ -1233,10 +1242,10 @@
         return true;
       }
       rememberOverlaySession(projectItem, sessionId, projectItem.href);
-      if (!liveSwitch(sessionId, {
+      liveSwitchOrNavigate(sessionId, {
         history: navMode() ? "none" : "push",
         canonical: projectItem.href,
-      })) void navigatePage(projectItem.href);
+      }, projectItem.href);
       return true;
     }
     const sessions = readProjectSessions(projectItem);
@@ -1251,10 +1260,10 @@
       void navigatePage(projectItem.href);
       return true;
     }
-    if (!liveSwitch(selected.id, {
+    liveSwitchOrNavigate(selected.id, {
       history: navMode() ? "none" : "push",
       canonical,
-    })) void navigatePage(projectItem.href);
+    }, projectItem.href);
     return true;
   };
   const selectOverlaySession = (link) => {
