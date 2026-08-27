@@ -22,5 +22,8 @@
     "@hypermemetic-ai/qq": "file:../qq-core",
     "highlight.js": "11.12.0",
     "markdown-it": "15.0.0"
+  },
+  "scripts": {
+    "test": "node --check src/plugin.mjs"
   }
 }
