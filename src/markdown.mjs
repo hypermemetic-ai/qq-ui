@@ -72,7 +72,7 @@ markdown.renderer.rules.image = (tokens, index) => escapeHtml(tokens[index].cont
 markdown.renderer.rules.s_open = () => "<del>";
 markdown.renderer.rules.s_close = () => "</del>";
 
-/** Literal user / tool / reasoning text. Matches DSH Web MessageText. */
+/** Literal user / tool text, not reasoning. Matches DSH Web MessageText. */
 export function renderMessageText(text) {
   return `<div class="message-text">${escapeHtml(text ?? "")}</div>`;
 }

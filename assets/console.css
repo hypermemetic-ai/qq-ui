@@ -1052,6 +1052,13 @@ details.session-menu.session-controls {
 }
 
 .assistant-reasoning .message-text { line-height: 1.48; }
+.assistant-reasoning .message-markdown,
+.assistant-reasoning .message-markdown blockquote {
+  color: inherit;
+}
+.assistant-reasoning .message-markdown :where(h1, h2, h3, h4, h5, h6) {
+  font-size: 1em;
+}
 
 .provider-gap {
   position: absolute;

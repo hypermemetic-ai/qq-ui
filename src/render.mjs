@@ -295,7 +295,7 @@ function renderConversationNode(node) {
       if (block?.type === "reasoning" && String(block.text ?? "").trim()) {
         flushAnswer();
         parts.push(`<section class="assistant-reasoning" aria-label="${escapeHtml(reasoningLabel)}" data-seq="${seq}" data-turn="${escapeHtml(node.turn ?? "")}" data-step="${escapeHtml(node.step ?? "")}"${streaming ? ' aria-busy="true"' : ""}>
-          ${renderMessageText(block.text)}
+          ${renderMarkdownText(block.text)}
         </section>`);
       } else if (block?.type === "text") {
         answer.push(renderMarkdownText(block.text ?? ""));
