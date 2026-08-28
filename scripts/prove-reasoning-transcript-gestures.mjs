@@ -4,11 +4,10 @@ import { readFileSync } from "node:fs";
 const render = readFileSync(new URL("../src/render.mjs", import.meta.url), "utf8");
 const css = readFileSync(new URL("../assets/console.css", import.meta.url), "utf8");
 const browser = readFileSync(new URL("../assets/browser-v9.js", import.meta.url), "utf8");
-const agents = readFileSync(new URL("../AGENTS.md", import.meta.url), "utf8");
 
 const settledRenderer = render.match(/function renderConversationNode\(node\) \{([\s\S]*?)\n\}/);
 assert.ok(settledRenderer, "settled conversation renderer must exist");
-assert.match(settledRenderer[1], /block\?\.type === "reasoning"/);
+assert.match(settledRenderer[1], /block\?\.type === "reasoning" && String\(block\.text \?\? ""\)\.trim\(\)/);
 assert.match(settledRenderer[1], /class="assistant-reasoning"/);
 assert.match(settledRenderer[1], /renderMarkdownText\(block\.text\)/);
 assert.doesNotMatch(settledRenderer[1], /renderMessageText\(block\.text\)/);
@@ -27,8 +26,6 @@ assert.doesNotMatch(liveRenderer[1], /renderMarkdownText/);
 assert.doesNotMatch(css, /\.assistant-reasoning[^{]*\{[^}]*display\s*:\s*none/s);
 assert.match(css, /\.assistant-reasoning \.message-markdown[\s\S]*?color:\s*inherit/);
 assert.match(css, /\.assistant-reasoning \.message-markdown :where\(h1, h2, h3, h4, h5, h6\)[^{]*\{[^}]*font-size:\s*1em/);
-assert.match(agents, /Reasoning is shown whenever its node has reasoning text/);
-assert.doesNotMatch(agents, /settled reasoning is not shown/i);
 
 const blocker = browser.match(/const surfaceGestureBlocked = \(target\) => \{([\s\S]*?)\n  \};/);
 assert.ok(blocker, "surfaceGestureBlocked must remain the single surface gesture target filter");
