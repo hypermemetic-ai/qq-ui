@@ -155,10 +155,20 @@ assert.equal("idleForMs" in isolatedDashboard.projects[1].sessions[0], false,
 const html = await pageFor(() => usageFailure);
 assert.match(html, /class="session-traversal live-tracker"/, "valid tracking survives provider-usage failure");
 assert.doesNotMatch(html, /class="session-token(?: |")/, "live tracker is the only session picker");
-assert.match(html, /class="live-tracker-project-name">Alpha</, "projects are grouped under a human project label");
+assert.match(html, /class="live-tracker-heading" aria-hidden="true"><span>sessions<\/span>/,
+  "the right pane identifies itself as sessions instead of repeating project groups");
+assert.match(html, /class="live-tracker-project-name">Alpha</,
+  "each filtered list keeps an accessible human project label");
 assert.match(html, /class="session-id">opal<\/p>/, "current-session chrome also prefers the dashboard alias");
 assert.match(html, /class="live-tracker-folder">Client</, "folder groups keep their human folder label");
 const alphaGroup = html.match(/<section class="live-tracker-project"[^>]*>[\s\S]*?Alpha[\s\S]*?<\/section>/)?.[0] ?? "";
+assert.match(alphaGroup, /data-project="alpha" data-folder=""[^>]*data-current="true"/,
+  "the selected session's project is the initial right-pane filter");
+assert.doesNotMatch(alphaGroup.match(/^<section[^>]*>/)?.[0] ?? "", / hidden(?:>| )/,
+  "the selected project session list is visible");
+const betaGroup = html.match(/<section class="live-tracker-project"[^>]*data-project="beta"[^>]*>[\s\S]*?<\/section>/)?.[0] ?? "";
+assert.match(betaGroup.match(/^<section[^>]*>/)?.[0] ?? "", /data-folder="client"[^>]*data-current="false"[^>]* hidden>/,
+  "other projects stay in the DOM but start filtered out");
 assert.match(alphaGroup, new RegExp(`data-session-id="${rootId}"[\\s\\S]*?<span class="live-tracker-face">opal</span>`),
   "root uses its alias as the primary face");
 assert.match(alphaGroup, new RegExp(`data-session-id="${childId}"[^>]*data-depth="1"[\\s\\S]*?<span class="live-tracker-face">runner</span>`),
@@ -218,6 +228,16 @@ assert.match(browser, /if \(event\.defaultPrevented \|\| modifiedClick\(event\)\
   "normal tracker clicks use chairGo while modified clicks retain native href behavior");
 assert.match(browser, /if \(!nav \|\| nav\.classList\.contains\("live-tracker"\)\) return;/,
   "project selection cannot replace the tracker with legacy session tokens");
+const projectFilterSource = browser.match(/const filterLiveTrackerProject = \(item\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
+assert.match(projectFilterSource, /liveTrackerGroups\(tracker\)\.find[\s\S]*?showLiveTrackerProject\(group, \{ item \}\)/,
+  "left project selection filters the dashboard-backed session group");
+const projectPickerSource = browser.match(/const selectOverlayProject = \(item\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
+assert.match(projectPickerSource, /if \(filterLiveTrackerProject\(projectItem\)\) return true;\s+const sessions/,
+  "a normal project filter returns before legacy session selection or navigation");
+assert.match(browser, /const filterOnlyProject = link\.matches[\s\S]*?const closesMobileRail = picker && !filterOnlyProject/,
+  "filter-only project clicks keep the mobile two-pane chooser open");
+assert.match(browser, /id === "session-chrome"[\s\S]*?syncLiveTrackerProjectFilter\(\)/,
+  "SSE chrome refreshes preserve the chosen project filter");
 const pickerSource = browser.match(/const selectOverlaySession = \(link\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
 assert.match(pickerSource, /const tracker = link\.matches\("\.live-tracker-session"\)[\s\S]*?const canonical = tracker[\s\S]*?\? link\.href/,
   "tracker switching keeps its authoritative session-open href rather than constructing a project route");
@@ -225,6 +245,12 @@ assert.match(pickerSource, /const projectItem = tracker[\s\S]*?\? null/,
   "cross-project tracker selection does not assign identity to the previously highlighted project");
 assert.match(pickerSource, /liveSwitchOrNavigate\([\s\S]*?link\.href\)/,
   "normal tracker clicks navigate by href when live switching is unavailable");
+
+const css = readFileSync(new URL("../assets/console.css", import.meta.url), "utf8");
+assert.match(css, /\.live-tracker-project\[hidden\][\s\S]*?display:\s*none\s*!important/,
+  "filtered project groups cannot be revived by the tracker flex layout");
+assert.match(css, /\.nav-mode \.project-rail \{[\s\S]*?width:\s*42%[\s\S]*?\.nav-mode \.session-traversal \{[\s\S]*?width:\s*58%/,
+  "the mobile chooser gives projects and sessions distinct polished panes");
 
 const plugin = readFileSync(new URL("../src/plugin.mjs", import.meta.url), "utf8");
 assert.match(plugin, /const dashboardOf = \(\) => ctx\.get\?\.\("qq-dashboard", false\) \?\? null;/,
