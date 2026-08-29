@@ -14,26 +14,24 @@ highlight.js 11.12.0. Admitted binary files use core's bounded same-origin open
 response. Current assets are served `no-store`; plugin reload and a page reload
 are enough during development.
 
-## Opt-in visual-latency study
+## Visual-latency study
 
 qq-ui includes a local browser study for comparing interaction-to-visual-ready
-latency while working on the UI. It is off by default and is not production
-telemetry. No study data is sent anywhere.
+latency while working on the UI. Collection starts automatically during
+ordinary qq-ui use unless the current tab has explicitly opted out. This is not
+production telemetry: no study data is transmitted or durably stored.
 
-### Enable, run, report, export, and clear
+### Run, report, export, clear, and stop
 
-1. Add `?qq-latency=1` to a qq-ui page URL and load it. For example,
-   `/qq/session/<id>?qq-latency=1`. This opts in the current tab through
-   `sessionStorage`; navigation and reloads in that tab remain opted in.
-2. Open browser developer tools, run `qqLatency.clear()`, and perform the prompt,
+1. Open any qq-ui page normally; an enable query parameter is not required.
+   Open browser developer tools and run `qqLatency.clear()` before the prompt,
    HTMX, SSE, drawer, dialog, input, focus, scroll, navigation, or streaming
-   interaction being studied. `qqLatency.start()` can explicitly resume a
-   stopped study.
-3. Run `qqLatency.report()` for a per-request console table. Each row contains
+   interaction being studied.
+2. Run `qqLatency.report()` for a per-request console table. Each row contains
    the retained visual sample count and first, p50, p95, and last latency from
    the trusted interaction that originated that request. Percentiles use linear
    interpolation.
-4. Inspect all raw timelines with `qqLatency.snapshot()`. To export a JSON copy
+3. Inspect all raw timelines with `qqLatency.snapshot()`. To export a JSON copy
    from browsers whose developer tools provide `copy`, run:
 
    ```js
@@ -44,14 +42,33 @@ telemetry. No study data is sent anywhere.
    the returned string manually. Keep exports local: labels intentionally omit
    input values and text, but include UI tag/id/class, route action, viewport,
    and user-agent metadata.
-5. Run `qqLatency.clear()` to discard captured records without disabling the
-   active study. Run `qqLatency.stop()` to stop and opt this tab out while
-   retaining its current records for inspection. To disable on page load (and
-   persist that choice for the tab), load any qq-ui URL with `?qq-latency=0`.
+4. Run `qqLatency.clear()` to discard captured records without disabling
+   collection. Run `qqLatency.stop()` to stop collection, retain the current
+   records for inspection, and persist an opt-out for this tab. Loading a qq-ui
+   URL with `?qq-latency=0` also stops collection and persists the tab opt-out.
+5. Run `qqLatency.start()` or load a URL with `?qq-latency=1` to re-enable
+   collection and persist that preference for the tab. An explicit query value
+   overrides the stored preference, so remove a conflicting query parameter
+   from the URL when relying on `start()` or `stop()` across reloads.
 
 `window.qqLatency` provides `start()`, `stop()`, `clear()`, `snapshot()`,
-`summary()`, and `report()`. Disabled mode does not install the study's
-MutationObserver, animation-frame work, or event listeners.
+`summary()`, and `report()`. Only the enable/disable preference is kept in
+`sessionStorage`, so it is scoped to the browser tab. Raw measurements live only
+in JavaScript memory for the life of the page and intentionally reset on every
+full page reload, even though the tab preference survives. Nothing is
+transmitted by the study, and there is no HUD or other self-observing UI.
+
+In-memory buffers are bounded to the newest 500 interaction origins, 1,000
+request/stage records, and 2,000 visual records; `snapshot().dropped` reports
+overwritten records. A busy page is expected to use only low single-digit MB.
+Creating a snapshot temporarily duplicates this bounded data while the snapshot
+exists.
+
+When enabled, the instrumentation adds event hooks, one `MutationObserver`, and
+coalesced per-presentation processing. This is limited overhead, but the
+observer effect can modestly perturb the smallest latency measurements. After
+`qqLatency.stop()`, disabled mode has no study observer, animation-frame work,
+or event listeners.
 
 ### What the numbers mean
 
@@ -71,9 +88,7 @@ hook so its current stream frame does not acquire an additional observer frame.
 These are **visual-ready/presentation-opportunity timings**, normally accurate
 to about plus or minus one frame; they are not exact compositor pixel timings.
 
-Storage is bounded to the newest 500 interaction origins, 1,000 request/stage
-records, and 2,000 visual records. `snapshot().dropped` reports overwritten
-records. The snapshot is JSON-safe and includes monotonic start/capture times,
+The snapshot is JSON-safe and includes monotonic start/capture times,
 `performance.timeOrigin`, UI generation/revision when available, viewport,
 user agent, sanitized origins/stages, visual correlations, limits, and dropped
 counts. Prompt/input values, mutation text, and request query strings are never

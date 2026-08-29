@@ -520,7 +520,7 @@
     if (querySetting === null) {
       try { querySetting = host.sessionStorage?.getItem(storageKey); } catch {}
     }
-    if (querySetting === "1") start();
+    if (querySetting !== "0") start();
     return api;
   };
   /* qq-latency-factory:end */
