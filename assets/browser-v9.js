@@ -1088,12 +1088,9 @@
         ?? item?.textContent
         ?? project,
     ).trim();
-    const count = group?.querySelectorAll(".live-tracker-session").length ?? 0;
     tracker.dataset.filterProject = project;
     tracker.dataset.filterFolder = folder;
     tracker.setAttribute("aria-label", `${label || project} sessions`);
-    const countNode = tracker.querySelector(".live-tracker-count");
-    if (countNode) countNode.textContent = `${count} live`;
     const empty = tracker.querySelector(".live-tracker-filter-empty");
     if (empty instanceof HTMLElement) empty.hidden = Boolean(group);
     const create = tracker.querySelector("form.new-session");

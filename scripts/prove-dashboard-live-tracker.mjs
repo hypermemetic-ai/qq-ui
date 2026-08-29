@@ -155,8 +155,8 @@ assert.equal("idleForMs" in isolatedDashboard.projects[1].sessions[0], false,
 const html = await pageFor(() => usageFailure);
 assert.match(html, /class="session-traversal live-tracker"/, "valid tracking survives provider-usage failure");
 assert.doesNotMatch(html, /class="session-token(?: |")/, "live tracker is the only session picker");
-assert.match(html, /class="live-tracker-heading" aria-hidden="true"><span>sessions<\/span>/,
-  "the right pane identifies itself as sessions instead of repeating project groups");
+assert.doesNotMatch(html, /class="live-tracker-(?:heading|count)"/,
+  "the right pane stays visually quiet without ornamental headings or counts");
 assert.match(html, /class="live-tracker-project-name">Alpha</,
   "each filtered list keeps an accessible human project label");
 assert.match(html, /class="session-id">opal<\/p>/, "current-session chrome also prefers the dashboard alias");
@@ -249,8 +249,14 @@ assert.match(pickerSource, /liveSwitchOrNavigate\([\s\S]*?link\.href\)/,
 const css = readFileSync(new URL("../assets/console.css", import.meta.url), "utf8");
 assert.match(css, /\.live-tracker-project\[hidden\][\s\S]*?display:\s*none\s*!important/,
   "filtered project groups cannot be revived by the tracker flex layout");
-assert.match(css, /\.nav-mode \.project-rail \{[\s\S]*?width:\s*42%[\s\S]*?\.nav-mode \.session-traversal \{[\s\S]*?width:\s*58%/,
-  "the mobile chooser gives projects and sessions distinct polished panes");
+assert.match(css, /\.nav-mode \.project-rail \{[^}]*width:\s*50%/,
+  "the project pane retains its original half-width");
+assert.match(css, /\.nav-mode \.session-traversal \{[^}]*width:\s*50%/,
+  "the session pane retains its original half-width");
+assert.doesNotMatch(css, /\.nav-mode \.project-rail \{[^}]*width:\s*42%|\.nav-mode \.session-traversal \{[^}]*width:\s*58%/,
+  "the visual correction removes the ornamental pane proportions");
+assert.doesNotMatch(css, /\.live-tracker-session-current\s*\{[^}]*box-shadow/,
+  "current sessions keep the original understated treatment without an inset bar");
 
 const plugin = readFileSync(new URL("../src/plugin.mjs", import.meta.url), "utf8");
 assert.match(plugin, /const dashboardOf = \(\) => ctx\.get\?\.\("qq-dashboard", false\) \?\? null;/,
