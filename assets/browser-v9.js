@@ -179,6 +179,7 @@
   };
   let resetAdoptedSession = () => {};
   let overlaySessionId = "";
+  let liveTrackerProjectFilter = "";
   let liveSessionId = currentSessionId();
   let committedLocation = location.href;
   let pendingCanonical = "";
@@ -953,6 +954,7 @@
     closeSseSources();
     projectTreeReady = null;
     treeRequest += 1;
+    liveTrackerProjectFilter = "";
     const next = document.adoptNode(parsed.body);
     if (keepNav) next.classList.add("nav-mode");
     document.title = parsed.title;
@@ -1066,6 +1068,71 @@
     } catch { /* use the console default */ }
     return "/qq";
   };
+  const liveTrackerGroups = (tracker = document.querySelector(".live-tracker")) => tracker
+    ? [...tracker.querySelectorAll(".live-tracker-project[data-project]")]
+    : [];
+  const showLiveTrackerProject = (group, { remember = true, item = null } = {}) => {
+    const tracker = document.querySelector(".live-tracker");
+    if (!(tracker instanceof HTMLElement)) return false;
+    const project = String(group?.dataset?.project ?? item?.dataset?.project ?? "");
+    const folder = String(group?.dataset?.folder ?? item?.dataset?.folder ?? "");
+    if (!project) return false;
+    for (const candidate of liveTrackerGroups(tracker)) {
+      const selected = candidate === group;
+      candidate.hidden = !selected;
+      candidate.dataset.current = selected ? "true" : "false";
+    }
+    const label = String(
+      group?.dataset?.projectLabel
+        ?? item?.querySelector?.(".active-project-label")?.textContent
+        ?? item?.textContent
+        ?? project,
+    ).trim();
+    const count = group?.querySelectorAll(".live-tracker-session").length ?? 0;
+    tracker.dataset.filterProject = project;
+    tracker.dataset.filterFolder = folder;
+    tracker.setAttribute("aria-label", `${label || project} sessions`);
+    const countNode = tracker.querySelector(".live-tracker-count");
+    if (countNode) countNode.textContent = `${count} live`;
+    const empty = tracker.querySelector(".live-tracker-filter-empty");
+    if (empty instanceof HTMLElement) empty.hidden = Boolean(group);
+    const create = tracker.querySelector("form.new-session");
+    if (create instanceof HTMLFormElement) {
+      create.action = `${consoleBasePath()}/project/${encodeURIComponent(project)}${folder ? `/${encodeURIComponent(folder)}` : ""}/sessions`;
+    }
+    if (remember || !liveTrackerProjectFilter) {
+      liveTrackerProjectFilter = projectIdentity({ project, folder });
+    }
+    return true;
+  };
+  const filterLiveTrackerProject = (item) => {
+    const tracker = document.querySelector(".live-tracker");
+    const project = String(item?.dataset?.project ?? "");
+    const folder = String(item?.dataset?.folder ?? "");
+    if (!(tracker instanceof HTMLElement) || !project) return false;
+    const key = projectIdentity({ project, folder });
+    const group = liveTrackerGroups(tracker).find((candidate) => (
+      projectIdentity(candidate.dataset) === key
+    )) ?? null;
+    showLiveTrackerProject(group, { item });
+    const menu = item.closest?.("details.projects-menu");
+    if (menu instanceof HTMLDetailsElement) menu.open = false;
+    return true;
+  };
+  const syncLiveTrackerProjectFilter = () => {
+    const tracker = document.querySelector(".live-tracker");
+    const groups = liveTrackerGroups(tracker);
+    if (!(tracker instanceof HTMLElement) || groups.length === 0) return;
+    const serverKey = projectIdentity({
+      project: tracker.dataset.filterProject,
+      folder: tracker.dataset.filterFolder,
+    });
+    const key = liveTrackerProjectFilter || serverKey;
+    const selected = groups.find((group) => projectIdentity(group.dataset) === key)
+      ?? groups.find((group) => group.dataset.current === "true")
+      ?? groups[0];
+    showLiveTrackerProject(selected, { remember: false });
+  };
   const sessionEventsUrl = (sessionId) =>
     `${consoleBasePath()}/session/${encodeURIComponent(sessionId)}/events`;
   const selectionCanonical = (sessionId, projectItem, fallback = "") => {
@@ -1115,6 +1182,7 @@
     const folder = String(meta.folder || "");
     const projectsScope = meta.scope === "projects";
     const child = meta.origin === "subagent" && Boolean(meta.parent);
+    if (!projectsScope && project) liveTrackerProjectFilter = projectIdentity({ project, folder });
     rail.dataset.currentProject = project;
     rail.dataset.currentFolder = folder;
     rail.dataset.currentActive = "true";
@@ -1259,6 +1327,7 @@
       }, projectItem.href);
       return true;
     }
+    if (filterLiveTrackerProject(projectItem)) return true;
     const sessions = readProjectSessions(projectItem);
     const currentId = sessions.some((session) => session.id === overlaySessionId)
       ? overlaySessionId
@@ -2149,7 +2218,9 @@
     const picker = link.matches(`.active-project-item, .projects-choice, ${LIVE_SESSION_PICKER}`);
     if (!url) return;
     if (!picker && url.pathname === location.pathname && url.search === location.search) return;
-    const closesMobileRail = picker && !desktopChair() && navMode()
+    const filterOnlyProject = link.matches(".active-project-item[data-project], .projects-choice[data-project]")
+      && Boolean(document.querySelector(".live-tracker"));
+    const closesMobileRail = picker && !filterOnlyProject && !desktopChair() && navMode()
       && Boolean(link.closest("#project-rail, .session-traversal"));
     event.preventDefault();
     void chairGo(url.href, link);
@@ -2932,7 +3003,10 @@
     document.addEventListener(eventName, (event) => {
       const id = swapTargetId(event);
       if (touchesComposer(id)) restoreDraft();
-      if (id === "session-chrome") syncLiveTrackerElapsed();
+      if (id === "session-chrome") {
+        syncLiveTrackerElapsed();
+        syncLiveTrackerProjectFilter();
+      }
     });
   }
 
@@ -2963,6 +3037,7 @@
     prepareSession();
     syncLiveTrackerElapsed();
     restoreActiveProjects();
+    syncLiveTrackerProjectFilter();
     if (!options.skipValidate) void validateRememberedProjects();
     if (drawerIsOpen()) requestAnimationFrame(() => openDrawer({ updateUrl: false, focus: !keepOpenerFocus }));
     restoreFileReturnFromHistory();
