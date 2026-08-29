@@ -2,7 +2,7 @@
 
 Server-rendered Cordis operator console. This repository owns HTML, routes,
 CSS, htmx, browser behavior, and PWA assets; presentation-neutral session
-semantics remain in `@hypermemetic-ai/qq` from sibling `qq-core`.
+semantics remain in `@hypermemetic-ai/qq-core` from sibling `qq-core`.
 
 The local dependency is `file:../qq-core`. The core launcher binds this plugin
 only when `../qq-ui` is present, and its HMR root is this repository root.
