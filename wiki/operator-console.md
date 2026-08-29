@@ -1,0 +1,58 @@
+# Operator console delivery
+
+## What it is
+
+- `@hypermemetic-ai/qq-ui` is an ESM Cordis plugin that turns a `qq-core` session service into a loopback-only operator console. `apply` mounts a configurable prefix (default `/qq`) and the root redirect on `webServer`; it does not own session semantics.
+- `createConsoleHandler` is the central adapter. It maps home, projects, folders, sessions, files, tools, mutations, health, assets, and SSE onto backend capabilities, enriches core snapshots with optional UI sheets, and chooses full-page, redirect, JSON, file, or HTMX out-of-band responses.
+- `render.mjs` projects snapshots into the first HTML paint and named update regions. `assets/browser-v9.js`, the HTMX/SSE extensions, and `assets/console.css` enhance that markup with live patches, session switching, draft/scroll preservation, keyboard and gesture behavior, drawers, viewers, and responsive chrome.
+- These server and browser pieces are one ownership boundary. Region names and IDs, canonical URLs, live-node keys, patch operations, CSS selectors, and switch handshakes are cross-file protocols; a plan that changes one side must re-establish the others.
+- The package also owns safe Markdown and code presentation, approval UI mediation, project-file viewing/opening/downloading through core, and the service-worker policy for presentation assets. These are seams of the console rather than independent session domains.
+
+## Sits with
+
+- Required sibling `../qq-core`: supplies `read`, `list`, `create`, `prompt`, `interrupt`, `close`, and `observe`; project-aware and file-aware routes appear only when the additional backend methods exist. The local package dependency and launcher/HMR joint are described in `package.json` and `README.md`.
+- Cordis provides `webServer`, effects, and service lookup. `plugin.mjs` requires `qq-core` and `webServer`, listens to `approval/request` only when an `approval` service exists, and resolves optional services on demand so their reloads do not freeze old facades.
+- `qq-workflows` supplies case files, offers, workflow names/modes, and choices; `qq-models` supplies login sheets; `image-finder` supplies overlays/find mode; `media-box` supplies progress. Failures to read these passive sheets do not make the core session unreadable.
+- Vendored `htmx` 2.0.10 and `htmx-ext-sse` 2.2.4 are pinned in `vendor-pins.json`. `markdown-it` and `highlight.js` are runtime dependencies used by `markdown.mjs`.
+- The generated document always references `/qq/dictate/client.js` and `/qq/cast/client.js`; those integrations sit outside this package, and unlike console routes those two URLs are not derived from a custom `basePath`.
+
+## Invariants
+
+- **Trust boundary.** `apply` refuses a non-`127.0.0.1` web-server host. Dynamic responses are no-store and all responses carry browser security headers; explicitly bundled immutable assets may override the cache policy. State-changing forms require same-origin evidence, URL-encoded bodies, and bounded input. File bytes and path admission come from core methods, not direct arbitrary filesystem access here.
+- **Server-first operation.** First paint contains the usable transcript, controls, optional sheets, and project chrome. Non-HTMX callers receive ordinary redirects or pages; HTMX is an enhancement that receives `HX-Redirect` or out-of-band region replacements. Do not make browser-only state authoritative for a session.
+- **Snapshot projection.** `view` combines the core snapshot with the appropriate session list and passive sheets. `watch` seeds sheet state from that initial view before raw `observe` callbacks arrive, then polls optional sheets and merges them into observations; otherwise first-paint approval/offer/overlay state can disappear on the first SSE event.
+- **Bounded console fold.** Both first paint and the observation hot path pass through `consoleFoldWindow`: the console shows at most the current and previous operator-started pair (`CONSOLE_PAIRS = 2`). Core still owns the complete durable transcript.
+- **Child chairs are observational.** Subagent snapshots get parent navigation and optional progress, not root session tokens, creation controls, composer, case/offer/approval/login/overlay sheets, or close UI. Server guards explicitly reject child prompt, queue, interrupt, and approval mutations; preserve both the rendering and route checks.
+- **Named-region protocol.** `SSE_REGION_NAMES`, `SSE_REGION_IDS`, `renderSessionRegion`, `regionFingerprints`, server event emission, HTML `sse-swap` targets, and browser selectors form one schema. Prompt/interrupt HTMX responses intentionally omit the queue because SSE owns that claim transition; queue edit/remove responses may replace it.
+- **Transcript order.** The settled transcript is a chronological prefix ending before the first running/streaming node; everything from that node onward is one mixed live suffix, including tools and later text. Settled nodes append while keys remain a prefix and reset when the surface is recommissioned. Never split live text and tools into independently ordered stacks.
+- **Incremental live updates.** Stable keyed live islands allow insert, replace/seal, and text-prefix append frames. The browser validates operation, key, and `from` offset, flushes buffered text before replacement, and suppresses protocol JSON rather than painting it when an old DOM races a reconnect. Non-prefix content changes fall back to replacement/reset.
+- **Live-switch handshake.** A bootstrap stream emits `switch-meta`, all destination regions, `switch-ready`, then buffered observations. Session ID plus generation gates both messages; the browser rejects stale EventSources, commits canonical history only at the right stage, rebinds HTMX/SSE, syncs the rail, and restores a per-session draft. Empty project surfaces have no SSE targets and must navigate instead.
+- **Canonical location and close recovery.** Project/folder membership is checked against the loaded snapshot, legacy session URLs redirect to project-aware canonical URLs, and switching resolves only live sessions. After close, prefer the backend's same-project remainder, then a still-live remembered cookie/last-viewed chair, then the first live row, and finally the projects chair.
+- **Rendering safety.** Literal user, tool, and context text is escaped. Raw HTML and images are disabled in Markdown; emitted links are limited to `http`, `https`, and `mailto`, with external HTTP(S) links isolated. Live reasoning is escaped text while streaming and is promoted to Markdown when settled. Syntax highlighting is language-declared, never auto-detected.
+- **Context and tool payloads.** Context cards show the model-facing text in first paint even when collapsed, do not dump source metadata, and unwrap recognized relay envelopes while retaining durable sender identity. Closed tool cards with a call ID defer bodies to the tool route; inline previews are capped at 80 lines and 12 KiB, while the route can render the complete core-provided result.
+- **Approval mediation fails closed.** Only root operator agents can be claimed. An ask pairs with the newest unmatched `approval/asked` event having the same call ID; claimed or decided IDs are skipped. Operator decisions are only `allowed-once` or `rejected`, and abort/dispose settles pending entries as `cancelled`.
+- **Asset generations.** Normal mode freezes render code and the UI generation at process start. `liveAssets` rereads active CSS/browser files and hot-imports `render.mjs`; SSE publishes the generation so the browser preserves its draft and reloads when its loaded script is stale.
+- **Offline boundary.** The service worker retries same-origin navigations before serving the offline shell and caches only its explicit presentation allowlist. Transcripts, events, prompts, files, credentials, and active `console.css`/`browser.js` aliases never enter Cache Storage.
+
+## Look in
+
+- `src/plugin.mjs` — `apply`: required Cordis services, loopback check, optional facade adapters, approval listener, registration, and disposal.
+- `src/http-app.mjs` — `routes`, `parseSessionRoute`, `parseProjectRoute`, `createConsoleHandler`, `withSheets`, `view`, `watch`, `mutationResponse`, the `events` branch, `closeNavigationLocation`, `resolveAsset`, and `consoleFoldWindow`.
+- `src/render.mjs` — `SSE_REGION_*`, `splitTranscriptNodes`, `liveTranscriptState`, `liveTranscriptUpdate`, `renderSettledTranscriptAppend`, `regionFingerprints`, `renderMutationOob`, `renderSessionContent`, and `renderPage` re-establish the server/browser markup protocol.
+- `src/render.mjs` — `renderConversationNode`, `contextCard`, `codeDispatchNodes`, `renderToolBody`, `renderCaseRegion`, and document-viewer functions cover payload interpretation and presentation.
+- `src/markdown.mjs` and `src/approval.mjs` — the two small trust-sensitive seams: escaping/link policy/highlighting and approval ask pairing/lifetime.
+- `assets/browser-v9.js` — `applyLivePatch`, SSE interception, `canLiveSwitch`/`liveSwitch`/`finishLiveSwitch`, soft page adoption, draft/scroll preservation, navigation, gestures, drawers, and viewer behavior.
+- `assets/console.css` and `assets/sw.js` — responsive layout selectors and the cache/navigation policy. Use `src/http-app.mjs` to determine which versioned asset names actually map to these active files.
+- `package.json` defines the executed proof set. `scripts/prove-session-switcher-polish.mjs` exercises first-paint/sheet/SSE/switch/close routing; the context-card, reasoning-gesture, and desktop-case-rail proofs pin markup/CSS/browser contracts.
+- Recent intent is concentrated in `git log` around context-card readability, live project/session switching, post-close chair selection, reasoning visibility, and the `qq-core` service-name migration; source and the package test command remain authoritative.
+
+## Traps
+
+- Do not move presentation-neutral identity, transcript, turn, interruption, project, or file-admission rules into this repository. A richer UI field should normally be a projection of a core snapshot or an optional service sheet.
+- Do not treat `http-app.mjs`, `render.mjs`, browser JavaScript, CSS, or proof scripts as independent features. A renamed region, ID, class, route suffix, live key, or patch event can silently break HTMX, SSE, soft navigation, accessibility behavior, and tests elsewhere.
+- Do not send the whole transcript on every update or replace the settled log during ordinary growth. Token frames deliberately bypass render-module loading; region fingerprints and prefix checks keep updates bounded and ordered.
+- Do not let an immediate raw core observation overwrite enriched first paint, or let observations emitted during a session bootstrap race ahead of `switch-ready`.
+- Do not infer current entry assets from the highest historical filename. The document uses `console.css` and `browser.js`; `http-app.mjs` maps those to `assets/console.css` and `assets/browser-v9.js`, while many versioned names remain compatibility aliases or service-worker entries.
+- Do not cache dynamic console traffic to make the PWA feel more offline. The offline shell is presentation-only; durable session truth must come back from the live server.
+- Do not assume every file named `scripts/prove-*.mjs` runs under `npm test`; follow the exact package script. The proofs intentionally include source/selector assertions because markup, CSS, and browser behavior are one contract.
+- Do not assume custom `basePath` rewrites the hard-coded dictate/cast script joints or the cookie's current `Path=/qq`; verify those seams explicitly in any base-path plan.
