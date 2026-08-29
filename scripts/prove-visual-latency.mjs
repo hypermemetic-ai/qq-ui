@@ -155,19 +155,46 @@ function fixture({ search = "", stored = null, limits } = {}) {
   };
 }
 
-const disabled = fixture();
-assert.equal(disabled.api.snapshot().active, false, "study defaults off");
-assert.equal(disabled.observers.length, 0, "disabled mode creates no MutationObserver");
-assert.equal(disabled.document.listenerCount(), 0, "disabled mode creates no document listeners");
-assert.equal(disabled.frameCount(), 0, "disabled mode schedules no animation frame");
+const ordinary = fixture();
+assert.equal(ordinary.api.snapshot().active, true, "study defaults on without a query or stored preference");
+assert.equal(ordinary.storage.get("qq:latency"), "1", "the default-on preference persists for the tab");
+assert.equal(ordinary.observers.length, 1, "default-on mode creates one MutationObserver");
+assert.ok(ordinary.document.listenerCount() > 0, "default-on mode installs document listeners");
+const ordinaryButton = new FakeElement("button", { id: "ordinary" });
+ordinary.document.dispatch("pointerdown", { isTrusted: true, button: 0, target: ordinaryButton });
+ordinary.document.dispatch("input", { isTrusted: true, target: ordinaryButton });
+assert.equal(ordinary.frameCount(), 1, "ordinary visual signals schedule collection immediately");
+ordinary.frame(16);
+assert.equal(ordinary.api.snapshot().origins.length, 1, "ordinary use collects interactions immediately");
+assert.equal(ordinary.api.snapshot().visuals.length, 1, "ordinary use collects visual records by default");
+ordinary.api.stop();
+
+const storedDisabled = fixture({ stored: "0" });
+assert.equal(storedDisabled.api.snapshot().active, false, "a stored per-tab opt-out survives navigation/reload");
+assert.equal(storedDisabled.storage.get("qq:latency"), "0");
+assert.equal(storedDisabled.observers.length, 0, "stored opt-out creates no MutationObserver");
+assert.equal(storedDisabled.document.listenerCount(), 0, "stored opt-out creates no document listeners");
+assert.equal(storedDisabled.frameCount(), 0, "stored opt-out schedules no animation frame");
+storedDisabled.api.start();
+assert.equal(storedDisabled.api.snapshot().active, true, "start re-enables a stored opt-out");
+assert.equal(storedDisabled.storage.get("qq:latency"), "1", "start persists re-enablement for the tab");
+storedDisabled.api.stop();
 
 const queryDisabled = fixture({ search: "?qq-latency=0", stored: "1" });
 assert.equal(queryDisabled.api.snapshot().active, false, "query zero overrides a stored opt-in");
 assert.equal(queryDisabled.storage.get("qq:latency"), "0", "query zero persists for the tab");
 assert.equal(queryDisabled.observers.length, 0);
+assert.equal(queryDisabled.document.listenerCount(), 0, "query opt-out creates no document listeners");
+assert.equal(queryDisabled.frameCount(), 0, "query opt-out schedules no animation frame");
+
+const queryEnabled = fixture({ search: "?qq-latency=1", stored: "0" });
+assert.equal(queryEnabled.api.snapshot().active, true, "query one overrides and re-enables a stored opt-out");
+assert.equal(queryEnabled.storage.get("qq:latency"), "1", "query one persists re-enablement for the tab");
+assert.equal(queryEnabled.observers.length, 1);
+queryEnabled.api.stop();
 
 const persisted = fixture({ stored: "1" });
-assert.equal(persisted.api.snapshot().active, true, "sessionStorage opt-in survives page navigation/reload");
+assert.equal(persisted.api.snapshot().active, true, "sessionStorage re-enablement survives page navigation/reload");
 assert.equal(persisted.observers.length, 1);
 persisted.api.stop();
 
