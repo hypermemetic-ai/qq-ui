@@ -626,10 +626,7 @@ function liveFace(snapshot) {
 
 function sessionToken(session) {
   const alias = typeof session?.alias === "string" ? session.alias.trim() : "";
-  if (alias) return alias;
-  const id = String(session?.id ?? "");
-  const uuid = id.match(/^session-[0-9a-f-]+([0-9a-f]{4})$/i);
-  return uuid?.[1] ?? sessionFace(session);
+  return alias || sessionFace(session);
 }
 
 function isChildSession(snapshot) {
@@ -715,23 +712,74 @@ function newSessionForm(action, extraClass = "") {
     </form>`;
 }
 
+function selectedLiveTrackerSession(snapshot) {
+  const selectedId = String(snapshot?.id ?? "");
+  if (!selectedId || snapshot?.dashboard?.schema !== "qq.dashboard/v1") return null;
+  for (const project of Array.isArray(snapshot.dashboard.projects) ? snapshot.dashboard.projects : []) {
+    const selected = (Array.isArray(project?.sessions) ? project.sessions : [])
+      .find((row) => row?.sessionId === selectedId);
+    if (selected) return selected;
+  }
+  return null;
+}
+
+function trackerSessionFace(row) {
+  return row?.alias || row?.label || "session";
+}
+
+function trackerPhaseStartedAt(row) {
+  return Number.isFinite(row?.phaseStartedAt) && Number.isInteger(row.phaseStartedAt) && row.phaseStartedAt >= 0
+    ? row.phaseStartedAt
+    : null;
+}
+
+function renderLiveTrackerRow(row, paths, selectedId) {
+  const current = row.sessionId === selectedId;
+  const face = trackerSessionFace(row);
+  const secondary = row.alias && row.label !== row.alias ? row.label : "";
+  const depthClass = ` live-tracker-depth-${Math.min(row.depth, 8)}`;
+  const workflow = row.workflow
+    ? `<span class="live-tracker-workflow">${escapeHtml(row.workflow)}</span>`
+    : "";
+  const startedAt = trackerPhaseStartedAt(row);
+  const elapsed = startedAt === null
+    ? ""
+    : `<time class="live-tracker-elapsed" data-phase-started-at="${startedAt}"></time>`;
+  return `<li class="live-tracker-row${depthClass}"><a class="live-tracker-session${current ? " live-tracker-session-current" : ""}" href="${escapeHtml(sessionSwitchHref(paths, row.sessionId))}" data-session-id="${escapeHtml(row.sessionId)}" data-depth="${row.depth}"${current ? ' aria-current="page"' : ""}>
+      <span class="live-tracker-identity"><span class="live-tracker-face">${escapeHtml(face)}</span>${secondary ? `<span class="live-tracker-label">${escapeHtml(secondary)}</span>` : ""}</span>
+      <span class="live-tracker-state"><span class="live-tracker-activity" data-activity="${escapeHtml(row.activity)}">${escapeHtml(row.activity)}</span>${workflow}<span class="live-tracker-phase" data-phase="${escapeHtml(row.phase)}">${escapeHtml(row.phase)}</span>${elapsed}</span>
+    </a></li>`;
+}
+
+function renderLiveTracker(snapshot, paths, create) {
+  const dashboard = snapshot?.dashboard;
+  const valid = dashboard?.schema === "qq.dashboard/v1" && Array.isArray(dashboard.projects) && paths?.switchSession;
+  if (!valid) {
+    return `<nav class="session-traversal live-tracker live-tracker-unavailable" aria-label="Live session tracker" aria-keyshortcuts="ArrowLeft ArrowRight"><span class="live-tracker-message">live tracking unavailable</span>${create}</nav>`;
+  }
+  if (dashboard.projects.length === 0) {
+    return `<nav class="session-traversal live-tracker live-tracker-empty" aria-label="Live session tracker" aria-keyshortcuts="ArrowLeft ArrowRight"><span class="live-tracker-message">no live sessions</span>${create}</nav>`;
+  }
+  const selectedId = String(snapshot?.id ?? "");
+  const groups = dashboard.projects.map((project) => {
+    const folder = project.folder && project.folderLabel
+      ? `<span class="live-tracker-folder">${escapeHtml(project.folderLabel)}</span>`
+      : "";
+    const rows = project.sessions.map((row) => renderLiveTrackerRow(row, paths, selectedId)).join("");
+    return `<section class="live-tracker-project"><h2 class="live-tracker-project-name">${escapeHtml(project.label)}${folder}</h2><ol class="live-tracker-sessions">${rows}</ol></section>`;
+  }).join("");
+  return `<nav class="session-traversal live-tracker" aria-label="Live session tracker" aria-keyshortcuts="ArrowLeft ArrowRight">${groups}${create}</nav>`;
+}
+
 function sessionNavigation(snapshot, paths) {
   const child = isChildSession(snapshot);
   const projects = snapshot?.scope === "projects";
-  const choices = child || projects ? [] : menuSessions(snapshot.sessions);
-  const selectedId = String(snapshot.id ?? "");
-  const selected = selectedId
-    ? choices.find((session) => session.id === selectedId) ?? snapshot
-    : undefined;
-  const token = selected ? sessionToken(selected) : "";
-  const links = choices.map((session) => {
-    const current = session.id === selectedId;
-    const href = sessionSwitchHref(paths, session.id);
-    return `<a class="session-token${current ? " session-token-current" : ""}" href="${escapeHtml(href)}" data-session-id="${escapeHtml(session.id)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(session.id)}"><span>${escapeHtml(sessionToken(session))}</span></a>`;
-  }).join("");
-  const create = child || projects || !paths.createSession ? "" : newSessionForm(paths.createSession);
-  const empty = child || projects ? "" : '<span class="session-empty">no live sessions</span>';
-  const tokens = `<nav class="session-traversal" aria-label="Sessions" aria-keyshortcuts="ArrowLeft ArrowRight">${links || empty}${create}</nav>`;
+  const tracked = selectedLiveTrackerSession(snapshot);
+  const token = tracked ? trackerSessionFace(tracked) : "";
+  const create = child || projects || !paths.createSession
+    ? ""
+    : newSessionForm(paths.createSession);
+  const tokens = renderLiveTracker(snapshot, paths, create);
   const close = child || !paths.close
     ? ""
     : `<form id="close-session" class="close-session session-background-actions" action="${escapeHtml(paths.close)}" method="post" hidden>
@@ -1588,7 +1636,8 @@ function regionShell(id, className, eventName, inner, enabled, swap = "innerHTML
 export function renderChrome(snapshot, paths, notice = "") {
   const emptyProject = !snapshot?.id;
   const status = sessionStatus(snapshot);
-  const face = emptyProject ? "" : liveFace(snapshot);
+  const tracked = selectedLiveTrackerSession(snapshot);
+  const face = emptyProject ? "" : tracked ? trackerSessionFace(tracked) : liveFace(snapshot);
   const sessions = sessionNavigation(snapshot, paths);
   const project = placeName(snapshot);
   const slash = slashNoticeHtml(snapshot, paths, notice);
@@ -1785,6 +1834,28 @@ export function renderSessionRegion(name, snapshot, paths, notice = "") {
   }
 }
 
+function liveTrackerFingerprint(dashboard) {
+  if (dashboard?.schema !== "qq.dashboard/v1" || !Array.isArray(dashboard.projects)) return null;
+  return dashboard.projects.map((project) => [
+    project.key,
+    project.name,
+    project.label,
+    project.folder,
+    project.folderLabel,
+    (Array.isArray(project.sessions) ? project.sessions : []).map((row) => [
+      row.sessionId,
+      row.alias,
+      row.label,
+      row.parentSessionId,
+      row.depth,
+      row.activity,
+      row.workflow,
+      row.phase,
+      row.phaseStartedAt,
+    ]),
+  ]);
+}
+
 /** Compact per-region tokens. SSE emits a named event only when that token changes. */
 export function regionFingerprints(snapshot) {
   const sessions = Array.isArray(snapshot?.sessions) ? snapshot.sessions : [];
@@ -1807,6 +1878,7 @@ export function regionFingerprints(snapshot) {
       status.code ?? "",
       sessions.map((session) => [session.id, session.createdAt, session.alias, session.project]),
       (snapshot?.activeProjects ?? []).map((session) => [session.id, session.createdAt, session.alias, session.project, session.folder]),
+      liveTrackerFingerprint(snapshot?.dashboard),
       snapshot?.sessionMode ?? "",
       (snapshot?.workflows ?? []).join(","),
     ]),
