@@ -1,7 +1,533 @@
 (() => {
   "use strict";
 
+  /* qq-latency-factory:start */
+  const createQQLatencyStudy = (host, options = {}) => {
+    const document = host.document;
+    const performance = host.performance;
+    const storageKey = "qq:latency";
+    const configuredLimits = options.limits ?? {};
+    const positiveLimit = (value, fallback) => Number.isInteger(value) && value > 0 ? value : fallback;
+    const limits = Object.freeze({
+      origins: positiveLimit(configuredLimits.origins, 500),
+      stages: positiveLimit(configuredLimits.stages, 1000),
+      visuals: positiveLimit(configuredLimits.visuals, 2000),
+    });
+    const now = () => {
+      const value = Number(performance?.now?.());
+      return Number.isFinite(value) ? value : 0;
+    };
+    const round = (value) => value === null || value === undefined
+      ? null
+      : Math.round(value * 1000) / 1000;
+    const timeOrigin = Number.isFinite(Number(performance?.timeOrigin))
+      ? Number(performance.timeOrigin)
+      : Date.now() - now();
+    const safeToken = (value, maximum = 48) => String(value ?? "")
+      .replace(/[^a-zA-Z0-9_:.@/-]+/g, "_")
+      .slice(0, maximum);
+    const elementFor = (node) => {
+      if (node?.nodeType === 3) return node.parentElement ?? null;
+      return node?.nodeType === 1 || typeof node?.tagName === "string" ? node : null;
+    };
+    const safeTargetLabel = (node) => {
+      const element = elementFor(node);
+      if (!element) return null;
+      const tag = safeToken(String(element.tagName ?? "element").toLowerCase(), 24) || "element";
+      const id = safeToken(element.id ?? element.getAttribute?.("id") ?? "");
+      let classes = [];
+      try {
+        classes = Array.from(element.classList ?? String(element.className ?? "").split(/\s+/));
+      } catch {}
+      const classSuffix = classes.map((entry) => safeToken(entry, 40)).filter(Boolean).slice(0, 3)
+        .map((entry) => `.${entry}`).join("");
+      return `${tag}${id ? `#${id}` : ""}${classSuffix}`.slice(0, 180);
+    };
+    const attribute = (element, name) => {
+      try { return element?.getAttribute?.(name) ?? null; } catch { return null; }
+    };
+    const safePath = (value) => {
+      if (!value) return "";
+      try {
+        const URLConstructor = host.URL ?? URL;
+        const parsed = new URLConstructor(String(value), host.location?.href ?? "http://qq.invalid/");
+        return safeToken(parsed.pathname, 160);
+      } catch {
+        return safeToken(String(value).split(/[?#]/, 1)[0], 160);
+      }
+    };
+    const actionForElement = (element) => {
+      if (!element) return "";
+      for (const verb of ["get", "post", "put", "patch", "delete"]) {
+        const path = attribute(element, `hx-${verb}`) ?? attribute(element, `data-hx-${verb}`);
+        if (path) return `${verb.toUpperCase()} ${safePath(path)}`;
+      }
+      const form = String(element.tagName ?? "").toLowerCase() === "form" ? element : element.form;
+      const formAction = attribute(element, "formaction") ?? attribute(form, "action");
+      if (formAction) {
+        const method = safeToken(attribute(element, "formmethod") ?? attribute(form, "method") ?? "get", 12).toUpperCase();
+        return `${method || "GET"} ${safePath(formAction)}`;
+      }
+      const href = attribute(element, "href");
+      if (href) return `NAVIGATE ${safePath(href)}`;
+      const type = safeToken(attribute(element, "type") ?? "", 24);
+      return type ? `control:${type.toLowerCase()}` : "";
+    };
+    const keyAction = (key) => {
+      const named = {
+        Enter: "enter", Escape: "escape", Tab: "tab", Backspace: "edit", Delete: "edit",
+        ArrowUp: "navigation", ArrowDown: "navigation", ArrowLeft: "navigation", ArrowRight: "navigation",
+        PageUp: "navigation", PageDown: "navigation", Home: "navigation", End: "navigation",
+        " ": "space", Spacebar: "space",
+      };
+      if (named[key]) return `key:${named[key]}`;
+      return String(key ?? "").length === 1 ? "key:text" : "key:control";
+    };
+    const interactionControl = (node) => {
+      const element = elementFor(node);
+      if (!element) return null;
+      try {
+        return element.closest?.("button, a, input, select, textarea, summary, form, [role=button], [role=link], [tabindex]") ?? element;
+      } catch { return element; }
+    };
+    const relatedTargets = (left, right) => {
+      if (!left || !right) return false;
+      if (left === right || left.form === right || right.form === left || (left.form && left.form === right.form)) return true;
+      try { if (left.contains?.(right) || right.contains?.(left)) return true; } catch {}
+      return false;
+    };
+
+    let active = false;
+    let startedAt = null;
+    let startedAtISO = null;
+    let origins = [];
+    let stages = [];
+    let visuals = [];
+    let dropped = { origins: 0, stages: 0, visuals: 0 };
+    let originSequence = 0;
+    let requestSequence = 0;
+    let latestInteraction = null;
+    let recentGesture = null;
+    let activeRequest = null;
+    let originByEvent = new WeakMap();
+    let originByTarget = new WeakMap();
+    let requestByXhr = new WeakMap();
+    let observer = null;
+    let frameRequest = 0;
+    let pendingVisual = null;
+    let lastExplicitKey = null;
+    let lastExplicitSample = null;
+    const cleanups = [];
+
+    const appendBounded = (kind, entry) => {
+      const list = kind === "origins" ? origins : kind === "stages" ? stages : visuals;
+      if (list.length >= limits[kind]) {
+        list.shift();
+        dropped[kind] += 1;
+      }
+      list.push(entry);
+      return entry;
+    };
+    const addTarget = (target) => {
+      const label = safeTargetLabel(target);
+      if (label && pendingVisual.targets.size < 12) pendingVisual.targets.add(label);
+    };
+    const ensurePending = () => {
+      if (!pendingVisual) pendingVisual = { sources: new Set(), mutationCount: 0, targets: new Set() };
+      return pendingVisual;
+    };
+    const addSignal = (source, target, mutationCount = 0) => {
+      ensurePending();
+      pendingVisual.sources.add(source);
+      pendingVisual.mutationCount += mutationCount;
+      addTarget(target);
+    };
+    const correlationAt = (at) => ({
+      latestInteractionId: latestInteraction?.id ?? null,
+      latestInteractionLatencyMs: latestInteraction ? round(at - latestInteraction.at) : null,
+      activeRequestId: activeRequest?.id ?? null,
+      activeRequestOriginId: activeRequest?.origin?.id ?? null,
+      activeRequestLatencyMs: activeRequest?.origin ? round(at - activeRequest.origin.at) : null,
+      networkDispatchLatencyMs: activeRequest?.dispatchAt !== null && activeRequest?.dispatchAt !== undefined
+        ? round(at - activeRequest.dispatchAt)
+        : null,
+    });
+    const makeVisual = (at) => ({
+      at: round(at),
+      sources: [...pendingVisual.sources].sort(),
+      mutationCount: pendingVisual.mutationCount,
+      targets: [...pendingVisual.targets].sort(),
+      ...correlationAt(at),
+    });
+    const mergePendingInto = (sample, at) => {
+      sample.at = round(at);
+      sample.sources = [...new Set([...sample.sources, ...pendingVisual.sources])].sort();
+      sample.mutationCount += pendingVisual.mutationCount;
+      sample.targets = [...new Set([...sample.targets, ...pendingVisual.targets])].sort().slice(0, 12);
+      Object.assign(sample, correlationAt(at));
+    };
+    const flushVisual = () => {
+      frameRequest = 0;
+      if (!pendingVisual) return null;
+      const sample = makeVisual(now());
+      pendingVisual = null;
+      lastExplicitKey = null;
+      lastExplicitSample = null;
+      return appendBounded("visuals", sample);
+    };
+    const scheduleVisual = () => {
+      if (frameRequest || typeof host.requestAnimationFrame !== "function") return;
+      frameRequest = host.requestAnimationFrame(flushVisual);
+    };
+    const signalVisual = (source, target) => {
+      if (!active) return;
+      addSignal(source, target);
+      scheduleVisual();
+    };
+    const mergeMutations = (records, { schedule = true } = {}) => {
+      if (!active || !records?.length) return;
+      for (const record of records) {
+        const type = record?.type === "childList" || record?.type === "characterData" || record?.type === "attributes"
+          ? record.type
+          : "other";
+        addSignal(`mutation:${type}`, record?.target, 1);
+      }
+      if (schedule) scheduleVisual();
+    };
+    const markStreamPaint = (target, opportunity = null) => {
+      if (!active) return null;
+      mergeMutations(observer?.takeRecords?.() ?? [], { schedule: false });
+      addSignal("stream-paint", target);
+      if (frameRequest) {
+        host.cancelAnimationFrame?.(frameRequest);
+        frameRequest = 0;
+      }
+      const at = now();
+      if (opportunity !== null && opportunity === lastExplicitKey
+        && lastExplicitSample && visuals[visuals.length - 1] === lastExplicitSample) {
+        mergePendingInto(lastExplicitSample, at);
+        pendingVisual = null;
+        return lastExplicitSample;
+      }
+      const sample = makeVisual(at);
+      pendingVisual = null;
+      appendBounded("visuals", sample);
+      lastExplicitKey = opportunity;
+      lastExplicitSample = sample;
+      return sample;
+    };
+
+    const rememberOriginFor = (event, target, origin) => {
+      if (event && typeof event === "object") originByEvent.set(event, origin);
+      const control = interactionControl(target);
+      if (control && typeof control === "object") originByTarget.set(control, origin);
+      const form = control?.form ?? (String(control?.tagName ?? "").toLowerCase() === "form" ? control : null);
+      if (form && typeof form === "object") originByTarget.set(form, origin);
+    };
+    const canDedupe = (type, target, at) => {
+      if (!recentGesture || at - recentGesture.at > 1500 || !relatedTargets(recentGesture.target, target)) return false;
+      if (recentGesture.type === "pointerdown") return type === "click" || type === "submit" || type === "change" || type === "beforeinput";
+      if (recentGesture.type === "keydown") return type === "click" || type === "submit" || type === "change" || type === "beforeinput" || type === "keydown-repeat";
+      return recentGesture.type === "click" && (type === "submit" || type === "change");
+    };
+    const captureInteraction = (event) => {
+      if (!active || event?.isTrusted !== true) return;
+      const eventType = event.type;
+      if ((eventType === "pointerdown" || eventType === "click") && event.button !== undefined && event.button !== 0) return;
+      if (eventType === "keydown" && (event.isComposing || ["Shift", "Control", "Alt", "Meta"].includes(event.key))) return;
+      if (!["pointerdown", "click", "keydown", "beforeinput", "submit", "change"].includes(eventType)) return;
+      const target = interactionControl(event.submitter ?? event.target);
+      if (!target) return;
+      const at = now();
+      const dedupeType = eventType === "keydown" && event.repeat ? "keydown-repeat" : eventType;
+      if (canDedupe(dedupeType, target, at)) {
+        rememberOriginFor(event, target, recentGesture.origin);
+        return;
+      }
+      const elementAction = actionForElement(target);
+      const action = eventType === "keydown" ? keyAction(event.key)
+        : eventType === "beforeinput" ? `input:${safeToken(event.inputType ?? "edit", 32) || "edit"}`
+          : eventType === "submit" ? (elementAction || "submit")
+            : elementAction || eventType;
+      const origin = appendBounded("origins", {
+        id: `interaction-${++originSequence}`,
+        at: round(at),
+        type: eventType,
+        action,
+        target: safeTargetLabel(target),
+      });
+      latestInteraction = origin;
+      recentGesture = { type: eventType, at, target, origin };
+      rememberOriginFor(event, target, origin);
+    };
+    const requestOrigin = (event) => {
+      const trigger = event?.detail?.requestConfig?.triggeringEvent;
+      const triggerTarget = interactionControl(trigger?.submitter ?? trigger?.target);
+      const exact = trigger && originByEvent.get(trigger);
+      if (exact) return exact;
+      const mappedTarget = triggerTarget && originByTarget.get(triggerTarget);
+      if (mappedTarget && now() - mappedTarget.at <= 2000) return mappedTarget;
+      return latestInteraction && now() - latestInteraction.at <= 2000 ? latestInteraction : null;
+    };
+    const requestAction = (event) => {
+      const config = event?.detail?.requestConfig;
+      const verb = safeToken(config?.verb ?? "", 12).toUpperCase();
+      const path = safePath(config?.path ?? event?.detail?.pathInfo?.requestPath ?? "");
+      if (verb || path) return `${verb || "REQUEST"}${path ? ` ${path}` : ""}`;
+      return actionForElement(event?.detail?.elt ?? event?.target);
+    };
+    const requestFor = (event, { create = false } = {}) => {
+      const xhr = event?.detail?.xhr;
+      if (xhr && typeof xhr === "object") {
+        const known = requestByXhr.get(xhr);
+        if (known) return known;
+      }
+      if (!create) return null;
+      const request = {
+        id: `request-${++requestSequence}`,
+        origin: requestOrigin(event),
+        preparedAt: now(),
+        dispatchAt: null,
+        target: safeTargetLabel(event?.detail?.elt ?? event?.target),
+        action: requestAction(event),
+      };
+      if (xhr && typeof xhr === "object") requestByXhr.set(xhr, request);
+      return request;
+    };
+    const appendStage = (eventName, kind, event, request) => {
+      const at = now();
+      appendBounded("stages", {
+        at: round(at),
+        event: eventName,
+        kind,
+        requestId: request?.id ?? null,
+        originId: request?.origin?.id ?? null,
+        originLatencyMs: request?.origin ? round(at - request.origin.at) : null,
+        dispatchLatencyMs: request?.dispatchAt !== null && request?.dispatchAt !== undefined
+          ? round(at - request.dispatchAt)
+          : null,
+        target: request?.target ?? safeTargetLabel(event?.detail?.elt ?? event?.target),
+        action: request?.action ?? requestAction(event),
+      });
+    };
+    const onBeforeRequest = (event) => {
+      const request = requestFor(event, { create: true });
+      appendStage("htmx:beforeRequest", "request-prepared", event, request);
+    };
+    const onBeforeSend = (event) => {
+      const request = requestFor(event, { create: true });
+      activeRequest = request;
+      if (request.dispatchAt === null) request.dispatchAt = now();
+      appendStage("htmx:beforeSend", "network-dispatch", event, request);
+    };
+    const onRequestStage = (eventName, kind) => (event) => {
+      const request = requestFor(event) ?? (eventName.startsWith("htmx:sse") ? activeRequest : null);
+      appendStage(eventName, kind, event, request);
+    };
+    const listen = (target, type, listener, options) => {
+      if (!target?.addEventListener) return;
+      target.addEventListener(type, listener, options);
+      cleanups.push(() => target.removeEventListener(type, listener, options));
+    };
+    const install = () => {
+      for (const type of ["pointerdown", "click", "keydown", "beforeinput", "submit", "change"]) {
+        listen(document, type, captureInteraction, true);
+      }
+      for (const type of ["beforeinput", "input", "change", "toggle", "focusin", "focusout", "scroll", "selectionchange", "invalid"]) {
+        listen(document, type, (event) => signalVisual(type, event.target), { capture: true, passive: type === "scroll" });
+      }
+      for (const type of ["resize", "scroll", "orientationchange", "pageshow", "popstate", "hashchange"]) {
+        listen(host, type, (event) => signalVisual(`window:${type}`, event.target), { capture: true, passive: type === "scroll" });
+      }
+      for (const type of ["resize", "scroll"]) {
+        listen(host.visualViewport, type, (event) => signalVisual(`visualViewport:${type}`, event.target), { passive: true });
+      }
+      listen(document, "htmx:beforeRequest", onBeforeRequest, true);
+      listen(document, "htmx:beforeSend", onBeforeSend, true);
+      for (const [eventName, kind] of [
+        ["htmx:beforeSwap", "response-before-swap"],
+        ["htmx:afterSwap", "response-after-swap"],
+        ["htmx:afterSettle", "response-after-settle"],
+        ["htmx:afterRequest", "request-complete"],
+        ["htmx:sseOpen", "sse-open"],
+        ["htmx:sseBeforeMessage", "sse-message-before"],
+        ["htmx:sseMessage", "sse-message-after"],
+      ]) listen(document, eventName, onRequestStage(eventName, kind), true);
+      if (typeof host.MutationObserver === "function") {
+        observer = new host.MutationObserver((records) => mergeMutations(records));
+        const root = document?.documentElement ?? document;
+        if (root) observer.observe(root, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+          attributes: true,
+        });
+      }
+    };
+    const setStored = (value) => {
+      try { host.sessionStorage?.setItem(storageKey, value); } catch {}
+    };
+    const start = () => {
+      if (active) return api;
+      active = true;
+      if (startedAt === null) {
+        startedAt = now();
+        try { startedAtISO = new Date(timeOrigin + startedAt).toISOString(); } catch { startedAtISO = null; }
+      }
+      setStored("1");
+      install();
+      return api;
+    };
+    const stop = () => {
+      if (active) {
+        active = false;
+        while (cleanups.length) cleanups.pop()();
+        observer?.disconnect?.();
+        observer = null;
+        if (frameRequest) host.cancelAnimationFrame?.(frameRequest);
+        frameRequest = 0;
+        pendingVisual = null;
+        lastExplicitKey = null;
+        lastExplicitSample = null;
+      }
+      setStored("0");
+      return api;
+    };
+    const clear = () => {
+      origins = [];
+      stages = [];
+      visuals = [];
+      dropped = { origins: 0, stages: 0, visuals: 0 };
+      originSequence = 0;
+      requestSequence = 0;
+      latestInteraction = null;
+      recentGesture = null;
+      activeRequest = null;
+      originByEvent = new WeakMap();
+      originByTarget = new WeakMap();
+      requestByXhr = new WeakMap();
+      if (frameRequest) host.cancelAnimationFrame?.(frameRequest);
+      frameRequest = 0;
+      pendingVisual = null;
+      observer?.takeRecords?.();
+      lastExplicitKey = null;
+      lastExplicitSample = null;
+      startedAt = active ? now() : null;
+      try { startedAtISO = active ? new Date(timeOrigin + startedAt).toISOString() : null; } catch { startedAtISO = null; }
+      return api;
+    };
+    const uiMetadata = () => {
+      const script = options.script ?? document?.currentScript
+        ?? document?.querySelector?.("script[data-ui-generation], script[data-ui-revision]");
+      const marker = document?.querySelector?.("#ui-generation");
+      return {
+        generation: safeToken(script?.dataset?.uiGeneration ?? "", 120) || null,
+        revision: safeToken(marker?.dataset?.uiRevision ?? script?.dataset?.uiRevision ?? "", 120) || null,
+      };
+    };
+    const viewportMetadata = () => {
+      const visual = host.visualViewport;
+      return {
+        width: Number(host.innerWidth) || null,
+        height: Number(host.innerHeight) || null,
+        devicePixelRatio: Number(host.devicePixelRatio) || null,
+        visual: visual ? {
+          width: Number(visual.width) || null,
+          height: Number(visual.height) || null,
+          scale: Number(visual.scale) || null,
+        } : null,
+      };
+    };
+    const snapshot = () => {
+      const result = {
+        schema: "qq.visual-latency/v1",
+        measurement: "visual-ready/presentation-opportunity",
+        precision: "normally plus or minus one frame; not exact compositor pixel timing",
+        active,
+        startedAt: startedAt === null ? null : round(startedAt),
+        startedAtISO,
+        capturedAt: round(now()),
+        timeOrigin,
+        ui: uiMetadata(),
+        viewport: viewportMetadata(),
+        userAgent: String(host.navigator?.userAgent ?? "").slice(0, 512),
+        limits: { ...limits },
+        latestInteractionId: latestInteraction?.id ?? null,
+        activeRequest: activeRequest ? {
+          id: activeRequest.id,
+          originId: activeRequest.origin?.id ?? null,
+          preparedAt: round(activeRequest.preparedAt),
+          dispatchAt: round(activeRequest.dispatchAt),
+          target: activeRequest.target,
+          action: activeRequest.action,
+        } : null,
+        origins,
+        stages,
+        visuals,
+        dropped: { ...dropped, total: dropped.origins + dropped.stages + dropped.visuals },
+      };
+      return JSON.parse(JSON.stringify(result));
+    };
+    const percentile = (sorted, portion) => {
+      if (!sorted.length) return null;
+      const position = (sorted.length - 1) * portion;
+      const lower = Math.floor(position);
+      const upper = Math.ceil(position);
+      if (lower === upper) return round(sorted[lower]);
+      return round(sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower));
+    };
+    const summary = () => {
+      const rows = new Map();
+      for (const visual of visuals) {
+        if (!visual.activeRequestId) continue;
+        let row = rows.get(visual.activeRequestId);
+        if (!row) {
+          row = { requestId: visual.activeRequestId, originId: visual.activeRequestOriginId, values: [], count: 0 };
+          rows.set(visual.activeRequestId, row);
+        }
+        row.count += 1;
+        if (visual.activeRequestLatencyMs !== null) row.values.push(visual.activeRequestLatencyMs);
+      }
+      return [...rows.values()].map((row) => {
+        const sorted = [...row.values].sort((left, right) => left - right);
+        return {
+          requestId: row.requestId,
+          originId: row.originId,
+          count: row.count,
+          firstLatencyMs: row.values.length ? round(row.values[0]) : null,
+          p50LatencyMs: percentile(sorted, 0.5),
+          p95LatencyMs: percentile(sorted, 0.95),
+          lastLatencyMs: row.values.length ? round(row.values[row.values.length - 1]) : null,
+        };
+      });
+    };
+    const report = () => {
+      const rows = summary();
+      host.console?.table?.(rows);
+      return rows;
+    };
+    const api = Object.freeze({ start, stop, clear, snapshot, summary, report, markStreamPaint });
+
+    let querySetting = null;
+    try {
+      const SearchParams = host.URLSearchParams ?? URLSearchParams;
+      const requested = new SearchParams(host.location?.search ?? "").get("qq-latency");
+      if (requested === "1" || requested === "0") {
+        querySetting = requested;
+        setStored(requested);
+      }
+    } catch {}
+    if (querySetting === null) {
+      try { querySetting = host.sessionStorage?.getItem(storageKey); } catch {}
+    }
+    if (querySetting === "1") start();
+    return api;
+  };
+  /* qq-latency-factory:end */
+
   const ownScript = document.currentScript;
+  const qqLatency = createQQLatencyStudy(window, { script: ownScript });
+  window.qqLatency = qqLatency;
   const desktopChair = () => window.matchMedia("(min-width: 42.01rem)").matches;
   const composer = () => document.querySelector("#prompt");
   const completeSlash = async (input) => {
@@ -2745,7 +3271,7 @@
     providerGapAwaiting = false;
     syncProviderGapForTurn();
   });
-  const paintLiveSlice = (state, take) => {
+  const paintLiveSlice = (state, take, presentationOpportunity) => {
     if (take <= 0) return;
     const slice = state.committed.slice(state.painted, state.painted + take);
     state.painted += slice.length;
@@ -2755,17 +3281,19 @@
     } else {
       state.block.append(slice);
     }
+    if (presentationOpportunity !== null) qqLatency.markStreamPaint(state.block, presentationOpportunity);
   };
   const flushLiveElt = (elt) => {
     for (const [key, state] of liveBuffers) {
       if (state.elt !== elt) continue;
-      paintLiveSlice(state, state.committed.length - state.painted);
+      paintLiveSlice(state, state.committed.length - state.painted, null);
       liveBuffers.delete(key);
     }
   };
-  const playLive = () => {
+  const playLive = (frameTime) => {
     liveRaf = 0;
     const now = liveNow();
+    const presentationOpportunity = frameTime ?? now;
     let againAt = Infinity;
     for (const state of liveBuffers.values()) {
       const pending = state.committed.length - state.painted;
@@ -2780,7 +3308,7 @@
       const catchup = pending / (LIVE_SMOOTH_MAX_CATCHUP_MS / 1000);
       if (catchup > cps) cps = Math.min(LIVE_SMOOTH_MAX_CPS, catchup);
       const take = Math.min(pending, Math.max(1, Math.floor((cps * dt) / 1000) || 1));
-      paintLiveSlice(state, take);
+      paintLiveSlice(state, take, presentationOpportunity);
       if (state.committed.length > state.painted) againAt = Math.min(againAt, now + 16);
       else state.emptyAt = now;
     }
