@@ -26,6 +26,100 @@ const MAX_FORM_BYTES = 524_288;
 const DEFAULT_SSE_POLL_MS = 100;
 const LAST_SESSION_COOKIE = "qq-last-session";
 const LAST_SESSION_ID = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DASHBOARD_SCHEMA = "qq.dashboard/v1";
+const DASHBOARD_SESSION_ID = LAST_SESSION_ID;
+const DASHBOARD_UUID_TEXT = /(?:session-)?[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
+const DASHBOARD_PHASES = new Set(["planning", "plan", "work", "none", "unknown"]);
+
+function dashboardText(value, { empty = false, display = false } = {}) {
+  if (typeof value !== "string") return null;
+  const result = value.trim();
+  if ((!empty && !result) || (display && result && DASHBOARD_UUID_TEXT.test(result))) return null;
+  return result;
+}
+
+function dashboardDuration(value) {
+  return value === null || (Number.isFinite(value) && Number.isInteger(value) && value >= 0);
+}
+
+/**
+ * Validate and isolate the presentation fields consumed by qq-ui. generatedAt
+ * is intentionally omitted because it advances on cache refresh even when the
+ * semantic tracker is unchanged. Provider usage is neither read nor copied.
+ */
+export function validatedDashboardSnapshot(candidate) {
+  try {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)
+      || candidate.schema !== DASHBOARD_SCHEMA || !Array.isArray(candidate.projects)) return null;
+    const projects = [];
+    const projectKeys = new Set();
+    const sessionIds = new Set();
+    for (const project of candidate.projects) {
+      if (!project || typeof project !== "object" || Array.isArray(project)
+        || !Array.isArray(project.sessions)) return null;
+      const key = dashboardText(project.key);
+      const name = dashboardText(project.name);
+      const label = dashboardText(project.label, { display: true });
+      const folder = dashboardText(project.folder, { empty: true });
+      const folderLabel = dashboardText(project.folderLabel, { empty: true, display: true });
+      if (key === null || name === null || label === null || folder === null || folderLabel === null
+        || projectKeys.has(key) || (folder && !folderLabel) || (!folder && folderLabel)
+        || project.sessions.length === 0) return null;
+      projectKeys.add(key);
+      const sessions = [];
+      const projectSessions = new Map();
+      for (const row of project.sessions) {
+        if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+        const sessionId = dashboardText(row.sessionId);
+        const alias = dashboardText(row.alias, { empty: true, display: true });
+        const rowLabel = dashboardText(row.label, { display: true });
+        const parentSessionId = dashboardText(row.parentSessionId, { empty: true });
+        const depth = row.depth;
+        const activity = row.activity;
+        const idleForMs = row.idleForMs;
+        const workflow = row.workflow === null
+          ? null
+          : typeof row.workflow === "string" ? dashboardText(row.workflow, { display: true }) : undefined;
+        const phase = row.phase;
+        const phaseStartedAt = row.phaseStartedAt;
+        if (!DASHBOARD_SESSION_ID.test(sessionId ?? "") || sessionIds.has(sessionId)
+          || alias === null || rowLabel === null
+          || (parentSessionId !== "" && !DASHBOARD_SESSION_ID.test(parentSessionId ?? ""))
+          || !Number.isInteger(depth) || depth < 0
+          || (activity !== "working" && activity !== "idle")
+          || !dashboardDuration(idleForMs)
+          || (activity === "working" && idleForMs !== null)
+          || workflow === "" || workflow === undefined
+          || (row.workflow !== null && workflow === null)
+          || (workflow === null && phase !== "none")
+          || (workflow !== null && phase === "none")
+          || !DASHBOARD_PHASES.has(phase)
+          || !dashboardDuration(phaseStartedAt)
+          || ((phase === "none" || phase === "unknown") && phaseStartedAt !== null)) return null;
+        if (depth === 0) {
+          if (parentSessionId !== "") return null;
+        } else {
+          const parent = projectSessions.get(parentSessionId);
+          if (!parent || parent.depth + 1 !== depth) return null;
+        }
+        sessionIds.add(sessionId);
+        const normalized = Object.freeze({
+          sessionId, alias, label: rowLabel, parentSessionId, depth, activity,
+          workflow, phase, phaseStartedAt,
+        });
+        sessions.push(normalized);
+        projectSessions.set(sessionId, normalized);
+      }
+      projects.push(Object.freeze({
+        key, name, label, folder, folderLabel,
+        sessions: Object.freeze(sessions),
+      }));
+    }
+    return Object.freeze({ schema: DASHBOARD_SCHEMA, projects: Object.freeze(projects) });
+  } catch {
+    return null;
+  }
+}
 /** Console chat is the architect fold floor: current operator pair plus previous. */
 export const CONSOLE_PAIRS = 2;
 
@@ -686,14 +780,25 @@ export function createConsoleHandler(backend, options = {}) {
   const sessionModeFor = typeof options.sessionModeFor === "function" ? options.sessionModeFor : null;
   const workflowsFor = typeof options.workflowsFor === "function" ? options.workflowsFor : null;
   const completeWorkflows = typeof options.completeWorkflows === "function" ? options.completeWorkflows : null;
+  const readDashboard = typeof options.dashboardFor === "function" ? options.dashboardFor : null;
 
   async function withSheets(snapshot) {
-    let next = snapshot;
+    const nextBase = { ...snapshot };
+    delete nextBase.dashboard;
+    let next = nextBase;
     if (typeof backend.list === "function") {
       try {
         next = { ...next, activeProjects: await backend.list() };
       } catch {
         /* live project list is optional */
+      }
+    }
+    if (readDashboard) {
+      try {
+        const dashboard = validatedDashboardSnapshot(readDashboard());
+        if (dashboard) next = { ...next, dashboard };
+      } catch {
+        /* optional live tracking renders its unavailable state on provider failure */
       }
     }
     if (snapshot.origin === "subagent") {
@@ -910,7 +1015,7 @@ export function createConsoleHandler(backend, options = {}) {
 
   const SHEET_KEYS = Object.freeze([
     "caseFile", "offer", "approval", "loginSheet", "overlay", "progress",
-    "sessionMode", "workflows", "activeProjects", "findWork",
+    "sessionMode", "workflows", "activeProjects", "findWork", "dashboard",
   ]);
 
   function sheetFields(snapshot) {
@@ -934,7 +1039,7 @@ export function createConsoleHandler(backend, options = {}) {
     const hasSheets = Boolean(
       typeof backend.list === "function"
       || readCaseFile || readOffer || readOverlay || readProgress || readApproval || readLoginSheet
-      || inFindMode || sessionModeFor || workflowsFor || readCase,
+      || inFindMode || sessionModeFor || workflowsFor || readCase || readDashboard,
     );
     let cancelled = false;
     let sheets = sheetFields(initialSnapshot);

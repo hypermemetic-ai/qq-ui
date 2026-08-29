@@ -12,6 +12,7 @@ export function apply(ctx, config) {
   const qq = ctx.get("qq-core");
   if (!qq) throw new Error("qq-ui: qq service is unavailable");
   const workflowsOf = () => ctx.get?.("qq-workflows", false) ?? null;
+  const dashboardOf = () => ctx.get?.("qq-dashboard", false) ?? null;
   const modelsOf = () => ctx.get?.("qq-models", false) ?? null;
   const finderOf = () => ctx.get?.("image-finder", false) ?? null;
   const mediaOf = () => ctx.get?.("media-box", false) ?? null;
@@ -31,6 +32,7 @@ export function apply(ctx, config) {
     ssePollMs: config?.ssePollMs,
     liveAssets: config?.liveAssets === true,
     approvalFor: (sessionId) => answerer.pendingFor(sessionId),
+    dashboardFor: () => dashboardOf()?.snapshot?.(),
     decideApproval: (sessionId, form) => answerer.decide(
       sessionId,
       String(form?.get?.("approvalId") ?? ""),

@@ -215,7 +215,7 @@
   const sessionLinks = () => {
     const seen = new Set();
     const links = [];
-    for (const link of document.querySelectorAll(".session-token[data-session-id]")) {
+    for (const link of document.querySelectorAll(".live-tracker-session[data-session-id]")) {
       const id = link.dataset.sessionId;
       if (!id || seen.has(id)) continue;
       seen.add(id);
@@ -224,23 +224,33 @@
     return links;
   };
   const sessionIds = () => sessionLinks().map((link) => link.dataset.sessionId).filter(Boolean);
-  const LIVE_SESSION_PICKER = ".session-token[data-session-id], .session-parent a[data-session-id], .session-child[data-session-id]";
+  const LIVE_SESSION_PICKER = ".live-tracker-session[data-session-id], .session-parent a[data-session-id], .session-child[data-session-id]";
   const openSession = (sessionId) => {
     if (!sessionId || sessionId === viewingSessionId()) return;
     const link = sessionLinks().find((entry) => entry.dataset.sessionId === sessionId);
-    if (link?.href) {
-      void chairGo(link.href, link);
-      return;
-    }
-    const projectMatch = location.pathname.match(/^(.*\/project\/[^/]+(?:\/[^/]+)?)\/session\/session-[0-9a-fA-F-]{36}(?:\/|$)/);
-    if (projectMatch) {
-      void chairGo(`${projectMatch[1]}/session/${sessionId}`);
-      return;
-    }
-    const match = location.pathname.match(/^(.*)\/session\/session-[0-9a-fA-F-]{36}(?:\/|$)/);
-    const base = match ? match[1] : "/qq";
-    void chairGo(`${base}/session/${sessionId}`);
+    if (link?.href) void chairGo(link.href, link);
   };
+
+  const formatLiveTrackerElapsed = (milliseconds) => {
+    const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ${minutes % 60}m`;
+    return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+  };
+  const syncLiveTrackerElapsed = () => {
+    const now = Date.now();
+    for (const time of document.querySelectorAll(".live-tracker-elapsed[data-phase-started-at]")) {
+      const startedAt = Number(time.dataset.phaseStartedAt);
+      time.textContent = Number.isFinite(startedAt) && startedAt >= 0
+        ? formatLiveTrackerElapsed(now - startedAt)
+        : "";
+    }
+  };
+  setInterval(syncLiveTrackerElapsed, 1000);
+
   const confirmingClose = () => document.querySelector(".session-item-current.close-confirming");
   const restoreCloseFocus = () => {
     const arm = document.querySelector(".close-arm");
@@ -931,7 +941,9 @@
     if (!(link instanceof Element)) return;
     if (link.matches(".active-project-item")) markGroupCurrent(".active-project-item[href]", "active-project-current", link);
     if (link.matches(".projects-choice")) markGroupCurrent(".projects-choice[href]", "projects-choice-current", link);
-    if (link.matches(".session-token")) markGroupCurrent(".session-token[href]", "session-token-current", link);
+    if (link.matches(".live-tracker-session")) {
+      markGroupCurrent(".live-tracker-session[href]", "live-tracker-session-current", link);
+    }
   };
   const adoptPage = (html, url, historyMode = "push") => {
     const parsed = new DOMParser().parseFromString(html, "text/html");
@@ -1002,7 +1014,7 @@
   };
   const paintSessionTokens = (sessions, currentId, projectItem = null) => {
     const nav = document.querySelector(".session-traversal");
-    if (!nav) return;
+    if (!nav || nav.classList.contains("live-tracker")) return;
     nav.replaceChildren();
     if (!sessions.length) {
       const empty = document.createElement("span");
@@ -1016,9 +1028,8 @@
       if (session.id === currentId) link.setAttribute("aria-current", "page");
       link.href = session.href;
       link.dataset.sessionId = session.id;
-      link.title = session.id;
       const label = document.createElement("span");
-      label.textContent = session.token || session.id;
+      label.textContent = session.token || "session";
       link.append(label);
       nav.append(link);
     }
@@ -1269,13 +1280,18 @@
   const selectOverlaySession = (link) => {
     if (!(link instanceof HTMLElement) || !link.dataset.sessionId) return false;
     markLinkCurrent(link);
-    const projectItem = document.querySelector(".active-project-item[aria-current='page']");
-    const canonical = selectionCanonical(link.dataset.sessionId, projectItem, link.href);
+    const tracker = link.matches(".live-tracker-session");
+    const projectItem = tracker
+      ? null
+      : document.querySelector(".active-project-item[aria-current='page']");
+    const canonical = tracker
+      ? link.href
+      : selectionCanonical(link.dataset.sessionId, projectItem, link.href);
     rememberOverlaySession(projectItem, link.dataset.sessionId, canonical);
-    liveSwitch(link.dataset.sessionId, {
+    liveSwitchOrNavigate(link.dataset.sessionId, {
       history: navMode() ? "none" : "push",
       canonical,
-    });
+    }, link.href);
     return true;
   };
   const paintChairMode = (nav, persist = true) => {
@@ -2916,6 +2932,7 @@
     document.addEventListener(eventName, (event) => {
       const id = swapTargetId(event);
       if (touchesComposer(id)) restoreDraft();
+      if (id === "session-chrome") syncLiveTrackerElapsed();
     });
   }
 
@@ -2944,6 +2961,7 @@
     syncDrawerChrome();
     restoreChairMode();
     prepareSession();
+    syncLiveTrackerElapsed();
     restoreActiveProjects();
     if (!options.skipValidate) void validateRememberedProjects();
     if (drawerIsOpen()) requestAnimationFrame(() => openDrawer({ updateUrl: false, focus: !keepOpenerFocus }));

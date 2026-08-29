@@ -2554,6 +2554,138 @@ body.document-page {
   background: #1a1a1a;
 }
 
+.live-tracker {
+  scrollbar-width: none;
+}
+.live-tracker::-webkit-scrollbar { display: none; }
+.live-tracker-project {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: .4rem;
+  min-width: 0;
+}
+.live-tracker-project-name {
+  flex: none;
+  margin: 0;
+  color: #666;
+  font-size: .66rem;
+  font-weight: 620;
+  letter-spacing: .055em;
+  line-height: 1;
+  text-transform: lowercase;
+}
+.live-tracker-folder::before { content: " / "; color: #3f3f3f; }
+.live-tracker-sessions {
+  display: flex;
+  align-items: center;
+  gap: .22rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.live-tracker-row { margin: 0; padding: 0; }
+.live-tracker-session {
+  display: flex;
+  min-width: 0;
+  min-height: 2rem;
+  flex-direction: column;
+  justify-content: center;
+  gap: .08rem;
+  padding: .2rem .42rem;
+  border-radius: .38rem;
+  color: #888;
+  line-height: 1.05;
+  text-decoration: none;
+}
+.live-tracker-session:hover,
+.live-tracker-session:focus-visible { color: #eee; outline: none; }
+.live-tracker-session-current { color: #f2f2f2; background: #181818; }
+.live-tracker-identity,
+.live-tracker-state { display: flex; min-width: 0; align-items: baseline; gap: .28rem; }
+.live-tracker-face {
+  overflow: hidden;
+  font-size: var(--chrome-size);
+  font-weight: var(--chrome-emphasis);
+  letter-spacing: var(--chrome-tracking);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-tracker-label,
+.live-tracker-state {
+  color: #686868;
+  font-size: .62rem;
+  font-weight: 480;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.live-tracker-session:hover .live-tracker-label,
+.live-tracker-session:hover .live-tracker-state,
+.live-tracker-session:focus-visible .live-tracker-label,
+.live-tracker-session:focus-visible .live-tracker-state { color: #999; }
+.live-tracker-activity[data-activity="working"] { color: #b8b8b8; }
+.live-tracker-phase[data-phase="none"] { display: none; }
+.live-tracker-workflow + .live-tracker-phase::before { content: "· "; }
+.live-tracker-elapsed {
+  min-width: 2ch;
+  color: #777;
+  font-variant-numeric: tabular-nums;
+}
+.live-tracker-elapsed:not(:empty)::before { content: "· "; }
+.live-tracker-depth-1 .live-tracker-session { margin-inline-start: .35rem; }
+.live-tracker-depth-2 .live-tracker-session { margin-inline-start: .7rem; }
+.live-tracker-depth-3 .live-tracker-session { margin-inline-start: 1.05rem; }
+.live-tracker-depth-4 .live-tracker-session,
+.live-tracker-depth-5 .live-tracker-session,
+.live-tracker-depth-6 .live-tracker-session,
+.live-tracker-depth-7 .live-tracker-session,
+.live-tracker-depth-8 .live-tracker-session { margin-inline-start: 1.4rem; }
+.live-tracker-message {
+  color: #686868;
+  font-size: var(--chrome-size);
+  font-weight: var(--chrome-weight);
+  white-space: nowrap;
+}
+
+@media (max-width: 42rem) {
+  .nav-mode .live-tracker-project {
+    display: block;
+    width: 100%;
+    padding-block: .35rem;
+  }
+  .nav-mode .live-tracker-project-name {
+    margin: 0 0 .3rem .15rem;
+    color: #555;
+    font-size: .7rem;
+  }
+  .nav-mode .live-tracker-sessions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: .05rem;
+  }
+  .nav-mode .live-tracker-session {
+    min-height: 2.75rem;
+    padding: .3rem .15rem;
+    border-radius: 0;
+    background: transparent;
+  }
+  .nav-mode .live-tracker-session-current { color: #f2f2f2; }
+  .nav-mode .live-tracker-depth-1 .live-tracker-session { margin-inline-start: .65rem; }
+  .nav-mode .live-tracker-depth-2 .live-tracker-session { margin-inline-start: 1.3rem; }
+  .nav-mode .live-tracker-depth-3 .live-tracker-session { margin-inline-start: 1.95rem; }
+  .nav-mode .live-tracker-depth-4 .live-tracker-session,
+  .nav-mode .live-tracker-depth-5 .live-tracker-session,
+  .nav-mode .live-tracker-depth-6 .live-tracker-session,
+  .nav-mode .live-tracker-depth-7 .live-tracker-session,
+  .nav-mode .live-tracker-depth-8 .live-tracker-session { margin-inline-start: 2.6rem; }
+  .nav-mode .live-tracker-message {
+    padding: .7rem .15rem;
+    color: #777;
+    font-size: .9rem;
+  }
+}
+
 .nav-mode .session-traversal {
   display: flex;
   min-width: 0;
