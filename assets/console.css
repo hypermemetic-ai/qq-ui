@@ -501,7 +501,70 @@ code {
 .workflows-menu[open] > summary::after { transform: translateY(.1rem) rotate(225deg); }
 .session-menu:not([open]) > .session-menu-list,
 .projects-menu:not([open]) > .projects-menu-list,
-.workflows-menu:not([open]) > .workflows-menu-list { display: none; }
+.workflows-menu:not([open]) > .workflows-menu-list,
+.workflows-menu:not([open]) > .console-menu-list { display: none; }
+
+/* The workflow picker is also the general console menu. Its workflow form
+   remains a native progressive form inside one shared action surface. */
+.console-menu-list {
+  position: absolute;
+  z-index: 4;
+  top: 100%;
+  right: 0;
+  display: grid;
+  width: max-content;
+  min-width: max(100%, 8.5rem);
+  max-width: min(15rem, calc(100vw - 1.5rem));
+  gap: 0;
+  padding: .2rem 0;
+  overflow: hidden;
+  border: 1px solid #1a1a1a;
+  border-top: 0;
+  background: #000;
+  box-shadow: 0 .8rem 2rem rgba(0, 0, 0, .55);
+}
+
+.console-menu-list > .workflows-menu-list {
+  position: static;
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.console-menu-list .console-menu-choice {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--menu-row-height);
+  align-items: center;
+  padding: .28rem .3rem;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: #c8c8c8;
+  font: inherit;
+  font-weight: 650;
+  letter-spacing: .02em;
+  text-align: left;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  text-transform: lowercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.console-menu-list .console-menu-choice:hover,
+.console-menu-list .console-menu-choice:focus-visible,
+.console-menu-list .workflows-choice:focus-visible {
+  color: #fff;
+  outline: 1px solid #555;
+  outline-offset: -2px;
+}
 
 .session-controls {
   position: relative;
@@ -742,6 +805,162 @@ details.session-menu.session-controls {
 
 #console-stream[aria-busy="true"] #transcript {
   visibility: hidden;
+}
+
+/* Usage is an alternate bounded content view, never an overlay. The :target
+   branch is the no-JavaScript fallback; enhanced view state avoids URL churn. */
+.usage-view {
+  display: none;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.session-panel[data-console-view="usage"] > .usage-view,
+.usage-view:target { display: flex; }
+.session-panel[data-console-view="usage"] > .transcript,
+.session-panel:has(> .usage-view:target) > .transcript { display: none; }
+
+.usage-content {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 1.2rem;
+  padding: 1.35rem 1.5rem 1rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.usage-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: .65rem;
+  border-bottom: 1px solid #1a1a1a;
+}
+
+.usage-heading h2 {
+  margin: 0;
+  color: #eee;
+  font-size: 1rem;
+  font-weight: 680;
+  letter-spacing: .02em;
+  text-transform: lowercase;
+}
+
+.usage-close {
+  min-height: 2.15rem;
+  padding: .2rem .35rem;
+  border: 0;
+  background: transparent;
+  color: #8a8a8a;
+  font-size: .82rem;
+  font-weight: 620;
+  text-transform: lowercase;
+  cursor: pointer;
+}
+
+.usage-close:hover,
+.usage-close:focus-visible { color: #fff; }
+.usage-message { margin: auto; color: #777; text-align: center; }
+
+.usage-providers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr));
+  align-content: start;
+  gap: .8rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.usage-provider {
+  min-width: 0;
+  padding: .85rem;
+  border: 1px solid #202020;
+  background: #000;
+}
+
+.usage-provider-heading,
+.usage-meter-heading {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+.usage-provider-heading h3 {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #e5e5e5;
+  font-size: 1rem;
+  font-weight: 670;
+}
+
+.usage-provider-state {
+  flex: none;
+  color: #9a9a9a;
+  font-size: .75rem;
+  font-weight: 640;
+  letter-spacing: .04em;
+  text-transform: lowercase;
+}
+
+.usage-observed,
+.usage-reset {
+  display: block;
+  margin-top: .22rem;
+  color: #727272;
+  font-size: .72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-meters {
+  display: grid;
+  gap: .85rem;
+  margin: .9rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.usage-meter { min-width: 0; }
+.usage-meter-label { color: #bdbdbd; font-size: .82rem; font-weight: 620; }
+.usage-meter-value {
+  color: #eee;
+  font-size: .88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-meter-track {
+  display: block;
+  width: 100%;
+  height: .2rem;
+  margin-top: .42rem;
+  overflow: hidden;
+  background: #262626;
+}
+
+.usage-meter-fill {
+  display: block;
+  height: 100%;
+  background: #a9b9c3;
+}
+
+.usage-meter-detail,
+.usage-provider-empty {
+  margin: .42rem 0 0;
+  overflow-wrap: anywhere;
+  color: #858585;
+  font-size: .76rem;
+  line-height: 1.4;
 }
 
 .transcript {
@@ -1902,6 +2121,14 @@ body > footer {
   .turn-error { display: grid; grid-template-columns: 1fr auto; gap: .15rem .5rem; }
   .turn-error span { grid-column: 1 / -1; }
   .turn-error code { grid-column: 2; grid-row: 1; }
+  .usage-content {
+    gap: .85rem;
+    padding: .85rem max(.75rem, env(safe-area-inset-right)) .55rem max(.75rem, env(safe-area-inset-left));
+    scrollbar-gutter: auto;
+  }
+  .usage-providers { grid-template-columns: minmax(0, 1fr); gap: .65rem; }
+  .usage-provider { padding: .72rem; }
+  .usage-close { min-height: 2.75rem; }
   .transcript {
     --transcript-gap: 1rem;
     --provider-gap-slot: 2.35rem;
