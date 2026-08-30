@@ -708,6 +708,34 @@ const startupRecords = [{
   visuals: [{ sequence: 1, at: 14_020 }],
 }, {
   schema: "qq.ui-latency-log/v1",
+  runId: "page-retained-prefix",
+  batchId: "retained-prefix",
+  page: {
+    startedAt: 749.2,
+    firstPaint: 500,
+    firstContentfulPaint: 550,
+    navigation: {
+      type: "navigate", startTime: 0, fetchStart: 10, requestStart: 100,
+      responseStart: 400, responseEnd: 500, duration: 700,
+      domInteractive: 600, domContentLoadedEventEnd: 625, domComplete: 675, loadEventEnd: 700,
+      serverViewDuration: 250, serverRenderDuration: 20, transferSize: 4_000,
+    },
+    navigationIntent: {
+      id: "intent-retained", sourceRunId: "page-source", action: "NAVIGATE /qq/retained",
+      target: "a#retained", at: 100, intentToNavigationMs: 25, intentToCollectorMs: 774.2,
+    },
+  },
+  origins: [{ sequence: 1_868, at: 813_000, kind: "click" }],
+  stages: [
+    { sequence: 2_015, at: 875_724, kind: "sse-open", requestId: null },
+    { sequence: 2_016, at: 875_800, kind: "sse-message-before", requestId: null, channel: "switch-meta" },
+    { sequence: 2_017, at: 875_850, kind: "sse-message-before", requestId: null, channel: "transcript-reset" },
+    { sequence: 2_018, at: 875_900, kind: "sse-message-before", requestId: null, channel: "live" },
+    { sequence: 2_019, at: 875_942, kind: "sse-message-before", requestId: null, channel: "switch-ready" },
+  ],
+  visuals: [{ sequence: 11_259, at: 813_330 }],
+}, {
+  schema: "qq.ui-latency-log/v1",
   runId: "page-phased-14s",
   batchId: "phased-late",
   page: {
@@ -729,7 +757,8 @@ const startupRecords = [{
   origins: [], stages: [], visuals: [],
 }];
 const startupReport = analyzeLatencyRecords(startupRecords);
-assert.deepEqual(startupReport.startupRows.map((row) => row.navigationToCollectorMs), [32_479.4, 22_744.7, 14_000],
+assert.deepEqual(startupReport.startupRows.map((row) => row.navigationToCollectorMs),
+  [32_479.4, 22_744.7, 14_000, 749.2],
   "default startup rows visibly sort multi-second historical and new starts slowest first");
 const historical22 = startupReport.startupRows.find((row) => row.runId === "page-historical-22s");
 assert.equal(historical22.navigationType, "(old/no navigation timing)");
@@ -738,6 +767,8 @@ assert.equal(historical22.navigationToFirstVisualMs, 22_767.3,
 assert.equal(historical22.collectorToFirstVisualMs, 22.6);
 assert.equal(historical22.collectorToSseOpenMs, 1_008.4);
 const phased = startupReport.startupRows.find((row) => row.runId === "page-phased-14s");
+assert.equal(phased.initialStageCoverage, true);
+assert.equal(phased.initialVisualCoverage, true);
 assert.equal(phased.start, "SLOW");
 assert.equal(phased.fetchToRequestMs, 100);
 assert.equal(phased.requestToResponseStartMs, 11_900);
@@ -754,8 +785,44 @@ assert.equal(startupReport.startupByAction.find((group) => group.action === "NAV
   "cross-document session starts are grouped by their normalized action");
 assert.equal(phased.loadEventEndMs, 13_600,
   "later duplicate page metadata fills completed load milestones while initial zero remains incomplete");
-assert.equal(startupReport.startupSummary.navigationToCollector.samples, 3);
+const retainedPrefix = startupReport.startupRows.find((row) => row.runId === "page-retained-prefix");
+assert.equal(retainedPrefix.initialStageCoverage, false);
+assert.equal(retainedPrefix.initialVisualCoverage, false);
+assert.equal(retainedPrefix.navigationToCollectorMs, 749.2,
+  "repeated page metadata remains valid when retained entry streams are left-truncated");
+assert.equal(retainedPrefix.navigationDurationMs, 700);
+assert.equal(retainedPrefix.navigationToFirstPaintMs, 500);
+assert.equal(retainedPrefix.navigationToFirstContentfulPaintMs, 550);
+assert.equal(retainedPrefix.intentToCollectorMs, 774.2);
+assert.equal(retainedPrefix.serverViewMs, 250);
+assert.equal(retainedPrefix.serverRenderMs, 20);
+for (const field of [
+  "navigationToFirstVisualMs", "collectorToFirstVisualMs", "intentToFirstVisualMs",
+  "navigationToSseOpenMs", "collectorToSseOpenMs", "navigationToSwitchMetaMs",
+  "navigationToInitialTranscriptMs", "navigationToInitialLiveMs", "navigationToSwitchReadyMs",
+  "collectorToSwitchReadyMs", "intentToSwitchReadyMs",
+]) assert.equal(retainedPrefix[field], null, `${field} requires retained sequence-1 coverage`);
+assert.equal(retainedPrefix.start, "ok", "invalid retained startup events do not produce a slow flag");
+assert.deepEqual(startupReport.runHealth.find((row) => row.runId === "page-retained-prefix").initialEntryCoverage,
+  { origins: false, stages: false, visuals: false }, "run health makes each missing initial prefix visible");
+assert.equal(startupReport.startupSummary.navigationToCollector.samples, 4);
 assert.equal(startupReport.startupSummary.navigationToCollector.maxMs, 32_479.4);
+assert.deepEqual(startupReport.startupSummary.navigationToFirstVisual,
+  { samples: 3, p50Ms: 22_767.3, p95Ms: 31_525.29, maxMs: 32_498.4 },
+  "startup aggregates exclude the false retained 813s first-visual sample");
+assert.deepEqual(startupReport.startupSummary.navigationToSseOpen,
+  { samples: 3, p50Ms: 23_753.1, p95Ms: 31_944.27, maxMs: 32_854.4 },
+  "startup aggregates exclude the false retained 875s SSE-open sample");
+assert.deepEqual(startupReport.startupSummary.navigationToSwitchReady,
+  { samples: 1, p50Ms: 16_000, p95Ms: 16_000, maxMs: 16_000 },
+  "startup aggregates exclude the false retained 875s switch-ready sample");
+const retainedAction = startupReport.startupByAction.find((group) => group.action === "NAVIGATE /qq/retained");
+assert.equal(retainedAction.slowRuns, 0);
+assert.equal(retainedAction.metrics.navigationToCollector.samples, 1);
+assert.equal(retainedAction.metrics.navigationToFirstVisual.samples, 0);
+assert.equal(retainedAction.metrics.navigationToSseOpen.samples, 0);
+assert.equal(retainedAction.metrics.navigationToSwitchReady.samples, 0,
+  "by-action metrics exclude initial milestones without retained sequence-1 coverage");
 
 const admissionReport = analyzeLatencyRecords([{
   schema: "qq.ui-latency-log/v1",

@@ -264,7 +264,7 @@ function firstStageAt(stages, predicate) {
   return result;
 }
 
-function startupTimingRows(runIds, pages, stages, firstVisualByRun) {
+function startupTimingRows(runIds, pages, stages, firstVisualByRun, initialEntryCoverageByRun) {
   const byRun = new Map();
   for (const sample of stages) {
     const list = byRun.get(sample.runId) ?? [];
@@ -279,8 +279,14 @@ function startupTimingRows(runIds, pages, stages, firstVisualByRun) {
       startedAt: null, firstPaint: null, firstContentfulPaint: null, navigation: null, navigationIntent: null,
     };
     const runStages = byRun.get(runId) ?? [];
-    const withoutSwitch = runStages.filter(({ entry }) => !entry.sessionSwitchId && entry.kind !== "session-switch-start");
-    const firstVisual = firstVisualByRun.get(runId) ?? null;
+    const initialEntryCoverage = initialEntryCoverageByRun.get(runId) ?? {};
+    const initialStageCoverage = initialEntryCoverage.stages === true;
+    const initialVisualCoverage = initialEntryCoverage.visuals === true;
+    // An earliest retained event is an initial event only when sequence 1 survived retention.
+    const withoutSwitch = initialStageCoverage
+      ? runStages.filter(({ entry }) => !entry.sessionSwitchId && entry.kind !== "session-switch-start")
+      : [];
+    const firstVisual = initialVisualCoverage ? firstVisualByRun.get(runId) ?? null : null;
     const navigation = page.navigation;
     const requestStart = nonnegative(navigation?.requestStart);
     const responseStart = nonnegative(navigation?.responseStart);
@@ -333,6 +339,8 @@ function startupTimingRows(runIds, pages, stages, firstVisualByRun) {
       runId,
       action,
       start: slow ? "SLOW" : "ok",
+      initialStageCoverage,
+      initialVisualCoverage,
       navigationType: navigation?.type ?? "(old/no navigation timing)",
       ...Object.fromEntries(Object.entries(candidates).map(([name, value]) => [`${name}Ms`, value])),
       domInteractiveMs: nonnegative(navigation?.domInteractive),
@@ -720,16 +728,20 @@ export function analyzeLatencyRecords(records) {
   const sequenceGaps = { origins: 0, stages: 0, visuals: 0 };
   const generated = { origins: 0, stages: 0, visuals: 0 };
   const runHealth = [];
+  const initialEntryCoverageByRun = new Map();
   for (const runId of runs) {
     const health = latestHealth.get(runId) ?? null;
     const retained = {};
     const runGenerated = {};
     const gaps = {};
     const retention = {};
+    const initialEntryCoverage = {};
     const runSequences = sequencesByRun.get(runId)
       ?? Object.fromEntries(ENTRY_KINDS.map((kind) => [kind, new Set()]));
     for (const kind of ENTRY_KINDS) {
       retained[kind] = runSequences[kind].size;
+      // Keep this prefix signal separate from gaps, which count only holes between retained entries.
+      initialEntryCoverage[kind] = runSequences[kind].has(1);
       const orderedSequences = [...runSequences[kind]].sort((left, right) => left - right);
       const observedMaximum = orderedSequences.at(-1) ?? 0;
       runGenerated[kind] = Math.max(observedMaximum, health?.generated[kind] ?? 0);
@@ -740,7 +752,11 @@ export function analyzeLatencyRecords(records) {
       generated[kind] += runGenerated[kind];
       sequenceGaps[kind] += gaps[kind];
     }
-    runHealth.push({ runId, health, retained, generated: runGenerated, sequenceGaps: gaps, retentionPercent: retention });
+    initialEntryCoverageByRun.set(runId, initialEntryCoverage);
+    runHealth.push({
+      runId, health, retained, generated: runGenerated, initialEntryCoverage,
+      sequenceGaps: gaps, retentionPercent: retention,
+    });
   }
   runHealth.sort((left, right) => left.runId.localeCompare(right.runId));
 
@@ -751,7 +767,9 @@ export function analyzeLatencyRecords(records) {
   }]));
   const requestReport = requestTimingRows(samples.stages, samples.visuals);
   const admissionReport = admissionTimingRows(samples.stages, samples.visuals);
-  const startupReport = startupTimingRows(runs, pages, samples.stages, firstVisualByRun);
+  const startupReport = startupTimingRows(
+    runs, pages, samples.stages, firstVisualByRun, initialEntryCoverageByRun,
+  );
   const switchReport = sessionSwitchTimingRows(samples.stages, samples.visuals);
   const sseRows = sseTimingRows(samples.stages);
   const sampleCounts = {
@@ -827,6 +845,7 @@ function compactHealth(row) {
   return {
     run: row.runId,
     retentionPctOSV: threeKinds(row.retentionPercent),
+    initialCoverageOSV: threeKinds(row.initialEntryCoverage, false),
     gapsOSV: threeKinds(row.sequenceGaps, 0),
     generatedOSV: threeKinds(row.generated, 0),
     acknowledgedOSV: threeKinds(row.health?.acknowledged),
@@ -875,7 +894,7 @@ async function main() {
   else console.log("No prompt-admission evidence retained; old logs remain readable.");
   console.log("Prompt-admission aggregate timing:");
   console.table(Object.entries(report.admissionSummary.metrics).map(([phase, value]) => ({ phase, ...value })));
-  console.log("Collector health (O/S/V = origins/stages/visuals; latest cumulative metadata per run; n/a means an old log line):");
+  console.log("Collector health (O/S/V = origins/stages/visuals; initial coverage means retained sequence 1; latest cumulative metadata per run; n/a means an old log line):");
   // Keep this label above the table rather than encoding arbitrary labels in persisted health.
   if (report.runHealth.length) console.table(report.runHealth.map(compactHealth));
   else console.log("No collector runs retained.");
