@@ -1171,10 +1171,6 @@ details.session-menu.session-controls {
   color: #8a8a8a;
 }
 
-.queue-item[data-prompt-echo-state="accepted-legacy"] {
-  color: #858085;
-}
-
 .prompt-echo-status {
   position: absolute;
   width: 1px;
