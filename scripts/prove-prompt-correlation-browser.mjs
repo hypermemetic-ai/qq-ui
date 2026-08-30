@@ -103,6 +103,51 @@ async function connectChrome(debugPort, expectedUrl) {
   throw new Error("Chromium DevTools target did not start");
 }
 
+const isTransientExecutionContextError = (error) =>
+  /(?:Execution context was destroyed|Cannot find context with specified id|Cannot find default execution context)/i
+    .test(String(error?.message || error));
+
+async function waitForFixtureResult(cdp) {
+  const deadline = Date.now() + 12_000;
+  let lastState;
+  let contextRetries = 0;
+  const stateExpression = `({
+    readyState: document.readyState,
+    fixtureReady: window.qqPromptCorrelationFixtureReady === true,
+    hasResult: Boolean(window.qqPromptCorrelationResult),
+    hasHtmx: typeof window.htmx === "object",
+  })`;
+
+  while (Date.now() < deadline) {
+    try {
+      lastState = await cdp.evaluate(stateExpression);
+      if (lastState.readyState === "complete" && lastState.fixtureReady && lastState.hasResult) {
+        try {
+          return await cdp.evaluate("window.qqPromptCorrelationResult");
+        } catch (error) {
+          if (!isTransientExecutionContextError(error)) throw error;
+          contextRetries += 1;
+          lastState = undefined;
+        }
+      }
+    } catch (error) {
+      if (!isTransientExecutionContextError(error)) throw error;
+      contextRetries += 1;
+      lastState = undefined;
+    }
+    await sleep(25);
+  }
+
+  return {
+    readinessTimeout: true,
+    readyState: lastState?.readyState,
+    fixtureReady: lastState?.fixtureReady,
+    hasResult: lastState?.hasResult,
+    hasHtmx: lastState?.hasHtmx,
+    contextRetries,
+  };
+}
+
 const fixtureHtml = `<!doctype html>
 <html><head><meta charset="utf-8"><style>
 #transcript, #transcript-live, #prompt-echoes { display:flex; flex-direction:column; gap:8px }
@@ -334,23 +379,9 @@ child.stderr.on("data", (chunk) => { chromeErrors += chunk; });
 let cdp;
 try {
   cdp = await connectChrome(debugPort, url);
+  await cdp.send("Page.enable");
   await cdp.send("Runtime.enable");
-  const result = await cdp.evaluate(`(async () => {
-    const deadline = Date.now() + 12_000;
-    while ((!window.qqPromptCorrelationFixtureReady || !window.qqPromptCorrelationResult) && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    if (!window.qqPromptCorrelationFixtureReady || !window.qqPromptCorrelationResult) {
-      return {
-        readinessTimeout: true,
-        readyState: document.readyState,
-        fixtureReady: window.qqPromptCorrelationFixtureReady,
-        hasResult: Boolean(window.qqPromptCorrelationResult),
-        hasHtmx: typeof window.htmx === "object",
-      };
-    }
-    return await window.qqPromptCorrelationResult;
-  })()`);
+  const result = await waitForFixtureResult(cdp);
   assert.equal(result.readinessTimeout, undefined,
     `real HTMX fixture readiness timed out: ${JSON.stringify(result)}; requests=${serverRequests.join(",")}`);
   assert.equal(result.timeout, undefined,
