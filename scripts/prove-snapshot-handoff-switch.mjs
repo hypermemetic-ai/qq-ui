@@ -466,7 +466,7 @@ async function proveSwitchOrder() {
     "the critical ready frame is the flush boundary");
   const secondFlush = protocol.findIndex((entry, index) => index > firstFlush && entry.type === "flush");
   assert.deepEqual(protocol.slice(firstFlush + 1, secondFlush).map((entry) => entry.event), [
-    "usage", "children", "case", "ui",
+    "usage", "children", "case", "composer-case", "ui",
   ], "every secondary region follows ready in exact order");
   const laterEvents = protocol.slice(secondFlush + 1).filter((entry) => entry.type === "event").map((entry) => entry.event);
   assert.ok(laterEvents.some((event) => event === "live-append" || event === "live"),

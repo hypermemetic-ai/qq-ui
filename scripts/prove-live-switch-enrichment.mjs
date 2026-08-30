@@ -240,8 +240,13 @@ function closeSwitch(fixture) {
     "critical navigation metadata does not blank the destination chrome");
   assert.match(eventFrames(fixture.res, "chrome")[0]?.data ?? "", /workflows-choice/,
     "workflow mode/list state is available in critical chrome");
-  assert.match(eventFrames(fixture.res, "composer-shell")[0]?.data ?? "", /id="composer"/,
+  const criticalComposer = eventFrames(fixture.res, "composer-shell")[0]?.data ?? "";
+  assert.match(criticalComposer, /id="composer"/,
     "critical composer state is usable before ready");
+  assert.match(criticalComposer, /id="composer-case-region"[^>]*sse-swap="composer-case"/,
+    "critical composer retains an incremental mobile working-memory slot");
+  assert.doesNotMatch(criticalComposer, /id="composer-case"/,
+    "secondary working-memory affordance is absent before the case provider resolves");
 
   const ready = JSON.parse(eventFrames(fixture.res, "switch-ready")[0].data);
   assert.equal(ready.id, rootId);
@@ -261,6 +266,14 @@ function closeSwitch(fixture) {
   caseGate.resolve({ title: "Phase E case", text: "late destination case document" });
   await waitFor(() => eventFrames(fixture.res, "case").some((frame) => frame.data.includes("late destination case document")),
     "late case data was not reconciled into the active destination");
+  await waitFor(() => eventFrames(fixture.res, "composer-case").some((frame) => frame.data.includes('id="composer-case"')),
+    "late case data did not restore the narrow-viewport working-memory control");
+  const caseViewerAt = fixture.res.log.findIndex((entry) => entry.event === "case"
+    && entry.data.includes("late destination case document"));
+  const caseControlAt = fixture.res.log.findIndex((entry) => entry.event === "composer-case"
+    && entry.data.includes('id="composer-case"'));
+  assert.ok(caseControlAt > caseViewerAt,
+    "the late working-memory viewer arrives before its mobile control");
   await waitFor(() => eventFrames(fixture.res, "usage").some((frame) => frame.data.includes("Phase E quota")),
     "late dashboard/usage did not arrive");
   await waitFor(() => eventFrames(fixture.res, "popups").some((frame) => frame.data.includes("Phase E download")),

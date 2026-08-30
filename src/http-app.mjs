@@ -2354,7 +2354,7 @@ export function createConsoleHandler(backend, options = {}) {
           // already been flushed, so secondary work cannot delay critical
           // presentation or race newer truth ahead of bootstrap ordering.
           const secondaryErrors = [];
-          for (const name of ["usage", "children", "case"]) {
+          for (const name of ["usage", "children", "case", "composer-case"]) {
             if (closed || res.destroyed || res.writableEnded) return;
             let html;
             try {
