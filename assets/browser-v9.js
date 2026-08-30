@@ -62,6 +62,96 @@
       return `page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
     };
     const runId = safeToken(options.runId ?? makeRunId(), 128) || makeRunId();
+    const navigationIntentStorageKey = "qq:latency-navigation-intent";
+    const navigationIntentValidityMs = 60_000;
+    const navigationIntentInterceptCheckMs = 0;
+    const navigationTypes = new Set(["navigate", "reload", "back_forward", "prerender"]);
+    const sseChannels = new Set([
+      "switch-meta", "chrome", "usage", "transcript-reset", "transcript", "live", "queue", "children",
+      "popups", "case", "composer-shell", "switch-ready", "ui", "live-append", "live-tool-append",
+    ]);
+    const timingFields = [
+      "startTime", "redirectStart", "redirectEnd", "workerStart", "fetchStart", "domainLookupStart",
+      "domainLookupEnd", "connectStart", "secureConnectionStart", "connectEnd", "requestStart", "responseStart",
+      "responseEnd", "domInteractive", "domContentLoadedEventStart", "domContentLoadedEventEnd", "domComplete",
+      "loadEventStart", "loadEventEnd", "duration",
+    ];
+    const nonZeroTimingFields = new Set(timingFields.filter((field) => !["startTime", "fetchStart"].includes(field)));
+    const boundedTiming = (value, { integer = false, allowZero = true } = {}) => {
+      const result = Number(value);
+      if (!Number.isFinite(result) || result < 0 || result > 1_000_000_000_000
+        || (integer && !Number.isSafeInteger(result)) || (!allowZero && result === 0)) return null;
+      return round(result);
+    };
+    const navigationMetadata = () => {
+      let entry;
+      try { entry = performance?.getEntriesByType?.("navigation")?.[0]; } catch {}
+      if (!entry || !navigationTypes.has(entry.type)) return null;
+      const result = { type: entry.type };
+      for (const field of timingFields) {
+        result[field] = boundedTiming(entry[field], { allowZero: !nonZeroTimingFields.has(field) });
+      }
+      for (const field of ["transferSize", "encodedBodySize", "decodedBodySize"]) {
+        result[field] = boundedTiming(entry[field], { integer: true });
+      }
+      const serverTiming = new Map();
+      try {
+        for (const timing of Array.from(entry.serverTiming ?? [])) {
+          if ((timing?.name === "qq-view" || timing?.name === "qq-render") && !serverTiming.has(timing.name)) {
+            const duration = boundedTiming(timing.duration);
+            if (duration !== null) serverTiming.set(timing.name, duration);
+          }
+        }
+      } catch {}
+      result.serverViewDuration = serverTiming.get("qq-view") ?? null;
+      result.serverRenderDuration = serverTiming.get("qq-render") ?? null;
+      return result;
+    };
+    const paintMetadata = () => {
+      const result = { firstPaint: null, firstContentfulPaint: null };
+      try {
+        for (const entry of Array.from(performance?.getEntriesByType?.("paint") ?? [])) {
+          const field = entry?.name === "first-paint" ? "firstPaint"
+            : entry?.name === "first-contentful-paint" ? "firstContentfulPaint" : null;
+          const at = boundedTiming(entry?.startTime, { allowZero: false });
+          if (field && at !== null && (result[field] === null || at < result[field])) result[field] = at;
+        }
+      } catch {}
+      return result;
+    };
+    const safeHandoffId = (value, maximum) => typeof value === "string" && value.length > 0 && value.length <= maximum
+      && /^[a-zA-Z0-9_.:@/-]+$/.test(value) ? value : "";
+    const consumeNavigationIntent = () => {
+      let raw = null;
+      try {
+        raw = host.sessionStorage?.getItem(navigationIntentStorageKey) ?? null;
+        host.sessionStorage?.removeItem(navigationIntentStorageKey);
+      } catch {}
+      if (!raw) return null;
+      let value;
+      try { value = JSON.parse(raw); } catch { return null; }
+      if (!value || typeof value !== "object" || Array.isArray(value)
+        || Object.keys(value).some((key) => !["id", "sourceRunId", "action", "target", "at"].includes(key))) return null;
+      const id = safeHandoffId(value.id, 80);
+      const sourceRunId = safeHandoffId(value.sourceRunId, 128);
+      const action = typeof value.action === "string" && /^NAVIGATE \/[a-zA-Z0-9_:.@/-]*$/.test(value.action)
+        ? value.action : "";
+      const target = value.target === null || (typeof value.target === "string" && value.target.length <= 180
+        && /^[a-zA-Z0-9_:@/-]+(?:#[a-zA-Z0-9_:.@/-]+)?(?:\.[a-zA-Z0-9_:.@/-]+){0,3}$/.test(value.target))
+        ? value.target : undefined;
+      const at = Number(value.at);
+      const intentToNavigationMs = timeOrigin - at;
+      const intentToCollectorMs = timeOrigin + now() - at;
+      if (!id || !sourceRunId || !action || target === undefined || !Number.isFinite(at) || at < 0
+        || intentToNavigationMs < 0 || intentToCollectorMs < intentToNavigationMs
+        || intentToCollectorMs > navigationIntentValidityMs) return null;
+      return {
+        id, sourceRunId, action, target, at: round(at),
+        intentToNavigationMs: round(intentToNavigationMs),
+        intentToCollectorMs: round(intentToCollectorMs),
+      };
+    };
+    const navigationIntent = consumeNavigationIntent();
     const elementFor = (node) => {
       if (node?.nodeType === 3) return node.parentElement ?? null;
       return node?.nodeType === 1 || typeof node?.tagName === "string" ? node : null;
@@ -82,14 +172,27 @@
     const attribute = (element, name) => {
       try { return element?.getAttribute?.(name) ?? null; } catch { return null; }
     };
+    const normalizeRoutePath = (value) => {
+      const segments = String(value ?? "").split("/");
+      for (let index = 0; index < segments.length; index += 1) {
+        if (segments[index] === "project" && index + 1 < segments.length) {
+          segments[index + 1] = ":project";
+          if (index + 2 < segments.length && segments[index + 2] !== "session") {
+            segments[index + 2] = ":folder";
+          }
+        }
+        if (segments[index] === "session" && index + 1 < segments.length) segments[index + 1] = ":id";
+      }
+      return segments.join("/");
+    };
     const safePath = (value) => {
       if (!value) return "";
       try {
         const URLConstructor = host.URL ?? URL;
         const parsed = new URLConstructor(String(value), host.location?.href ?? "http://qq.invalid/");
-        return safeToken(parsed.pathname, 160);
+        return safeToken(normalizeRoutePath(parsed.pathname), 160);
       } catch {
-        return safeToken(String(value).split(/[?#]/, 1)[0], 160);
+        return safeToken(normalizeRoutePath(String(value).split(/[?#]/, 1)[0]), 160);
       }
     };
     const actionForElement = (element) => {
@@ -164,6 +267,18 @@
     let latestInteraction = null;
     let recentGesture = null;
     let activeRequest = null;
+    const maximumAdmissionCandidates = 32;
+    // Conversation sequence numbers are scoped to one session. Retain enough
+    // identities to survive settled-window eviction/replacement without
+    // allowing a long-lived console tab to grow this set without bound.
+    const maximumKnownUserSequences = 4096;
+    let admissionCandidates = [];
+    let knownUserSequences = new Set();
+    let sessionSwitchSequence = 0;
+    let activeSessionSwitch = null;
+    let navigationIntentTimer = 0;
+    let navigationIntentInterceptTimer = 0;
+    let writtenNavigationIntentId = "";
     let originByEvent = new WeakMap();
     let originByTarget = new WeakMap();
     let requestByXhr = new WeakMap();
@@ -208,6 +323,8 @@
         // global request before the pending aggregate reaches its rAF flush.
         requestContext: captureRequestContext(),
         requestPrimed: false,
+        admissionPrimed: false,
+        sessionSwitchId: activeSessionSwitch?.id ?? null,
       };
       return pendingVisual;
     };
@@ -217,6 +334,7 @@
       // response mutation. Upgrade null/older context when request evidence is
       // present, but never let a later null signal erase captured evidence.
       if (activeRequest && !pendingVisual.requestPrimed) pendingVisual.requestContext = captureRequestContext();
+      if (!pendingVisual.sessionSwitchId && activeSessionSwitch) pendingVisual.sessionSwitchId = activeSessionSwitch.id;
       if (pendingVisual.sources.has(source) || pendingVisual.sources.size < maximumVisualSources) {
         pendingVisual.sources.add(source);
       }
@@ -244,6 +362,7 @@
       targets: [...pendingVisual.targets].sort(),
       ...latestInteractionAt(at),
       ...requestCorrelationAt(at, pendingVisual.requestContext),
+      sessionSwitchId: pendingVisual.sessionSwitchId,
     });
     const mergePendingInto = (sample, at) => {
       sample.at = round(at);
@@ -254,6 +373,14 @@
       // Never erase an initial response association merely because a later
       // same-opportunity signal arrived after request completion.
       if (!sample.activeRequestId) Object.assign(sample, requestCorrelationAt(at, pendingVisual.requestContext));
+      if (!sample.sessionSwitchId) sample.sessionSwitchId = pendingVisual.sessionSwitchId;
+    };
+    const finishPresentedSessionSwitch = (sample) => {
+      if (activeSessionSwitch?.baselineCommitted
+        && activeSessionSwitch?.readyAt !== null && activeSessionSwitch?.readyAt !== undefined
+        && sample?.sessionSwitchId === activeSessionSwitch.id && sample.at >= activeSessionSwitch.readyAt) {
+        activeSessionSwitch = null;
+      }
     };
     const flushVisual = () => {
       frameRequest = 0;
@@ -262,7 +389,9 @@
       pendingVisual = null;
       lastExplicitKey = null;
       lastExplicitSample = null;
-      return appendBounded("visuals", sample);
+      const result = appendBounded("visuals", sample);
+      finishPresentedSessionSwitch(result);
+      return result;
     };
     const scheduleVisual = () => {
       if (frameRequest || typeof host.requestAnimationFrame !== "function") return;
@@ -273,8 +402,100 @@
       addSignal(source, target);
       scheduleVisual();
     };
+    const conversationSequenceFor = (node) => {
+      let raw = null;
+      try { raw = node?.getAttribute?.("data-seq") ?? node?.dataset?.seq ?? null; } catch {}
+      const value = typeof raw === "string" && /^[1-9][0-9]*$/.test(raw) ? Number(raw) : NaN;
+      return Number.isSafeInteger(value) && value > 0 ? value : null;
+    };
+    const isUserConversationNode = (node) => {
+      try { return node?.matches?.(".message-user[data-seq]") === true; } catch { return false; }
+    };
+    const userNodesWithin = (node) => {
+      const result = [];
+      if (isUserConversationNode(node)) result.push(node);
+      try { result.push(...Array.from(node?.querySelectorAll?.(".message-user[data-seq]") ?? [])); } catch {}
+      return result;
+    };
+    const rememberUserSequence = (sequence) => {
+      if (sequence === null || knownUserSequences.has(sequence)) return;
+      knownUserSequences.add(sequence);
+      while (knownUserSequences.size > maximumKnownUserSequences) {
+        knownUserSequences.delete(knownUserSequences.values().next().value);
+      }
+    };
+    const rememberExistingUserNodes = () => {
+      try {
+        for (const node of Array.from(document?.querySelectorAll?.(".message-user[data-seq]") ?? [])) {
+          rememberUserSequence(conversationSequenceFor(node));
+        }
+      } catch {}
+    };
+    const recommissionUserSequenceBaseline = () => {
+      knownUserSequences = new Set();
+      rememberExistingUserNodes();
+    };
+    const appendAdmissionStage = (kind, request, { conversationSequence = null, at = now() } = {}) => {
+      const completedAt = request?.completedAt ?? null;
+      return appendBounded("stages", {
+        at: round(at),
+        event: "qq:promptAdmission",
+        kind,
+        requestId: request?.id ?? null,
+        originId: request?.origin?.id ?? null,
+        originLatencyMs: request?.origin ? round(at - request.origin.at) : null,
+        dispatchLatencyMs: request?.dispatchAt !== null && request?.dispatchAt !== undefined
+          ? round(at - request.dispatchAt) : null,
+        requestCompleteLatencyMs: completedAt !== null ? round(at - completedAt) : null,
+        conversationSequence,
+        channel: null,
+        sessionSwitchId: null,
+        target: request?.target ?? null,
+        action: request?.action ?? "",
+      });
+    };
+    const detectPromptAdmissions = (records) => {
+      // Incoming bootstrap nodes belong to the new session's existing body.
+      // Ignore even already-delivered MutationObserver records until the
+      // validated switch-ready/adopt boundary snapshots the complete body.
+      if (activeSessionSwitch && !activeSessionSwitch.baselineCommitted) return;
+      const discovered = new Map();
+      for (const record of records ?? []) {
+        if (record?.type !== "childList") continue;
+        for (const added of Array.from(record?.addedNodes ?? [])) {
+          for (const node of userNodesWithin(added)) {
+            const sequence = conversationSequenceFor(node);
+            if (sequence !== null && !knownUserSequences.has(sequence)) discovered.set(sequence, node);
+          }
+        }
+      }
+      for (const [sequence, node] of [...discovered.entries()].sort((left, right) => left[0] - right[0])) {
+        if (knownUserSequences.has(sequence)) continue;
+        rememberUserSequence(sequence);
+        const request = admissionCandidates.shift() ?? null;
+        const at = now();
+        appendAdmissionStage(request ? "prompt-admitted" : "prompt-admission-unmatched", request, {
+          conversationSequence: sequence,
+          at,
+        });
+        if (request) {
+          // Operational assumption: without backend identity support, the next
+          // genuinely new user node belongs to the oldest local successful
+          // composer submission. External concurrent submitters cannot be
+          // cryptographically distinguished.
+          const pending = ensurePending();
+          if (!pending.admissionPrimed) {
+            pending.requestContext = requestContextFor(request);
+            pending.requestPrimed = true;
+            pending.admissionPrimed = true;
+          }
+          addTarget(node);
+        }
+      }
+    };
     const mergeMutations = (records, { schedule = true } = {}) => {
       if (!active || !records?.length) return;
+      detectPromptAdmissions(records);
       for (const record of records) {
         const type = record?.type === "childList" || record?.type === "characterData" || record?.type === "attributes"
           ? record.type
@@ -296,11 +517,13 @@
         && lastExplicitSample && visuals[visuals.length - 1] === lastExplicitSample) {
         mergePendingInto(lastExplicitSample, at);
         pendingVisual = null;
+        finishPresentedSessionSwitch(lastExplicitSample);
         return lastExplicitSample;
       }
       const sample = makeVisual(at);
       pendingVisual = null;
       appendBounded("visuals", sample);
+      finishPresentedSessionSwitch(sample);
       lastExplicitKey = opportunity;
       lastExplicitSample = sample;
       return sample;
@@ -383,9 +606,16 @@
       if (xhr && typeof xhr === "object") requestByXhr.set(xhr, request);
       return request;
     };
-    const appendStage = (eventName, kind, event, request) => {
+    const sseChannelFor = (eventName, event) => {
+      if (!eventName.startsWith("htmx:sse")) return null;
+      const channel = event?.detail?.type;
+      return sseChannels.has(channel) ? channel : null;
+    };
+    const appendStage = (eventName, kind, event, request, extra = {}) => {
       const at = now();
-      appendBounded("stages", {
+      const channel = extra.channel ?? sseChannelFor(eventName, event);
+      const sessionSwitch = activeSessionSwitch;
+      const stage = appendBounded("stages", {
         at: round(at),
         event: eventName,
         kind,
@@ -395,9 +625,15 @@
         dispatchLatencyMs: request?.dispatchAt !== null && request?.dispatchAt !== undefined
           ? round(at - request.dispatchAt)
           : null,
+        requestCompleteLatencyMs: null,
+        conversationSequence: null,
+        channel,
+        sessionSwitchId: sessionSwitch?.id ?? null,
         target: request?.target ?? safeTargetLabel(event?.detail?.elt ?? event?.target),
         action: request?.action ?? requestAction(event),
+        ...extra,
       });
+      return stage;
     };
     const onBeforeRequest = (event) => {
       const request = requestFor(event, { create: true });
@@ -409,6 +645,18 @@
       if (request.dispatchAt === null) request.dispatchAt = now();
       appendStage("htmx:beforeSend", "network-dispatch", event, request);
     };
+    const isComposerPromptRequest = (request, event) => {
+      if (!request || request.dispatchAt === null || request.dispatchAt === undefined
+        || !/\/prompt$/.test(request.action ?? "")) return false;
+      const element = event?.detail?.elt ?? event?.target;
+      try { return element?.matches?.("form#composer, #composer") === true || element?.id === "composer"; } catch { return false; }
+    };
+    const requestSucceeded = (event) => {
+      if (event?.detail?.successful === true) return true;
+      if (event?.detail?.failed === true || event?.detail?.successful === false) return false;
+      const status = Number(event?.detail?.xhr?.status);
+      return Number.isInteger(status) && status >= 200 && status < 400;
+    };
     const onRequestStage = (eventName, kind) => (event) => {
       // SSE events only inherit a request when their own XHR identifies one;
       // a completed prompt is not evidence that a later stream update is its.
@@ -418,6 +666,19 @@
         const pending = ensurePending();
         pending.requestContext = requestContextFor(request);
         pending.requestPrimed = true;
+      }
+      if (eventName === "htmx:afterRequest" && request && !request.admissionCompleted
+        && isComposerPromptRequest(request, event)) {
+        request.admissionCompleted = true;
+        request.completedAt = now();
+        if (requestSucceeded(event)) {
+          appendAdmissionStage("prompt-admission-pending", request, { at: request.completedAt });
+          admissionCandidates.push(request);
+          while (admissionCandidates.length > maximumAdmissionCandidates) admissionCandidates.shift();
+        } else {
+          appendAdmissionStage("prompt-admission-failed", request, { at: request.completedAt });
+          admissionCandidates = admissionCandidates.filter((candidate) => candidate !== request);
+        }
       }
       if (eventName === "htmx:afterRequest" && activeRequest === request) {
         activeRequest = null;
@@ -430,15 +691,84 @@
         }
       }
     };
+    const clearWrittenNavigationIntent = (id = writtenNavigationIntentId) => {
+      if (!id) return;
+      try {
+        const raw = host.sessionStorage?.getItem(navigationIntentStorageKey);
+        const value = raw ? JSON.parse(raw) : null;
+        if (value?.id === id) host.sessionStorage?.removeItem(navigationIntentStorageKey);
+      } catch {}
+      if (writtenNavigationIntentId === id) {
+        writtenNavigationIntentId = "";
+        if (navigationIntentTimer) host.clearTimeout?.(navigationIntentTimer);
+        if (navigationIntentInterceptTimer) host.clearTimeout?.(navigationIntentInterceptTimer);
+        navigationIntentTimer = 0;
+        navigationIntentInterceptTimer = 0;
+      }
+    };
+    const markNavigationIntent = (value, target = null, sessionSwitchId = null, interceptedEvent = null) => {
+      if (!active) return null;
+      let destination;
+      let current;
+      try {
+        const URLConstructor = host.URL ?? URL;
+        current = new URLConstructor(host.location?.href ?? "http://qq.invalid/");
+        destination = new URLConstructor(String(value ?? ""), current);
+      } catch { return null; }
+      if (destination.origin !== current.origin || !/^https?:$/.test(destination.protocol)
+        || (destination.pathname === current.pathname && destination.search === current.search)) return null;
+      let random = "";
+      try { random = host.crypto?.randomUUID?.() ?? ""; } catch {}
+      const id = `intent-${safeToken(random || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, 64)}`;
+      const switchAt = sessionSwitchId && activeSessionSwitch?.id === sessionSwitchId
+        ? activeSessionSwitch.at : now();
+      const handoff = {
+        id,
+        sourceRunId: runId,
+        action: `NAVIGATE ${safePath(destination.href)}`,
+        target: safeTargetLabel(target),
+        at: round(timeOrigin + switchAt),
+      };
+      try { host.sessionStorage?.setItem(navigationIntentStorageKey, JSON.stringify(handoff)); } catch { return null; }
+      writtenNavigationIntentId = id;
+      if (navigationIntentTimer) host.clearTimeout?.(navigationIntentTimer);
+      if (navigationIntentInterceptTimer) host.clearTimeout?.(navigationIntentInterceptTimer);
+      if (typeof host.setTimeout === "function") {
+        // Check after event propagation so an in-document router/HTMX handler
+        // has had a chance to prevent the native navigation. A fixed short
+        // expiry would erase precisely the multi-second pre-script handoffs we
+        // need to retain while the old document waits for the next response.
+        if (interceptedEvent) {
+          navigationIntentInterceptTimer = host.setTimeout(() => {
+            navigationIntentInterceptTimer = 0;
+            if (interceptedEvent.defaultPrevented) clearWrittenNavigationIntent(id);
+          }, navigationIntentInterceptCheckMs);
+        }
+        navigationIntentTimer = host.setTimeout(() => clearWrittenNavigationIntent(id), navigationIntentValidityMs);
+      }
+      return id;
+    };
+    const captureNavigationIntent = (event) => {
+      if (!active || event?.isTrusted !== true || event.defaultPrevented || event.button !== 0
+        || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      let link;
+      try { link = elementFor(event.target)?.closest?.("a[href]"); } catch {}
+      if (!link || attribute(link, "download") !== null) return;
+      const target = attribute(link, "target");
+      if (target && target.toLowerCase() !== "_self") return;
+      markNavigationIntent(attribute(link, "href") ?? link.href, link, null, event);
+    };
     const listen = (target, type, listener, options) => {
       if (!target?.addEventListener) return;
       target.addEventListener(type, listener, options);
       cleanups.push(() => target.removeEventListener(type, listener, options));
     };
     const install = () => {
+      rememberExistingUserNodes();
       for (const type of ["pointerdown", "click", "keydown", "beforeinput", "submit", "change"]) {
         listen(document, type, captureInteraction, true);
       }
+      listen(document, "click", captureNavigationIntent, true);
       for (const type of ["beforeinput", "input", "change", "toggle", "focusin", "focusout", "scroll", "selectionchange", "invalid"]) {
         listen(document, type, (event) => signalVisual(type, event.target), { capture: true, passive: type === "scroll" });
       }
@@ -499,6 +829,11 @@
         lastExplicitSample = null;
         if (uploadTimer) host.clearTimeout?.(uploadTimer);
         uploadTimer = 0;
+        if (navigationIntentTimer) host.clearTimeout?.(navigationIntentTimer);
+        if (navigationIntentInterceptTimer) host.clearTimeout?.(navigationIntentInterceptTimer);
+        clearWrittenNavigationIntent();
+        admissionCandidates = [];
+        activeSessionSwitch = null;
       }
       setStored("0");
       return api;
@@ -518,6 +853,9 @@
       latestInteraction = null;
       recentGesture = null;
       activeRequest = null;
+      admissionCandidates = [];
+      recommissionUserSequenceBaseline();
+      activeSessionSwitch = null;
       originByEvent = new WeakMap();
       originByTarget = new WeakMap();
       requestByXhr = new WeakMap();
@@ -564,6 +902,9 @@
       timeOrigin,
       startedAt: startedAt === null ? null : round(startedAt),
       startedAtISO,
+      navigation: navigationMetadata(),
+      ...paintMetadata(),
+      navigationIntent,
       ui: uiMetadata(),
       viewport: viewportMetadata(),
       userAgent: String(host.navigator?.userAgent ?? "").slice(0, 512),
@@ -793,6 +1134,72 @@
       if (!uploadInFlight) void attemptUpload({ keepalive: true, preparedBatch: batch });
     };
 
+    const markSessionSwitch = (value, target = null) => {
+      if (!active) return null;
+      const at = now();
+      const sessionSwitch = {
+        id: `switch-${++sessionSwitchSequence}`,
+        at,
+        action: `NAVIGATE ${safePath(value)}`,
+        target: safeTargetLabel(target),
+        origin: latestInteraction && at - latestInteraction.at <= 2_000 ? latestInteraction : null,
+        readyAt: null,
+        baselineCommitted: false,
+      };
+      // A pending prompt from the outgoing transcript cannot safely be matched
+      // against historical nodes in the incoming session.
+      admissionCandidates = [];
+      activeSessionSwitch = sessionSwitch;
+      appendBounded("stages", {
+        at: round(at),
+        event: "qq:sessionSwitch",
+        kind: "session-switch-start",
+        requestId: null,
+        originId: sessionSwitch.origin?.id ?? null,
+        originLatencyMs: sessionSwitch.origin ? round(at - sessionSwitch.origin.at) : null,
+        dispatchLatencyMs: null,
+        requestCompleteLatencyMs: null,
+        conversationSequence: null,
+        channel: null,
+        sessionSwitchId: sessionSwitch.id,
+        target: sessionSwitch.target,
+        action: sessionSwitch.action,
+      });
+      return sessionSwitch.id;
+    };
+    const markSessionSwitchMilestone = (sessionSwitchId, kind, target = null) => {
+      if (!active || !sessionSwitchId || activeSessionSwitch?.id !== sessionSwitchId
+        || !["session-switch-response", "session-switch-ready"].includes(kind)
+        || (kind === "session-switch-ready" && activeSessionSwitch.baselineCommitted)) return false;
+      const at = now();
+      appendBounded("stages", {
+        at: round(at),
+        event: "qq:sessionSwitch",
+        kind,
+        requestId: null,
+        originId: activeSessionSwitch.origin?.id ?? null,
+        originLatencyMs: activeSessionSwitch.origin ? round(at - activeSessionSwitch.origin.at) : null,
+        dispatchLatencyMs: null,
+        requestCompleteLatencyMs: null,
+        conversationSequence: null,
+        channel: null,
+        sessionSwitchId,
+        target: safeTargetLabel(target) ?? activeSessionSwitch.target,
+        action: activeSessionSwitch.action,
+      });
+      if (kind === "session-switch-ready") {
+        activeSessionSwitch.readyAt = at;
+        // This is the only session-namespace reset. Both full-body adoption and
+        // validated live bootstrap call this after settled and live transcript
+        // frames are present, but before queued replacement mutations run.
+        admissionCandidates = [];
+        recommissionUserSequenceBaseline();
+        activeSessionSwitch.baselineCommitted = true;
+        addSignal("mutation:childList", target, 1);
+        scheduleVisual();
+      }
+      return true;
+    };
     const snapshot = () => {
       const result = {
         schema: "qq.visual-latency/v1",
@@ -821,11 +1228,16 @@
         startedAtISO,
         capturedAt: round(now()),
         timeOrigin,
+        navigation: navigationMetadata(),
+        ...paintMetadata(),
+        navigationIntent,
         ui: uiMetadata(),
         viewport: viewportMetadata(),
         userAgent: String(host.navigator?.userAgent ?? "").slice(0, 512),
         limits: { ...limits },
         latestInteractionId: latestInteraction?.id ?? null,
+        pendingAdmissions: admissionCandidates.length,
+        activeSessionSwitch: activeSessionSwitch?.id ?? null,
         activeRequest: activeRequest ? {
           id: activeRequest.id,
           originId: activeRequest.origin?.id ?? null,
@@ -876,7 +1288,13 @@
       host.console?.table?.(rows);
       return rows;
     };
-    const api = Object.freeze({ start, stop, clear, snapshot, summary, report, markStreamPaint });
+    const api = Object.freeze({
+      start, stop, clear, snapshot, summary, report, markStreamPaint, markNavigationIntent, markSessionSwitch,
+      markSessionSwitchResponse: (sessionSwitchId, target) =>
+        markSessionSwitchMilestone(sessionSwitchId, "session-switch-response", target),
+      markSessionSwitchReady: (sessionSwitchId, target) =>
+        markSessionSwitchMilestone(sessionSwitchId, "session-switch-ready", target),
+    });
 
     let querySetting = null;
     try {
@@ -1924,6 +2342,8 @@
     }
     if (url.href === location.href) return;
     if (current instanceof Element && current.matches("[aria-current='page']")) return;
+    const sessionSwitchId = /\/session\/[^/]+\/?$/.test(url.pathname)
+      ? qqLatency.markSessionSwitch(url.href, current) : null;
     markLinkCurrent(current);
     const gen = ++navGeneration;
     abortPrefetchesExcept(url.href);
@@ -1931,10 +2351,13 @@
     try {
       const page = await prefetchPage(url.href, "high");
       if (gen !== navGeneration) return;
+      if (sessionSwitchId) qqLatency.markSessionSwitchResponse(sessionSwitchId, current);
       if (!page?.html || !adoptPage(page.html, page.url)) throw new Error("adopt");
+      if (sessionSwitchId) qqLatency.markSessionSwitchReady(sessionSwitchId, document.body);
     } catch (error) {
       if (gen !== navGeneration) return;
       if (error?.name === "AbortError") return;
+      qqLatency.markNavigationIntent(url.href, current, sessionSwitchId);
       location.assign(url.href);
     }
   };
@@ -2425,8 +2848,10 @@
       history: historyMode,
       exitWhenReady: Boolean(exitWhenReady),
       meta: null,
+      latencySwitchId: null,
     };
     stream.setAttribute("aria-busy", "true");
+    bootstrapSwitch.latencySwitchId = qqLatency.markSessionSwitch(bootstrapSwitch.canonical || bootstrap, stream);
     closeSseSources();
     activeSseSource = null;
     stream.setAttribute("sse-connect", bootstrap);
@@ -2457,6 +2882,10 @@
     restorePersistedDraft(liveSessionId, { replace: true });
     anchorTranscript();
     prepareSession();
+    // switch-ready is intentionally cancelled before htmx's no-op swap, so it
+    // has no htmx:sseMessage callback. Commit the incoming sequence namespace
+    // here, after every transcript/live bootstrap frame and payload validation.
+    if (state.latencySwitchId) qqLatency.markSessionSwitchReady(state.latencySwitchId, document.body);
     if (state.history === "push" && normalizedCanonical(meta.canonical)) {
       const canonical = normalizedCanonical(meta.canonical);
       history.replaceState(sessionHistoryState(liveSessionId, canonical), "", canonical);

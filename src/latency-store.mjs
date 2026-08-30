@@ -98,11 +98,19 @@ const ORIGIN_TYPES = new Set(["pointerdown", "click", "keydown", "beforeinput", 
 const STAGE_EVENTS = new Set([
   "htmx:beforeRequest", "htmx:beforeSend", "htmx:beforeSwap", "htmx:afterSwap",
   "htmx:afterSettle", "htmx:afterRequest", "htmx:sseOpen", "htmx:sseBeforeMessage", "htmx:sseMessage",
+  "qq:promptAdmission", "qq:sessionSwitch",
 ]);
 const STAGE_KINDS = new Set([
   "request-prepared", "network-dispatch", "response-before-swap", "response-after-swap",
   "response-after-settle", "request-complete", "sse-open", "sse-message-before", "sse-message-after",
+  "prompt-admission-pending", "prompt-admitted", "prompt-admission-failed", "prompt-admission-unmatched",
+  "session-switch-start", "session-switch-response", "session-switch-ready",
 ]);
+const SSE_CHANNELS = new Set([
+  "switch-meta", "chrome", "usage", "transcript-reset", "transcript", "live", "queue", "children",
+  "popups", "case", "composer-shell", "switch-ready", "ui", "live-append", "live-tool-append",
+]);
+const NAVIGATION_TYPES = new Set(["navigate", "reload", "back_forward", "prerender"]);
 const ACTION_LABEL = /^(?:|(?:GET|POST|PUT|PATCH|DELETE|REQUEST|NAVIGATE) \/[a-zA-Z0-9_:.@/-]*|(?:control|key|input):[a-zA-Z0-9_:.@/-]+|pointerdown|click|submit|change|beforeinput)$/;
 const TARGET_LABEL = /^[a-zA-Z0-9_:@/-]+(?:#[a-zA-Z0-9_:.@/-]+)?(?:\.[a-zA-Z0-9_:.@/-]+){0,3}$/;
 const SOURCE_LABELS = new Set(LATENCY_VISUAL_SOURCE_LABELS);
@@ -112,10 +120,25 @@ function oneOf(value, label, values) {
   return value;
 }
 
+function normalizeActionRouteIdentities(action) {
+  const separator = action.indexOf(" ");
+  if (separator < 0) return action;
+  const verb = action.slice(0, separator);
+  const segments = action.slice(separator + 1).split("/");
+  for (let index = 0; index < segments.length; index += 1) {
+    if (segments[index] === "project" && segments[index + 1]) {
+      segments[index + 1] = ":project";
+      if (segments[index + 2] && segments[index + 2] !== "session") segments[index + 2] = ":folder";
+    }
+    if (segments[index] === "session" && segments[index + 1]) segments[index + 1] = ":id";
+  }
+  return `${verb} ${segments.join("/")}`;
+}
+
 function actionLabel(value, label) {
   const result = text(value, label, 200);
   if (!ACTION_LABEL.test(result)) throw schemaError(`${label} is not a recognized action label`);
-  return result;
+  return normalizeActionRouteIdentities(result);
 }
 
 function targetLabel(value, label) {
@@ -141,7 +164,8 @@ function sanitizeStage(candidate, index) {
   const label = `stages[${index}]`;
   const value = plainObject(candidate, label, new Set([
     "sequence", "at", "event", "kind", "requestId", "originId", "originLatencyMs",
-    "dispatchLatencyMs", "target", "action",
+    "dispatchLatencyMs", "requestCompleteLatencyMs", "conversationSequence", "channel",
+    "sessionSwitchId", "target", "action",
   ]));
   return {
     sequence: sequence(value.sequence, `${label}.sequence`),
@@ -150,8 +174,16 @@ function sanitizeStage(candidate, index) {
     kind: oneOf(text(value.kind, `${label}.kind`, 64, { empty: false }), `${label}.kind`, STAGE_KINDS),
     requestId: idOrNull(value.requestId, `${label}.requestId`),
     originId: idOrNull(value.originId, `${label}.originId`),
-    originLatencyMs: optionalNumber(value.originLatencyMs, `${label}.originLatencyMs`),
-    dispatchLatencyMs: optionalNumber(value.dispatchLatencyMs, `${label}.dispatchLatencyMs`),
+    originLatencyMs: optionalNumber(value.originLatencyMs, `${label}.originLatencyMs`, { minimum: 0 }),
+    dispatchLatencyMs: optionalNumber(value.dispatchLatencyMs, `${label}.dispatchLatencyMs`, { minimum: 0 }),
+    requestCompleteLatencyMs: optionalNumber(value.requestCompleteLatencyMs, `${label}.requestCompleteLatencyMs`, { minimum: 0 }),
+    conversationSequence: value.conversationSequence === undefined || value.conversationSequence === null
+      ? null
+      : sequence(value.conversationSequence, `${label}.conversationSequence`),
+    channel: value.channel === undefined || value.channel === null
+      ? null
+      : oneOf(text(value.channel, `${label}.channel`, 32, { empty: false }), `${label}.channel`, SSE_CHANNELS),
+    sessionSwitchId: idOrNull(value.sessionSwitchId ?? null, `${label}.sessionSwitchId`),
     target: targetLabel(value.target, `${label}.target`),
     action: actionLabel(value.action, `${label}.action`),
   };
@@ -174,7 +206,7 @@ function sanitizeVisual(candidate, index) {
   const value = plainObject(candidate, label, new Set([
     "sequence", "at", "sources", "mutationCount", "targets", "latestInteractionId",
     "latestInteractionLatencyMs", "activeRequestId", "activeRequestOriginId",
-    "activeRequestLatencyMs", "networkDispatchLatencyMs",
+    "activeRequestLatencyMs", "networkDispatchLatencyMs", "sessionSwitchId",
   ]));
   return {
     sequence: sequence(value.sequence, `${label}.sequence`),
@@ -187,11 +219,12 @@ function sanitizeVisual(candidate, index) {
     }),
     targets: stringArray(value.targets, `${label}.targets`, 12, 180, TARGET_LABEL),
     latestInteractionId: idOrNull(value.latestInteractionId, `${label}.latestInteractionId`),
-    latestInteractionLatencyMs: optionalNumber(value.latestInteractionLatencyMs, `${label}.latestInteractionLatencyMs`),
+    latestInteractionLatencyMs: optionalNumber(value.latestInteractionLatencyMs, `${label}.latestInteractionLatencyMs`, { minimum: 0 }),
     activeRequestId: idOrNull(value.activeRequestId, `${label}.activeRequestId`),
     activeRequestOriginId: idOrNull(value.activeRequestOriginId, `${label}.activeRequestOriginId`),
-    activeRequestLatencyMs: optionalNumber(value.activeRequestLatencyMs, `${label}.activeRequestLatencyMs`),
-    networkDispatchLatencyMs: optionalNumber(value.networkDispatchLatencyMs, `${label}.networkDispatchLatencyMs`),
+    activeRequestLatencyMs: optionalNumber(value.activeRequestLatencyMs, `${label}.activeRequestLatencyMs`, { minimum: 0 }),
+    networkDispatchLatencyMs: optionalNumber(value.networkDispatchLatencyMs, `${label}.networkDispatchLatencyMs`, { minimum: 0 }),
+    sessionSwitchId: idOrNull(value.sessionSwitchId ?? null, `${label}.sessionSwitchId`),
   };
 }
 
@@ -214,15 +247,81 @@ function sanitizeViewport(candidate) {
   };
 }
 
+const NAVIGATION_TIMING_FIELDS = Object.freeze([
+  "startTime", "redirectStart", "redirectEnd", "workerStart", "fetchStart", "domainLookupStart",
+  "domainLookupEnd", "connectStart", "secureConnectionStart", "connectEnd", "requestStart", "responseStart",
+  "responseEnd", "domInteractive", "domContentLoadedEventStart", "domContentLoadedEventEnd", "domComplete",
+  "loadEventStart", "loadEventEnd", "duration",
+]);
+
+function sanitizeNavigation(candidate) {
+  if (candidate === null || candidate === undefined) return null;
+  const allowed = new Set(["type", ...NAVIGATION_TIMING_FIELDS,
+    "transferSize", "encodedBodySize", "decodedBodySize", "serverViewDuration", "serverRenderDuration"]);
+  const value = plainObject(candidate, "page.navigation", allowed);
+  const result = {
+    type: oneOf(text(value.type, "page.navigation.type", 32, { empty: false }), "page.navigation.type", NAVIGATION_TYPES),
+  };
+  for (const field of NAVIGATION_TIMING_FIELDS) {
+    result[field] = optionalNumber(value[field], `page.navigation.${field}`, { minimum: 0 });
+  }
+  for (const field of ["transferSize", "encodedBodySize", "decodedBodySize"]) {
+    result[field] = optionalNumber(value[field], `page.navigation.${field}`, {
+      integer: true, minimum: 0, maximum: MAX_SEQUENCE,
+    });
+  }
+  for (const field of ["serverViewDuration", "serverRenderDuration"]) {
+    result[field] = optionalNumber(value[field], `page.navigation.${field}`, { minimum: 0 });
+  }
+  return result;
+}
+
+function hasUnnormalizedRouteIdentity(action) {
+  const path = action.slice(action.indexOf(" ") + 1);
+  const segments = path.split("/");
+  for (let index = 0; index < segments.length; index += 1) {
+    if (segments[index] === "session" && segments[index + 1] && segments[index + 1] !== ":id") return true;
+    if (segments[index] === "project" && segments[index + 1] && segments[index + 1] !== ":project") return true;
+    if (segments[index] === "project" && segments[index + 2]
+      && segments[index + 2] !== "session" && segments[index + 2] !== ":folder") return true;
+  }
+  return false;
+}
+
+function sanitizeNavigationIntent(candidate) {
+  if (candidate === null || candidate === undefined) return null;
+  const value = plainObject(candidate, "page.navigationIntent", new Set([
+    "id", "sourceRunId", "action", "target", "at", "intentToNavigationMs", "intentToCollectorMs",
+  ]));
+  const action = actionLabel(value.action, "page.navigationIntent.action");
+  if (!action.startsWith("NAVIGATE /") || hasUnnormalizedRouteIdentity(value.action)) {
+    throw schemaError("page.navigationIntent.action must be a normalized navigation action");
+  }
+  return {
+    id: opaqueId(value.id, "page.navigationIntent.id", 80),
+    sourceRunId: opaqueId(value.sourceRunId, "page.navigationIntent.sourceRunId", 128),
+    action,
+    target: targetLabel(value.target, "page.navigationIntent.target"),
+    at: number(value.at, "page.navigationIntent.at", { minimum: 0, maximum: 10_000_000_000_000_000 }),
+    intentToNavigationMs: number(value.intentToNavigationMs, "page.navigationIntent.intentToNavigationMs", { minimum: 0 }),
+    intentToCollectorMs: number(value.intentToCollectorMs, "page.navigationIntent.intentToCollectorMs", { minimum: 0 }),
+  };
+}
+
 function sanitizePage(candidate) {
   const value = plainObject(candidate, "page", new Set([
-    "timeOrigin", "startedAt", "startedAtISO", "ui", "viewport", "userAgent",
+    "timeOrigin", "startedAt", "startedAtISO", "navigation", "firstPaint", "firstContentfulPaint",
+    "navigationIntent", "ui", "viewport", "userAgent",
   ]));
   const uiValue = plainObject(value.ui, "page.ui", new Set(["generation", "revision"]));
   return {
     timeOrigin: number(value.timeOrigin, "page.timeOrigin", { minimum: 0, maximum: 10_000_000_000_000_000 }),
     startedAt: optionalNumber(value.startedAt, "page.startedAt", { minimum: 0 }),
     startedAtISO: text(value.startedAtISO, "page.startedAtISO", 40, { nullable: true }),
+    navigation: sanitizeNavigation(value.navigation),
+    firstPaint: optionalNumber(value.firstPaint, "page.firstPaint", { minimum: 0 }),
+    firstContentfulPaint: optionalNumber(value.firstContentfulPaint, "page.firstContentfulPaint", { minimum: 0 }),
+    navigationIntent: sanitizeNavigationIntent(value.navigationIntent),
     ui: {
       generation: text(uiValue.generation, "page.ui.generation", 120, { nullable: true, id: true }),
       revision: text(uiValue.revision, "page.ui.revision", 120, { nullable: true, id: true }),
