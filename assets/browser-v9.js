@@ -1400,10 +1400,9 @@
     const hasClass = (node, name) => {
       try { return node?.classList?.contains?.(name) === true; } catch { return false; }
     };
-    const setState = (record, state, statusText, accessibleLabel) => {
+    const setState = (record, state, statusText) => {
       record.state = state;
       record.echo.setAttribute("data-prompt-echo-state", state);
-      record.echo.setAttribute("aria-label", accessibleLabel);
       record.status.textContent = statusText;
     };
     const echoContainer = () => document?.querySelector?.("#prompt-echoes") ?? null;
@@ -1429,7 +1428,6 @@
     const clearRecords = () => {
       for (const record of [...records]) removeRecord(record);
       recordsByMessageId.clear();
-      echoContainer()?.replaceChildren?.();
     };
     const trimRecords = () => {
       while (records.size > maximumEchoes) removeRecord(records.values().next().value);
@@ -1441,8 +1439,14 @@
         authoritativeMessageIds.delete(authoritativeMessageIds.values().next().value);
       }
     };
+    // Either server-owned representation supersedes the local object. Keeping
+    // this selector identity-only avoids text, position, and FIFO guesses.
+    const authoritativeSelector = ".message-user[data-message-id], .queue-item[data-message-id]";
     const authoritativeMessageId = (node) => {
-      if (!node || hasClass(node, "prompt-local-echo") || !hasClass(node, "message-user")) return "";
+      if (!node || (!hasClass(node, "message-user") && !hasClass(node, "queue-item"))) return "";
+      try {
+        if (node.getAttribute?.("data-prompt-echo-state") !== null) return "";
+      } catch { return ""; }
       const transcript = document?.querySelector?.("#transcript");
       try {
         if (!transcript || (node !== transcript && transcript.contains?.(node) !== true)) return "";
@@ -1464,12 +1468,14 @@
       if (!commissionedSessionId || currentSessionId() !== commissionedSessionId) return false;
       let changed = reconcileNode(root);
       try {
-        for (const node of root?.querySelectorAll?.(".message-user[data-message-id]") ?? []) {
+        for (const node of root?.querySelectorAll?.(authoritativeSelector) ?? []) {
           if (reconcileNode(node)) changed = true;
         }
       } catch {}
       return changed;
     };
+    // MutationObserver delivery runs at the microtask checkpoint, so direct
+    // live/reset inserts reconcile before the browser's next paint.
     const onMutations = (mutations) => {
       if (!commissionedSessionId || currentSessionId() !== commissionedSessionId) return;
       for (const mutation of mutations ?? []) {
@@ -1514,12 +1520,12 @@
     };
     const createEcho = (prompt, request) => {
       const echo = document.createElement("article");
-      echo.className = "message message-user prompt-local-echo message-pending-admission";
+      echo.className = "message message-user";
       echo.setAttribute("data-prompt-echo-state", "pending");
-      echo.setAttribute("aria-label", "Your message, pending admission");
+      echo.setAttribute("aria-label", "Your message");
 
-      const content = document.createElement("p");
-      content.className = "message-text prompt-echo-text";
+      const content = document.createElement("div");
+      content.className = "message-text";
       content.textContent = prompt;
 
       const status = document.createElement("span");
@@ -1527,7 +1533,7 @@
       status.setAttribute("role", "status");
       status.setAttribute("aria-live", "polite");
       status.setAttribute("aria-atomic", "true");
-      status.textContent = "Admitting…";
+      status.textContent = "Message pending admission";
       echo.append(content, status);
 
       const record = {
@@ -1583,21 +1589,21 @@
       options.fitComposer?.(input, { shrink: false });
     };
     const markAccepted = (record, messageId) => {
-      record.echo.classList?.remove?.("message-pending-admission");
-      record.echo.classList?.add?.("message-accepted-queued");
       if (messageId) {
         record.messageId = messageId;
         record.echo.setAttribute("data-message-id", messageId);
         const matching = recordsByMessageId.get(messageId) ?? new Set();
         matching.add(record);
         recordsByMessageId.set(messageId, matching);
-        setState(record, "accepted", "Accepted · queued", "Your message, accepted and queued");
+        setState(record, "accepted", "Message accepted");
+        // Covers both event orders: a mutation already remembered this ID, or
+        // an OOB/live node is present before its observer callback has run.
         if (authoritativeMessageIds.has(messageId)) removeRecord(record);
         else reconcile(document);
         return;
       }
       // Legacy acceptance is deliberately not matched by position or content.
-      setState(record, "accepted-legacy", "Accepted · awaiting transcript", "Your message, accepted; awaiting authoritative transcript identity");
+      setState(record, "accepted-legacy", "Message accepted; awaiting authoritative identity");
     };
     const afterRequest = (event) => {
       if (disposed) return false;
@@ -4865,6 +4871,8 @@
     id === "session-panel" || id === "transcript" || id === "transcript-log" || id === "transcript-live"
       || id === "transcript-live-nodes" || id === "transcript-anchor"
       || id.startsWith("live-node-") || id.startsWith("live-assistant-");
+  const touchesPromptTruth = (id) => touchesTranscript(id)
+    || id === "transcript-settled" || id === "session-queue" || id === "pending-queue";
   for (const eventName of ["htmx:beforeSwap", "htmx:sseBeforeMessage"]) {
     document.addEventListener(eventName, (event) => {
       const id = swapTargetId(event);
@@ -4994,7 +5002,7 @@
   for (const eventName of ["htmx:afterSwap", "htmx:afterSettle", "htmx:sseMessage"]) {
     document.addEventListener(eventName, (event) => {
       const id = swapTargetId(event);
-      if (touchesTranscript(id)) promptEchoes.reconcile();
+      if (touchesPromptTruth(id)) promptEchoes.reconcile();
       if (touchesTranscript(id) || id === "session-composer" || id === "composer-turn-controls" || id === "composer") prepareSession();
     });
   }

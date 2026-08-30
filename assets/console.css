@@ -1145,40 +1145,38 @@ details.session-menu.session-controls {
   color: #e4ddf4;
 }
 
-.prompt-local-echo {
+.message-user[data-prompt-echo-state] {
   outline: 1px dashed rgba(184, 168, 232, .34);
   outline-offset: -1px;
 }
 
-.message-pending-admission {
+.message-user[data-prompt-echo-state="pending"] {
   background: rgba(107, 86, 176, .17);
   color: #d2c9e8;
 }
 
-.message-accepted-queued {
+.message-user[data-prompt-echo-state="accepted"] {
+  background: rgba(107, 86, 176, .28);
+  color: #e4ddf4;
+}
+
+.message-user[data-prompt-echo-state="accepted-legacy"] {
   background: rgba(107, 86, 176, .24);
   color: #ded5ef;
 }
 
-.prompt-echo-text {
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .prompt-echo-status {
-  display: block;
-  margin-top: .42rem;
-  color: #a99dc9;
-  font-size: .7rem;
-  font-weight: 650;
-  letter-spacing: .035em;
-  line-height: 1.25;
-  text-align: right;
-  text-transform: uppercase;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
-
-.message-accepted-queued .prompt-echo-status { color: #bbb2d4; }
 
 .message-assistant {
   padding-right: clamp(1rem, 4vw, 3rem);

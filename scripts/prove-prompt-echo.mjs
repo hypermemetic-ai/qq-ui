@@ -7,6 +7,7 @@ import { sanitizeLatencyBatch } from "../src/latency-store.mjs";
 import { renderSessionContent, renderTranscript } from "../src/render.mjs";
 
 const browserSource = readFileSync(new URL("../assets/browser-v9.js", import.meta.url), "utf8");
+const consoleCss = readFileSync(new URL("../assets/console.css", import.meta.url), "utf8");
 const factoryStart = "/* qq-prompt-echo-factory:start */";
 const factoryEnd = "/* qq-prompt-echo-factory:end */";
 const start = browserSource.indexOf(factoryStart);
@@ -18,8 +19,32 @@ assert.match(factoryBody, /parameters\.get\("prompt"\)/, "the echo reads HTMX's 
 assert.match(factoryBody, /new WeakMap\(\)/, "concrete XHR identity owns each prompt echo");
 assert.match(browserSource, /admissionCandidates\.findIndex\(\(candidate\) => candidate\.messageId === messageId\)/,
   "authoritative admission timing selects out-of-order requests by exact in-memory ID");
-assert.doesNotMatch(factoryBody, /shift\(\).*message-user|message-user[\s\S]{0,120}shift\(/,
-  "authoritative reconciliation has no user-node FIFO fallback");
+assert.doesNotMatch(factoryBody, /shift\(\).*(?:message-user|queue-item)|(?:message-user|queue-item)[\s\S]{0,120}shift\(/,
+  "authoritative reconciliation has no text/position/FIFO fallback");
+assert.match(factoryBody, /\.queue-item\[data-message-id\]/,
+  "safe authoritative queue identities participate in exact reconciliation");
+assert.doesNotMatch(factoryBody, /replaceChildren/,
+  "prompt reconciliation and cleanup remove only owned echo nodes");
+assert.match(browserSource,
+  /touchesPromptTruth[\s\S]{0,180}transcript-settled[\s\S]{0,100}session-queue/,
+  "HTMX transcript-reset and queue swaps reconcile directly in their swap turn");
+assert.doesNotMatch(browserSource,
+  /const touchesTranscript = \(id\) =>[\s\S]{0,220}(?:transcript-settled|session-queue)/,
+  "replacement truth does not add transcript capture/follow cycles");
+const cssRule = (selector) => {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return consoleCss.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+};
+const statusCss = cssRule(".prompt-echo-status");
+assert.match(statusCss, /position:\s*absolute/, "the accessible status is out of flow");
+assert.match(statusCss, /clip(?:-path)?:/, "the status is visually hidden without consuming a row");
+for (const state of ["pending", "accepted", "accepted-legacy"]) {
+  const rule = cssRule(`.message-user[data-prompt-echo-state="${state}"]`);
+  assert.ok(rule, `${state} has a non-geometric state decoration`);
+  assert.doesNotMatch(rule,
+    /(?:^|;)\s*(?:display|position|inset|top|right|bottom|left|width|height|min-|max-|margin|padding|border(?:-(?:width|spacing))?|font(?:-size)?|line-height|letter-spacing|white-space|overflow|transform|transition|animation|flex|grid|gap)\s*:/,
+    `${state} decoration has no layout-affecting declarations`);
+}
 const createQQPromptEchoController = Function(`${factoryBody}\nreturn createQQPromptEchoController;`)();
 assert.equal(typeof createQQPromptEchoController, "function");
 
@@ -52,6 +77,8 @@ class FakeElement {
     this.value = "";
     this._text = "";
     this.blurred = false;
+    this.blurCalls = 0;
+    this.replaceChildrenCalls = 0;
     this.dataset = new Proxy({}, {
       get: (_target, name) => this.getAttribute(attributeName(String(name))) ?? undefined,
       set: (_target, name, value) => {
@@ -89,6 +116,7 @@ class FakeElement {
     }
   }
   replaceChildren(...nodes) {
+    this.replaceChildrenCalls += 1;
     for (const child of this.children) child.parentElement = null;
     this.children = [];
     this._text = "";
@@ -100,16 +128,22 @@ class FakeElement {
     if (index >= 0) this.parentElement.children.splice(index, 1);
     this.parentElement = null;
   }
-  blur() { this.blurred = true; }
+  blur() { this.blurred = true; this.blurCalls += 1; }
   contains(candidate) {
     if (candidate === this) return true;
     return this.children.some((child) => child.contains(candidate));
   }
   matches(selector) {
-    if (selector === ".message-user[data-message-id]") {
-      return this.classList.contains("message-user") && this.getAttribute("data-message-id") !== null;
-    }
-    return false;
+    return String(selector).split(",").some((part) => {
+      const candidate = part.trim();
+      if (candidate === ".message-user[data-message-id]") {
+        return this.classList.contains("message-user") && this.getAttribute("data-message-id") !== null;
+      }
+      if (candidate === ".queue-item[data-message-id]") {
+        return this.classList.contains("queue-item") && this.getAttribute("data-message-id") !== null;
+      }
+      return false;
+    });
   }
   querySelectorAll(selector) {
     const found = [];
@@ -204,6 +238,7 @@ function browserFixture({ maximumEchoes = 32 } = {}) {
   const persisted = [];
   const cleared = [];
   const fitted = [];
+  const anchors = [];
   let sessionId = "session-a";
   let now = 0;
   const host = {
@@ -221,7 +256,7 @@ function browserFixture({ maximumEchoes = 32 } = {}) {
     fitComposer: (...args) => fitted.push(args),
     clearComposerDraft: (id) => cleared.push(id),
     persistComposerDraft: (draft, id) => persisted.push([draft.value, id]),
-    anchorTranscript: () => {},
+    anchorTranscript: () => anchors.push(sessionId),
     markLocalEcho: (_xhr, echo) => marks.push({ at: now, target: echo.className }),
   });
   controller.commission(sessionId);
@@ -242,15 +277,29 @@ function browserFixture({ maximumEchoes = 32 } = {}) {
     ...event,
     detail: { ...event.detail, successful, failed: !successful, xhr },
   });
-  const authoritative = (messageId, { steering = false } = {}) => {
+  const authoritative = (messageId, { steering = false, text = "authoritative" } = {}) => {
     const node = new FakeElement("article");
     node.className = `message message-user${steering ? " message-steering" : ""}`;
     node.setAttribute("data-message-id", messageId);
+    const content = new FakeElement("div");
+    content.className = "message-text";
+    content.textContent = text;
+    node.append(content);
+    return node;
+  };
+  const queued = (messageId, text = "queued") => {
+    const node = new FakeElement("li");
+    node.className = "queue-item message-queued";
+    node.setAttribute("data-message-id", messageId);
+    const content = new FakeElement("p");
+    content.className = "queue-preview";
+    content.textContent = text;
+    node.append(content);
     return node;
   };
   return {
     document, transcript, liveNodes, echoes, queue, form, input, controller, observer,
-    marks, persisted, cleared, fitted, submit, complete, authoritative, windowListeners,
+    marks, persisted, cleared, fitted, anchors, submit, complete, authoritative, queued, windowListeners,
     setSession(value) { sessionId = value; form.dataset.sessionId = value; },
     setNow(value) { now = value; },
   };
@@ -264,103 +313,174 @@ const first = browser.submit(dangerous, new FakeXhr("message-safe_1:part.2"), {
 });
 assert.equal(browser.echoes.children.length, 1);
 let echo = browser.echoes.children[0];
-assert.equal(echo.children[0].textContent, dangerous, "script-looking prompt is inserted as exact text");
-assert.equal(echo.children[1].textContent, "Admitting…");
-assert.equal(echo.children[1].getAttribute("role"), "status");
-assert.equal(echo.children[1].getAttribute("aria-live"), "polite");
-assert.equal(echo.children[1].getAttribute("aria-atomic"), "true");
-assert.equal(echo.getAttribute("aria-label"), "Your message, pending admission");
+const content = echo.children[0];
+const status = echo.children[1];
+assert.equal(echo.tagName, "ARTICLE");
+assert.equal(echo.className, "message message-user",
+  "the optimistic outer box has exactly the authoritative user classes");
+assert.equal(content.tagName, "DIV");
+assert.equal(content.className, "message-text",
+  "the optimistic literal-text element has authoritative tag/classes");
+assert.equal(content.textContent, dangerous, "script-looking prompt is inserted as exact text");
+assert.equal(status.tagName, "SPAN");
+assert.equal(status.className, "prompt-echo-status");
+assert.equal(status.textContent, "Message pending admission");
+assert.equal(status.textContent.includes(dangerous), false,
+  "the live status announces state without announcing prompt content again");
+assert.equal(status.getAttribute("role"), "status");
+assert.equal(status.getAttribute("aria-live"), "polite");
+assert.equal(status.getAttribute("aria-atomic"), "true");
+assert.equal(echo.getAttribute("aria-label"), "Your message");
 assert.equal(browser.echoes.getAttribute("aria-live"), "off", "raw content is not its own live announcement");
 assert.equal(browser.input.value, "", "composer clears only after HTMX captured the prompt");
 assert.equal(innerHtmlWrites, 0);
 assert.equal(browser.marks[0].at, 12);
 assert.ok(browser.marks[0].at < 50, "deterministic interaction-to-local-echo target is below 50ms");
+assert.deepEqual(browser.anchors, ["session-a"], "submit performs exactly the original follow-anchor action");
+assert.equal(browser.input.blurCalls, 1, "submit performs exactly the original composer blur");
+const pendingGeometry = {
+  outerClass: echo.className,
+  outerStyle: echo.getAttribute("style"),
+  childIdentity: [...echo.children],
+  childShape: echo.children.map((node) => [node.tagName, node.className, node.getAttribute("style")]),
+};
 
 browser.complete(first);
 echo = browser.echoes.children[0];
 assert.equal(echo.getAttribute("data-message-id"), "message-safe_1:part.2");
 assert.equal(echo.getAttribute("data-prompt-echo-state"), "accepted");
-assert.equal(echo.children[1].textContent, "Accepted · queued");
-assert.equal(echo.classList.contains("message-pending-admission"), false);
-assert.equal(echo.classList.contains("message-accepted-queued"), true);
+assert.equal(status.textContent, "Message accepted");
+assert.equal(echo.className, pendingGeometry.outerClass);
+assert.equal(echo.getAttribute("style"), pendingGeometry.outerStyle);
+assert.deepEqual(echo.children, pendingGeometry.childIdentity,
+  "pending to accepted preserves every layout node's identity and order");
+assert.deepEqual(echo.children.map((node) => [node.tagName, node.className, node.getAttribute("style")]),
+  pendingGeometry.childShape, "pending to accepted changes no layout-affecting markup or inline style");
+assert.deepEqual(browser.anchors, ["session-a"], "response does not add a follow-anchor cycle");
+assert.equal(browser.input.blurCalls, 1, "response does not add a focus/blur cycle");
 
-const queueCopy = new FakeElement("li");
-queueCopy.className = "queue-item message-queued";
-queueCopy.setAttribute("data-message-id", "message-safe_1:part.2");
+const queueCopy = browser.queued("message-safe_1:part.2", dangerous);
 browser.queue.append(queueCopy);
 browser.controller.reconcile(browser.queue);
-assert.equal(browser.echoes.children.length, 1, "queue ownership never removes an accepted echo");
-const external = browser.authoritative("external-concurrent");
-browser.liveNodes.append(external);
-browser.observer.emit([{ type: "childList", target: browser.liveNodes, addedNodes: [external] }]);
-assert.equal(browser.echoes.children.length, 1, "an external unmatched user node cannot consume a local echo");
-const exact = browser.authoritative("message-safe_1:part.2", { steering: true });
+assert.equal(browser.echoes.children.length, 0, "response-before-queue removes the exact accepted echo");
+assert.equal(queueCopy.parentElement, browser.queue, "the authoritative queue row remains as the one representation");
+assert.equal(browser.echoes.replaceChildrenCalls, 0, "ordinary queue reconciliation never replaces the echo container");
+
+const queueFirst = browserFixture();
+const queueFirstRequest = queueFirst.submit("queue arrived first", new FakeXhr("queue-first"));
+const queueFirstTruth = queueFirst.queued("queue-first", "queue arrived first");
+queueFirst.queue.append(queueFirstTruth);
+queueFirst.observer.emit([{ type: "childList", target: queueFirst.queue, addedNodes: [queueFirstTruth] }]);
+assert.equal(queueFirst.echoes.children.length, 1,
+  "queue-before-response is remembered without guessing which pending request it owns");
+queueFirst.complete(queueFirstRequest);
+assert.equal(queueFirst.echoes.children.length, 0,
+  "binding the response ID immediately removes an echo whose queue truth arrived first");
+assert.equal(queueFirst.queue.children.length, 1, "queue-before-response converges to exactly one object");
+
+const liveInsert = browserFixture();
+const liveRequest = liveInsert.submit("live exact", new FakeXhr("live-exact"));
+liveInsert.complete(liveRequest);
+const liveTruth = liveInsert.authoritative("live-exact", { text: "live exact" });
+liveInsert.liveNodes.append(liveTruth);
+liveInsert.observer.emit([{ type: "childList", target: liveInsert.liveNodes, addedNodes: [liveTruth] }]);
+assert.equal(liveInsert.echoes.children.length, 0, "matching user live insert leaves only authoritative truth");
+assert.equal(liveTruth.parentElement, liveInsert.liveNodes);
+
+const resetInsert = browserFixture();
+const resetRequest = resetInsert.submit("reset exact", new FakeXhr("reset-exact"));
+resetInsert.complete(resetRequest);
+const resetTruth = resetInsert.authoritative("reset-exact", { steering: true, text: "reset exact" });
 const reset = new FakeElement("div");
 reset.id = "transcript-settled";
-reset.append(exact);
-browser.transcript.append(reset);
-browser.observer.emit([{ type: "childList", target: browser.transcript, addedNodes: [reset] }]);
-assert.equal(browser.echoes.children.length, 0, "a reset subtree removes only the exact accepted message ID");
+reset.append(resetTruth);
+resetInsert.transcript.append(reset);
+resetInsert.observer.emit([{ type: "childList", target: resetInsert.transcript, addedNodes: [reset] }]);
+assert.equal(resetInsert.echoes.children.length, 0, "matching transcript-reset subtree leaves only authoritative truth");
+assert.equal(resetTruth.parentElement, reset);
 
-const queued = browser.submit("remain while queued", new FakeXhr("queued-2"));
-browser.complete(queued);
-browser.controller.reconcile(browser.queue);
-assert.equal(browser.echoes.children.length, 1, "accepted followup survives queue swaps for an arbitrary duration");
-const queuedAuthoritative = browser.authoritative("queued-2");
-browser.liveNodes.append(queuedAuthoritative);
-browser.observer.emit([{ type: "childList", target: browser.liveNodes, addedNodes: [queuedAuthoritative] }]);
-assert.equal(browser.echoes.children.length, 0, "live insert reconciles an accepted followup exactly");
+const unmatched = browserFixture();
+const unmatchedRequest = unmatched.submit("local exact only", new FakeXhr("local-exact"));
+unmatched.complete(unmatchedRequest);
+const externalQueue = unmatched.queued("external-queue");
+const externalUser = unmatched.authoritative("external-user");
+unmatched.queue.append(externalQueue);
+unmatched.liveNodes.append(externalUser);
+unmatched.observer.emit([
+  { type: "childList", target: unmatched.queue, addedNodes: [externalQueue] },
+  { type: "childList", target: unmatched.liveNodes, addedNodes: [externalUser] },
+]);
+assert.equal(unmatched.echoes.children.length, 1,
+  "unmatched authoritative queue/user objects never consume a local echo");
+assert.equal(unmatched.echoes.children[0].getAttribute("data-message-id"), "local-exact");
 
-const requestOne = browser.submit("first concurrent", new FakeXhr("out-of-order-one"));
-const requestTwo = browser.submit("second concurrent", new FakeXhr("out-of-order-two"));
-browser.complete(requestTwo);
-browser.complete(requestOne);
-assert.deepEqual(browser.echoes.children.map((node) => node.getAttribute("data-message-id")), [
-  "out-of-order-one", "out-of-order-two",
-], "out-of-order responses update their concrete XHR-owned echoes");
-const secondNode = browser.authoritative("out-of-order-two");
-browser.liveNodes.append(secondNode);
-browser.observer.emit([{ type: "childList", target: browser.liveNodes, addedNodes: [secondNode] }]);
-assert.deepEqual(browser.echoes.children.map((node) => node.getAttribute("data-message-id")), ["out-of-order-one"]);
-const firstNode = browser.authoritative("out-of-order-one");
-browser.liveNodes.append(firstNode);
-browser.observer.emit([{ type: "childList", target: browser.liveNodes, addedNodes: [firstNode] }]);
-assert.equal(browser.echoes.children.length, 0);
+const ordered = browserFixture();
+const orderedRequests = [
+  ordered.submit("first concurrent", new FakeXhr("ordered-one")),
+  ordered.submit("middle concurrent", new FakeXhr("ordered-two")),
+  ordered.submit("last concurrent", new FakeXhr("ordered-three")),
+];
+// Deliberately bind response IDs out of order; concrete XHR identity must win.
+ordered.complete(orderedRequests[2]);
+ordered.complete(orderedRequests[0]);
+ordered.complete(orderedRequests[1]);
+const [firstEcho, middleEcho, lastEcho] = ordered.echoes.children;
+assert.deepEqual(ordered.echoes.children.map((node) => node.getAttribute("data-message-id")),
+  ["ordered-one", "ordered-two", "ordered-three"]);
+const middleTruth = ordered.queued("ordered-two");
+ordered.queue.append(middleTruth);
+ordered.observer.emit([{ type: "childList", target: ordered.queue, addedNodes: [middleTruth] }]);
+assert.deepEqual(ordered.echoes.children, [firstEcho, lastEcho],
+  "resolving the middle echo preserves sibling order and node identity");
+assert.equal(middleEcho.parentElement, null);
+assert.equal(ordered.echoes.replaceChildrenCalls, 0,
+  "middle reconciliation removes one node rather than recreating the container");
+assert.deepEqual(ordered.anchors, ["session-a", "session-a", "session-a"],
+  "responses and reconciliation add no follow-anchor cycles");
 
-const failed = browser.submit("restore this exact failed draft", new FakeXhr("", 503));
-browser.complete(failed, false);
-assert.equal(browser.echoes.children.length, 0, "failure removes only that request's echo");
-assert.equal(browser.input.value, "restore this exact failed draft");
-assert.deepEqual(browser.persisted.at(-1), ["restore this exact failed draft", "session-a"]);
-const semanticFailure = browser.submit("restore a 200 OOB failure", new FakeXhr("", 200, "failed"));
-browser.complete(semanticFailure, true);
-assert.equal(browser.echoes.children.length, 0);
-assert.equal(browser.input.value, "restore a 200 OOB failure", "fixed failure outcome overrides successful HTTP status");
+const cleanupBrowser = browserFixture();
+const failed = cleanupBrowser.submit("restore this exact failed draft", new FakeXhr("", 503));
+cleanupBrowser.complete(failed, false);
+assert.equal(cleanupBrowser.echoes.children.length, 0, "failure removes only that request's echo");
+assert.equal(cleanupBrowser.input.value, "restore this exact failed draft");
+assert.deepEqual(cleanupBrowser.persisted.at(-1), ["restore this exact failed draft", "session-a"]);
+cleanupBrowser.input.value = "";
+const semanticFailure = cleanupBrowser.submit("restore a 200 OOB failure", new FakeXhr("", 200, "failed"));
+cleanupBrowser.complete(semanticFailure, true);
+assert.equal(cleanupBrowser.echoes.children.length, 0);
+assert.equal(cleanupBrowser.input.value, "restore a 200 OOB failure",
+  "fixed failure outcome overrides successful HTTP status");
 
-const staleDetached = browser.authoritative("late-old-id");
-const oldSession = browser.submit("must not cross sessions", new FakeXhr("late-old-id"));
-browser.controller.reset();
-browser.setSession("session-b");
-browser.controller.commission("session-b");
-browser.observer.emit([{ type: "childList", addedNodes: [staleDetached] }]);
-assert.equal(browser.echoes.children.length, 0);
-assert.equal(browser.echoes.dataset.sessionId, "session-b");
-browser.complete(oldSession);
-assert.equal(browser.echoes.children.length, 0, "late old-session completion has no mapping in the adopted session");
-assert.notEqual(browser.input.value, "must not cross sessions");
-const reusedId = browser.submit("new session may reuse a backend ID namespace", new FakeXhr("late-old-id"));
-browser.complete(reusedId);
-assert.equal(browser.echoes.children.length, 1, "detached old-session mutation cannot pre-consume a new-session echo");
-const currentAuthoritative = browser.authoritative("late-old-id");
-browser.liveNodes.append(currentAuthoritative);
-browser.observer.emit([{ type: "childList", target: browser.liveNodes, addedNodes: [currentAuthoritative] }]);
-assert.equal(browser.echoes.children.length, 0, "the connected current-session node still reconciles exactly");
-const cleanup = browser.submit("cleanup", new FakeXhr("cleanup-id"));
+cleanupBrowser.input.value = "";
+const staleDetached = cleanupBrowser.authoritative("late-old-id");
+const oldSession = cleanupBrowser.submit("must not cross sessions", new FakeXhr("late-old-id"));
+cleanupBrowser.controller.reset();
+cleanupBrowser.setSession("session-b");
+cleanupBrowser.controller.commission("session-b");
+cleanupBrowser.observer.emit([{ type: "childList", addedNodes: [staleDetached] }]);
+assert.equal(cleanupBrowser.echoes.children.length, 0);
+assert.equal(cleanupBrowser.echoes.dataset.sessionId, "session-b");
+cleanupBrowser.complete(oldSession);
+assert.equal(cleanupBrowser.echoes.children.length, 0,
+  "late old-session completion has no mapping in the adopted session");
+assert.notEqual(cleanupBrowser.input.value, "must not cross sessions");
+const reusedId = cleanupBrowser.submit("new session may reuse a backend ID namespace", new FakeXhr("late-old-id"));
+cleanupBrowser.complete(reusedId);
+assert.equal(cleanupBrowser.echoes.children.length, 1,
+  "detached old-session mutation cannot pre-consume a new-session echo");
+const currentAuthoritative = cleanupBrowser.authoritative("late-old-id");
+cleanupBrowser.liveNodes.append(currentAuthoritative);
+cleanupBrowser.observer.emit([{ type: "childList", target: cleanupBrowser.liveNodes, addedNodes: [currentAuthoritative] }]);
+assert.equal(cleanupBrowser.echoes.children.length, 0, "the connected current-session node still reconciles exactly");
+const cleanup = cleanupBrowser.submit("cleanup", new FakeXhr("cleanup-id"));
 assert.ok(cleanup);
-browser.windowListeners.get("pagehide")?.();
-assert.equal(browser.echoes.children.length, 0, "page cleanup removes all in-memory and DOM echoes");
+cleanupBrowser.windowListeners.get("pagehide")?.();
+assert.equal(cleanupBrowser.echoes.children.length, 0, "page cleanup removes all in-memory and DOM echoes");
+assert.equal(cleanupBrowser.echoes.replaceChildrenCalls, 0, "cleanup removes owned nodes without container replacement");
 
-browser.controller.dispose();
+for (const fixture of [browser, queueFirst, liveInsert, resetInsert, unmatched, ordered, cleanupBrowser]) {
+  fixture.controller.dispose();
+}
 const legacy = browserFixture({ maximumEchoes: 2 });
 for (const text of ["legacy one", "legacy two", "legacy three"]) {
   const request = legacy.submit(text, new FakeXhr());
@@ -368,8 +488,9 @@ for (const text of ["legacy one", "legacy two", "legacy three"]) {
 }
 assert.equal(legacy.echoes.children.length, 2, "legacy missing-ID echoes have an explicit session bound");
 assert.ok(legacy.echoes.children.every((node) => node.getAttribute("data-prompt-echo-state") === "accepted-legacy"));
-assert.ok(legacy.echoes.children.every((node) => node.children[1].textContent === "Accepted · awaiting transcript"));
+assert.ok(legacy.echoes.children.every((node) => node.children[1].textContent === "Message accepted; awaiting authoritative identity"));
 const unrelatedLegacyNode = legacy.authoritative("some-external-id");
+legacy.liveNodes.append(unrelatedLegacyNode);
 legacy.controller.reconcile(unrelatedLegacyNode);
 assert.equal(legacy.echoes.children.length, 2, "legacy echoes never use unsafe FIFO reconciliation");
 legacy.controller.dispose();
@@ -395,7 +516,9 @@ const transcriptHtml = renderTranscript({
     pending: [],
   },
 }, paths);
-assert.match(transcriptHtml, /data-message-id="valid-user_1"/);
+assert.match(transcriptHtml,
+  /<article class="message message-user"[^>]*data-message-id="valid-user_1"[^>]*>\s*<div class="message-text">&lt;script&gt;literal&lt;\/script&gt;<\/div>\s*<\/article>/,
+  "authoritative literal user text uses the exact outer and text tag/classes pinned for the echo");
 assert.match(transcriptHtml, /class="message message-user message-steering"[^>]*data-message-id="valid-steering:2"/);
 assert.doesNotMatch(transcriptHtml, /invalid&quot;|onclick=/, "invalid authoritative IDs are omitted, not escaped into an identity");
 assert.match(transcriptHtml, /&lt;script&gt;literal&lt;\/script&gt;/, "authoritative prompt text remains escaped");
@@ -524,7 +647,7 @@ const latencyBatch = {
     sequence: 1, at: 12, event: "qq:promptAdmission", kind: "prompt-local-echo",
     requestId: "request-1", originId: "interaction-1", originLatencyMs: 11,
     dispatchLatencyMs: null, requestCompleteLatencyMs: null, conversationSequence: null,
-    channel: null, sessionSwitchId: null, target: "article.message.message-user.prompt-local-echo",
+    channel: null, sessionSwitchId: null, target: "article.message.message-user",
     action: `POST /qq/session/${sessionId}/prompt`,
   }],
   visuals: [],
