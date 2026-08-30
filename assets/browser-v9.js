@@ -705,7 +705,10 @@
   };
   let resetAdoptedSession = () => {};
   let overlaySessionId = "";
+  const LIVE_TRACKER_OVERVIEW = "all-projects";
   let liveTrackerProjectFilter = "";
+  let sessionConnectorFrame = 0;
+  let sessionConnectorObserver = null;
   let liveSessionId = currentSessionId();
   let committedLocation = location.href;
   let pendingCanonical = "";
@@ -1597,12 +1600,135 @@
   const liveTrackerGroups = (tracker = document.querySelector(".live-tracker")) => tracker
     ? [...tracker.querySelectorAll(".live-tracker-project[data-project]")]
     : [];
+  const sessionConnectors = () => document.querySelector("#session-connectors");
+  const hideSessionConnectors = () => {
+    const svg = sessionConnectors();
+    if (!(svg instanceof SVGElement)) return;
+    svg.hidden = true;
+    svg.replaceChildren();
+  };
+  const connectorOverflowClientRect = (element) => {
+    const rect = element.getBoundingClientRect();
+    const left = rect.left + element.clientLeft;
+    const top = rect.top + element.clientTop;
+    return {
+      left,
+      top,
+      right: left + element.clientWidth,
+      bottom: top + element.clientHeight,
+    };
+  };
+  const intersectConnectorRect = (rect, clipRect) => {
+    const left = Math.max(rect.left, clipRect.left, 0);
+    const top = Math.max(rect.top, clipRect.top, 0);
+    const right = Math.min(rect.right, clipRect.right, document.documentElement.clientWidth);
+    const bottom = Math.min(rect.bottom, clipRect.bottom, document.documentElement.clientHeight);
+    if (right <= left || bottom <= top) return null;
+    return { left, top, right, bottom, width: right - left, height: bottom - top };
+  };
+  const connectorProjectItem = (group) => {
+    const key = projectIdentity(group?.dataset);
+    return activeProjectItems().find((item) => projectIdentity(item.dataset) === key) ?? null;
+  };
+  const paintSessionConnectors = () => {
+    sessionConnectorFrame = 0;
+    const svg = sessionConnectors();
+    const tracker = document.querySelector(".live-tracker[data-overview='true']");
+    if (!(svg instanceof SVGElement) || !(tracker instanceof HTMLElement)
+      || (!desktopChair() && !navMode())) {
+      hideSessionConnectors();
+      return;
+    }
+    const width = document.documentElement.clientWidth;
+    const height = document.documentElement.clientHeight;
+    const paths = document.createDocumentFragment();
+    let count = 0;
+    for (const group of liveTrackerGroups(tracker)) {
+      const projectItem = connectorProjectItem(group);
+      const projectOverflow = projectItem?.closest(".active-projects");
+      if (!(projectItem instanceof HTMLElement) || !(projectOverflow instanceof HTMLElement) || group.hidden) continue;
+      const projectRect = intersectConnectorRect(
+        projectItem.getBoundingClientRect(),
+        connectorOverflowClientRect(projectOverflow),
+      );
+      const groupRect = intersectConnectorRect(
+        group.getBoundingClientRect(),
+        connectorOverflowClientRect(tracker),
+      );
+      if (!projectRect || !groupRect) continue;
+      const startX = Math.round(projectRect.right * 2) / 2;
+      const startY = Math.round((projectRect.top + projectRect.height / 2) * 2) / 2;
+      const endX = Math.round(groupRect.left * 2) / 2;
+      const endY = Math.round((groupRect.top + groupRect.height / 2) * 2) / 2;
+      const elbowX = Math.round(((startX + endX) / 2) * 2) / 2;
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", `M ${startX} ${startY} H ${elbowX} V ${endY} H ${endX}`);
+      path.setAttribute("vector-effect", "non-scaling-stroke");
+      path.dataset.project = String(group.dataset.project || "");
+      path.dataset.folder = String(group.dataset.folder || "");
+      paths.append(path);
+      count += 1;
+    }
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.replaceChildren(paths);
+    svg.hidden = count === 0;
+  };
+  const scheduleSessionConnectors = () => {
+    if (sessionConnectorFrame) return;
+    sessionConnectorFrame = requestAnimationFrame(paintSessionConnectors);
+  };
+  const observeSessionConnectorGeometry = () => {
+    sessionConnectorObserver?.disconnect();
+    if (typeof ResizeObserver !== "function") return;
+    if (!sessionConnectorObserver) sessionConnectorObserver = new ResizeObserver(scheduleSessionConnectors);
+    const tracker = document.querySelector(".live-tracker[data-overview='true']");
+    if (!(tracker instanceof HTMLElement)) return;
+    for (const node of [document.querySelector(".active-projects"), tracker, ...activeProjectItems(), ...liveTrackerGroups(tracker)]) {
+      if (node instanceof Element) sessionConnectorObserver.observe(node);
+    }
+  };
+  const preserveOverviewCreateState = (tracker) => {
+    const create = tracker.querySelector("form.new-session");
+    if (!(create instanceof HTMLFormElement)) return;
+    if (!create.dataset.overviewHidden) create.dataset.overviewHidden = create.hidden ? "preserve" : "restore";
+    create.hidden = true;
+  };
+  const restoreOverviewCreateState = (tracker) => {
+    const create = tracker.querySelector("form.new-session");
+    if (!(create instanceof HTMLFormElement) || !create.dataset.overviewHidden) return;
+    if (create.dataset.overviewHidden === "restore") create.hidden = false;
+    delete create.dataset.overviewHidden;
+  };
+  const showLiveTrackerOverview = ({ remember = true } = {}) => {
+    const tracker = document.querySelector(".live-tracker");
+    if (!(tracker instanceof HTMLElement)) return false;
+    for (const group of liveTrackerGroups(tracker)) {
+      group.hidden = false;
+      group.dataset.current = "false";
+    }
+    tracker.dataset.overview = "true";
+    delete tracker.dataset.filterProject;
+    delete tracker.dataset.filterFolder;
+    tracker.setAttribute("aria-label", "All project sessions");
+    const empty = tracker.querySelector(".live-tracker-filter-empty");
+    if (empty instanceof HTMLElement) empty.hidden = true;
+    preserveOverviewCreateState(tracker);
+    markGroupCurrent(".active-project-item[href]", "active-project-current", null);
+    markGroupCurrent(".projects-choice[href]", "projects-choice-current", null);
+    if (remember) liveTrackerProjectFilter = LIVE_TRACKER_OVERVIEW;
+    observeSessionConnectorGeometry();
+    scheduleSessionConnectors();
+    return true;
+  };
   const showLiveTrackerProject = (group, { remember = true, item = null } = {}) => {
     const tracker = document.querySelector(".live-tracker");
     if (!(tracker instanceof HTMLElement)) return false;
     const project = String(group?.dataset?.project ?? item?.dataset?.project ?? "");
     const folder = String(group?.dataset?.folder ?? item?.dataset?.folder ?? "");
     if (!project) return false;
+    delete tracker.dataset.overview;
+    hideSessionConnectors();
+    sessionConnectorObserver?.disconnect();
     for (const candidate of liveTrackerGroups(tracker)) {
       const selected = candidate === group;
       candidate.hidden = !selected;
@@ -1620,6 +1746,7 @@
     const empty = tracker.querySelector(".live-tracker-filter-empty");
     if (empty instanceof HTMLElement) empty.hidden = Boolean(group);
     const create = tracker.querySelector("form.new-session");
+    restoreOverviewCreateState(tracker);
     if (create instanceof HTMLFormElement) {
       create.action = `${consoleBasePath()}/project/${encodeURIComponent(project)}${folder ? `/${encodeURIComponent(folder)}` : ""}/sessions`;
     }
@@ -1645,7 +1772,12 @@
   const syncLiveTrackerProjectFilter = () => {
     const tracker = document.querySelector(".live-tracker");
     const groups = liveTrackerGroups(tracker);
-    if (!(tracker instanceof HTMLElement) || groups.length === 0) return;
+    if (!(tracker instanceof HTMLElement)) return;
+    if (liveTrackerProjectFilter === LIVE_TRACKER_OVERVIEW) {
+      showLiveTrackerOverview({ remember: false });
+      return;
+    }
+    if (groups.length === 0) return;
     const serverKey = projectIdentity({
       project: tracker.dataset.filterProject,
       folder: tracker.dataset.filterFolder,
@@ -1655,6 +1787,13 @@
       ?? groups.find((group) => group.dataset.current === "true")
       ?? groups[0];
     showLiveTrackerProject(selected, { remember: false });
+  };
+  const CHOOSER_INTERACTIVE = "a, button, input, select, textarea, summary, details, form, label, menu, [role='button'], [role='link'], [contenteditable], [tabindex]";
+  const clearProjectFilterFromEmptySpace = (target) => {
+    if (!(target instanceof Element) || (!desktopChair() && !navMode())) return false;
+    const surface = target.closest(".active-projects, .session-traversal");
+    if (!(surface instanceof Element) || target.closest(CHOOSER_INTERACTIVE)) return false;
+    return showLiveTrackerOverview();
   };
   const sessionEventsUrl = (sessionId) =>
     `${consoleBasePath()}/session/${encodeURIComponent(sessionId)}/events`;
@@ -1705,7 +1844,9 @@
     const folder = String(meta.folder || "");
     const projectsScope = meta.scope === "projects";
     const child = meta.origin === "subagent" && Boolean(meta.parent);
-    if (!projectsScope && project) liveTrackerProjectFilter = projectIdentity({ project, folder });
+    if (!projectsScope && project && liveTrackerProjectFilter !== LIVE_TRACKER_OVERVIEW) {
+      liveTrackerProjectFilter = projectIdentity({ project, folder });
+    }
     rail.dataset.currentProject = project;
     rail.dataset.currentFolder = folder;
     rail.dataset.currentActive = "true";
@@ -1750,6 +1891,9 @@
     if (create instanceof HTMLFormElement && !projectsScope) create.action = `${projectBase}/sessions`;
     if (close instanceof HTMLFormElement) close.action = `${canonical}/close`;
     if (create instanceof HTMLFormElement) create.hidden = child || projectsScope;
+    if (!projectsScope && project) {
+      syncLiveTrackerProjectFilter();
+    }
     if (oldProject !== project || oldFolder !== folder) {
       closeDrawer({ updateUrl: false, restoreFocus: false });
       projectTreeReady = null;
@@ -1889,6 +2033,8 @@
   const paintChairMode = (nav, persist = true) => {
     if (nav) document.body.classList.add("nav-mode");
     else document.body.classList.remove("nav-mode");
+    observeSessionConnectorGeometry();
+    scheduleSessionConnectors();
     if (nav) {
       overlaySessionId = "";
       pendingCanonical = "";
@@ -2800,6 +2946,10 @@
       dismiss.closest(".workflows-popup")?.remove();
       return;
     }
+    if (!event.defaultPrevented && !modifiedClick(event) && clearProjectFilterFromEmptySpace(target)) {
+      event.preventDefault();
+      return;
+    }
     const traversalAction = target?.closest(".session-traversal a[href], .session-traversal button, .session-traversal input, .session-traversal select, .session-traversal textarea, .session-traversal [role=button], .session-traversal [role=link]");
     if (!desktopChair() && !traversalAction
       && target?.closest(".session-heading-start, .session-project, .session-mobile-id, .session-place")) {
@@ -2945,8 +3095,10 @@
       return;
     }
     if (key === "n" || key === "N") {
+      const create = document.querySelector(".new-session:not([hidden])");
+      if (!(create instanceof HTMLFormElement)) return;
       event.preventDefault();
-      submitForm(".new-session");
+      create.requestSubmit();
       return;
     }
     const overlay = document.querySelector(".overlay-popup");
@@ -3083,12 +3235,17 @@
   });
   document.addEventListener("scroll", (event) => {
     if (event.target?.id === "transcript") onTranscriptUserScroll(event.target);
+    scheduleSessionConnectors();
   }, true);
+  window.addEventListener("resize", scheduleSessionConnectors, { passive: true });
+  window.addEventListener("orientationchange", scheduleSessionConnectors, { passive: true });
   const visualViewport = window.visualViewport;
   if (visualViewport && typeof visualViewport.addEventListener === "function") {
     visualViewport.addEventListener("resize", () => {
       if (transcriptView.follow) showLatest();
+      scheduleSessionConnectors();
     });
+    visualViewport.addEventListener("scroll", scheduleSessionConnectors, { passive: true });
   }
   // Jitter buffer for visible text: hold the start of a burst, then leak
   // characters at a steady rate so a 0ms slab does not read as fast→stall→fast.
