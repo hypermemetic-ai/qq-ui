@@ -323,6 +323,107 @@ const inspectExpression = `(() => {
   const projects = [...document.querySelectorAll('.active-project-item[data-project]')];
   const groups = [...document.querySelectorAll('.live-tracker-project[data-project]')];
   const visibleGroups = groups.filter((group) => !group.hidden);
+  const projectPort = document.querySelector('.active-projects');
+  const groupPort = document.querySelector('.live-tracker');
+  const composerShell = document.querySelector('#session-composer');
+  const clientRect = (node) => {
+    const box = node?.getBoundingClientRect();
+    return box ? {
+      left: box.left + (node.clientLeft || 0), top: box.top + (node.clientTop || 0),
+      right: box.left + (node.clientLeft || 0) + node.clientWidth,
+      bottom: box.top + (node.clientTop || 0) + node.clientHeight,
+    } : null;
+  };
+  const elementRect = (node) => {
+    const box = node?.getBoundingClientRect();
+    return box ? { left: box.left, top: box.top, right: box.right, bottom: box.bottom, width: box.width, height: box.height } : null;
+  };
+  const projectVisibilityClip = clientRect(projectPort);
+  const rawGroupVisibilityClip = clientRect(groupPort);
+  const composerRect = elementRect(composerShell);
+  const narrowNav = document.body.classList.contains('nav-mode')
+    && !matchMedia('(min-width: 42.01rem)').matches;
+  const composerStyle = composerShell ? getComputedStyle(composerShell) : null;
+  const composerCoversTracker = Boolean(narrowNav && rawGroupVisibilityClip && composerRect
+    && composerStyle?.display !== 'none' && composerStyle?.visibility !== 'hidden'
+    && composerRect.width > 0 && composerRect.height > 0
+    && composerRect.left < rawGroupVisibilityClip.right && composerRect.right > rawGroupVisibilityClip.left
+    && composerRect.top < rawGroupVisibilityClip.bottom && composerRect.bottom > rawGroupVisibilityClip.top);
+  const groupVisibilityClip = rawGroupVisibilityClip ? {
+    ...rawGroupVisibilityClip,
+    bottom: composerCoversTracker
+      ? Math.max(rawGroupVisibilityClip.top, Math.min(rawGroupVisibilityClip.bottom, composerRect.top))
+      : rawGroupVisibilityClip.bottom,
+  } : null;
+  const visibleSlice = (node, clip) => {
+    const box = node?.getBoundingClientRect();
+    if (!box || !clip) return null;
+    const slice = {
+      left: Math.max(box.left, clip.left), top: Math.max(box.top, clip.top),
+      right: Math.min(box.right, clip.right), bottom: Math.min(box.bottom, clip.bottom),
+    };
+    const meaningfulHeight = Math.min(12, Math.max(4, box.height * .35));
+    return slice.right - slice.left >= 8 && slice.bottom - slice.top >= meaningfulHeight ? slice : null;
+  };
+  const groupByIdentity = new Map(groups.map((group) => [identity(group), group]));
+  const visiblePairSequenceFor = (groupClip) => projects.flatMap((project) => {
+    const group = groupByIdentity.get(identity(project));
+    return !group?.hidden && visibleSlice(project, projectVisibilityClip)
+      && visibleSlice(group, groupClip) ? [identity(project)] : [];
+  });
+  const rawVisiblePairSequence = visiblePairSequenceFor(rawGroupVisibilityClip);
+  const visiblePairSequence = visiblePairSequenceFor(groupVisibilityClip);
+  const composerOccludedPairSequence = rawVisiblePairSequence
+    .filter((identity) => !visiblePairSequence.includes(identity));
+  const layer = document.querySelector('#session-connectors');
+  const paths = [...document.querySelectorAll('#session-connectors path[data-project][data-folder]')];
+  const route = (path) => {
+    const length = path.getTotalLength();
+    const start = path.getPointAtLength(0);
+    const end = path.getPointAtLength(length);
+    const style = getComputedStyle(path);
+    const project = projects.find((candidate) => identity(candidate) === identity(path));
+    const group = groupByIdentity.get(identity(path));
+    const projectBox = project?.getBoundingClientRect();
+    const groupBox = group?.getBoundingClientRect();
+    const projectSlice = visibleSlice(project, projectVisibilityClip);
+    const groupSlice = visibleSlice(group, groupVisibilityClip);
+    return {
+      identity: identity(path), d: path.getAttribute('d') || '', length,
+      start: { x: start.x, y: start.y }, end: { x: end.x, y: end.y },
+      strokeWidth: Number.parseFloat(style.strokeWidth), stroke: style.stroke,
+      opacity: Number.parseFloat(style.opacity), display: style.display, visibility: style.visibility,
+      vectorEffect: style.vectorEffect,
+      direct: (path.getAttribute('d')?.match(/[ML]/g) || []).length === 2,
+      startAttached: Boolean(projectBox && projectSlice)
+        && Math.abs(start.x - projectBox.right) <= 2
+        && start.y >= projectSlice.top - 1 && start.y <= projectSlice.bottom + 1,
+      endAttached: Boolean(groupBox && groupSlice)
+        && Math.abs(end.x - groupBox.left) <= 2
+        && end.y >= groupSlice.top - 1 && end.y <= groupSlice.bottom + 1,
+    };
+  };
+  const routes = paths.map(route);
+  const cross = (a, b) => {
+    const orient = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+    const a1 = orient(a.start, a.end, b.start);
+    const a2 = orient(a.start, a.end, b.end);
+    const b1 = orient(b.start, b.end, a.start);
+    const b2 = orient(b.start, b.end, a.end);
+    return a1 * a2 < -.01 && b1 * b2 < -.01;
+  };
+  const collinear = (a, b) => {
+    const area = (p) => (a.end.x - a.start.x) * (p.y - a.start.y) - (a.end.y - a.start.y) * (p.x - a.start.x);
+    return Math.abs(area(b.start)) < .01 && Math.abs(area(b.end)) < .01;
+  };
+  const routeConflicts = [];
+  for (let left = 0; left < routes.length; left += 1) {
+    for (let right = left + 1; right < routes.length; right += 1) {
+      if (cross(routes[left], routes[right]) || collinear(routes[left], routes[right])) {
+        routeConflicts.push([routes[left].identity, routes[right].identity]);
+      }
+    }
+  }
   const alphaGroup = groups.find((group) => group.dataset.project === 'alpha' && (group.dataset.folder || '') === '');
   const child = alphaGroup?.querySelector('.live-tracker-child-strip .live-tracker-session');
   const childStyle = child ? getComputedStyle(child) : null;
@@ -334,9 +435,21 @@ const inspectExpression = `(() => {
   return {
     standalone: matchMedia('(display-mode: standalone)').matches,
     navMode: document.body.classList.contains('nav-mode'),
-    overview: document.querySelector('.live-tracker')?.dataset.overview === 'true',
-    connectorElements: document.querySelectorAll('#session-connectors, .session-connectors').length,
-    connectorPaths: document.querySelectorAll('svg path[data-project]').length,
+    overview: groupPort?.dataset.overview === 'true',
+    connectorElements: document.querySelectorAll('#session-connectors').length,
+    connectorLayerHidden: !layer || getComputedStyle(layer).display === 'none' || getComputedStyle(layer).visibility === 'hidden',
+    connectorPointerEvents: layer ? getComputedStyle(layer).pointerEvents : '',
+    connectorPaths: routes,
+    connectorPathIdentities: routes.map((entry) => entry.identity),
+    projectVisibilityClip,
+    rawGroupVisibilityClip,
+    groupVisibilityClip,
+    composerRect,
+    composerCoversTracker,
+    rawVisiblePairSequence,
+    visiblePairSequence,
+    composerOccludedPairSequence,
+    routeConflicts,
     projectSequence: projects.map(identity),
     groupSequence: groups.map(identity),
     groupHeadings: groups.map((group) => group.querySelector('.live-tracker-project-name')?.textContent.trim() || ''),
@@ -360,12 +473,12 @@ const inspectExpression = `(() => {
     } : null,
     idleParentElapsedCount: alphaGroup?.querySelector('.live-tracker-session[data-session-id="${architectB}"] .live-tracker-elapsed')?.textContent.trim() ? 1 : 0,
     scroll: {
-      projectTop: document.querySelector('.active-projects')?.scrollTop || 0,
-      projectHeight: document.querySelector('.active-projects')?.clientHeight || 0,
-      projectScrollHeight: document.querySelector('.active-projects')?.scrollHeight || 0,
-      trackerTop: document.querySelector('.live-tracker')?.scrollTop || 0,
-      trackerHeight: document.querySelector('.live-tracker')?.clientHeight || 0,
-      trackerScrollHeight: document.querySelector('.live-tracker')?.scrollHeight || 0,
+      projectTop: projectPort?.scrollTop || 0,
+      projectHeight: projectPort?.clientHeight || 0,
+      projectScrollHeight: projectPort?.scrollHeight || 0,
+      trackerTop: groupPort?.scrollTop || 0,
+      trackerHeight: groupPort?.clientHeight || 0,
+      trackerScrollHeight: groupPort?.scrollHeight || 0,
     },
   };
 })()`;
@@ -392,18 +505,32 @@ async function nativeProjectFocusSequence(cdp, count) {
   return sequence;
 }
 const ascending = (values) => values.every((value, index) => index === 0 || value >= values[index - 1]);
-function assertSelected(state, expected) {
-  assert.equal(state.connectorElements, 0, "selected mode has no connector layer");
-  assert.equal(state.connectorPaths, 0, "selected mode has no project connector path");
+function assertSelected(state, expected, selected = "alpha\n") {
+  assert.equal(state.connectorPaths.length, 0, "selected mode has zero project connector paths");
+  assert.ok(state.connectorElements === 0 || state.connectorLayerHidden,
+    "selected mode removes or hides an empty connector layer");
   assert.equal(state.overview, false, "one project group is selected");
   assert.deepEqual(state.projectSequence, expected, "left DOM/reading order is canonical");
   assert.deepEqual(state.groupSequence, expected, "right DOM/reading order matches the left exactly");
-  assert.deepEqual(state.visibleGroups, ["alpha\n"], "selected mode exposes only its authoritative project group");
+  assert.deepEqual(state.visibleGroups, [selected], "selected mode exposes only its authoritative project group");
 }
 function assertOverview(state, expected) {
-  assert.equal(state.connectorElements, 0, "overview has no connector layer");
-  assert.equal(state.connectorPaths, 0, "overview has no connector paths or persistent bundle");
   assert.equal(state.overview, true, "overview mode is active");
+  assert.equal(state.connectorElements, 1, "overview has one viewport connector layer");
+  assert.equal(state.connectorPointerEvents, "none", "relationship routes never intercept full-row interaction");
+  assert.deepEqual(state.connectorPathIdentities, state.visiblePairSequence,
+    "overview has exactly one route for each meaningfully visible authoritative pair");
+  assert.ok(state.connectorPaths.length > 0, "overview normally exposes visible relationship routes");
+  assert.ok(state.connectorPaths.every((route) => route.display !== "none" && route.visibility === "visible" && route.opacity > 0),
+    "every emitted relationship route is normally visible without hover or focus");
+  assert.ok(state.connectorPaths.every((route) => route.strokeWidth > 0 && route.strokeWidth <= 1),
+    "all relationship routes use a restrained hairline no thicker than one CSS pixel");
+  assert.ok(state.connectorPaths.every((route) => route.direct && route.startAttached && route.endAttached),
+    "each independent direct route attaches to its project and matching group surfaces");
+  assert.ok(state.groupVisibilityClip && state.connectorPaths.every((route) =>
+    route.end.y >= state.groupVisibilityClip.top - 1 && route.end.y <= state.groupVisibilityClip.bottom + 1),
+  "right endpoints stay inside the unobscured group surface rather than the composer-covered padding");
+  assert.deepEqual(state.routeConflicts, [], "routes never cross or overlap into shared/heavier geometry");
   assert.deepEqual(state.projectSequence, expected, "left project identities keep canonical order");
   assert.deepEqual(state.groupSequence, expected, "right group identities exactly match canonical left order");
   assert.deepEqual(state.visibleGroups, expected, "overview exposes every group in reading order");
@@ -428,7 +555,7 @@ try {
   assert.deepEqual(report.desktopFocusSequence, expectedMany,
     "native keyboard Tab traversal follows the same canonical visible project sequence");
   await openOverview(desktop.cdp);
-  report.desktopOverview = await inspect(desktop.cdp, "desktop-overview", { capture: false });
+  report.desktopOverview = await inspect(desktop.cdp, "desktop-overview");
   assertOverview(report.desktopOverview, expectedMany);
   assert.deepEqual(report.desktopOverview.alphaRows, [
     { id: architectB, depth: 0 }, { id: childB2, depth: 1 }, { id: childB1, depth: 1 },
@@ -464,7 +591,7 @@ try {
     document.dispatchEvent(new CustomEvent('htmx:afterSwap', { detail: { target: replacement } }));
   })()`);
   report.desktopLiveSwap = await inspect(desktop.cdp, "desktop-live-swap", { capture: false });
-  assert.equal(report.desktopLiveSwap.connectorElements, 0, "live swaps cannot recreate connector machinery");
+  assertOverview(report.desktopLiveSwap, expectedMany);
   await closeChrome(desktop);
 
   // Installed/standalone narrow PWA: mandatory selected and small-overview images.
@@ -474,7 +601,7 @@ try {
   });
   await waitForPaint(smallPwa.cdp);
   report.smallClosed = await inspect(smallPwa.cdp, "small-closed", { capture: false });
-  assert.equal(report.smallClosed.connectorElements, 0, "closed narrow navigation has no connector layer");
+  assert.equal(report.smallClosed.connectorPaths.length, 0, "closed narrow navigation suppresses relationship routes");
   await openNavigation(smallPwa.cdp);
   report.pwaSelected = await inspect(smallPwa.cdp, "pwa-selected");
   assert.ok(report.pwaSelected.standalone && report.pwaSelected.navMode, "selected screenshot is installed-PWA navigation");
@@ -482,12 +609,28 @@ try {
   await openOverview(smallPwa.cdp);
   report.pwaSmallOverview = await inspect(smallPwa.cdp, "pwa-small-overview");
   assertOverview(report.pwaSmallOverview, expectedSmall);
+  assert.deepEqual(report.pwaSmallOverview.connectorPathIdentities, expectedSmall,
+    "small overview connects every meaningfully visible pair, including epsilon");
+  const epsilonRoute = report.pwaSmallOverview.connectorPaths.find((route) => route.identity === "epsilon\n");
+  assert.ok(epsilonRoute, "epsilon has its required project-to-group relationship line");
+  assert.ok(epsilonRoute.end.y > report.pwaSmallOverview.projectVisibilityClip.bottom,
+    "epsilon right endpoint remains visible below the shorter centered left project list");
+  assert.ok(report.pwaSmallOverview.composerCoversTracker
+    && Math.abs(report.pwaSmallOverview.groupVisibilityClip.bottom - report.pwaSmallOverview.composerRect.top) < .01
+    && epsilonRoute.end.y < report.pwaSmallOverview.composerRect.top,
+  "small overview clips the right tracker at the actual composer while retaining epsilon above it");
   await smallPwa.cdp.evaluate(`document.body.click()`);
   report.smallClosedAfter = await inspect(smallPwa.cdp, "small-closed-after", { capture: false });
-  assert.equal(report.smallClosedAfter.connectorElements, 0, "closing narrow navigation leaves no connector layer");
+  assert.equal(report.smallClosedAfter.connectorPaths.length, 0, "closing narrow navigation suppresses relationship routes");
   await openNavigation(smallPwa.cdp);
   report.smallReopened = await inspect(smallPwa.cdp, "small-reopened", { capture: false });
-  assert.equal(report.smallReopened.connectorElements, 0, "reopening narrow navigation leaves selected mode connector-free");
+  assertOverview(report.smallReopened, expectedSmall);
+  await smallPwa.cdp.evaluate(`document.querySelector('.active-project-item[data-project="beta"][data-folder=""]')?.click()`);
+  report.pwaReselected = await inspect(smallPwa.cdp, "pwa-reselected", { capture: false });
+  assertSelected(report.pwaReselected, expectedSmall, "beta\n");
+  await openOverview(smallPwa.cdp);
+  report.pwaOverviewReentered = await inspect(smallPwa.cdp, "pwa-overview-reentered", { capture: false });
+  assertOverview(report.pwaOverviewReentered, expectedSmall);
   await closeChrome(smallPwa);
 
   // Installed/standalone many-project PWA: mandatory many, independently
@@ -501,6 +644,11 @@ try {
   await openOverview(manyPwa.cdp);
   report.pwaManyOverview = await inspect(manyPwa.cdp, "pwa-many-overview");
   assertOverview(report.pwaManyOverview, expectedMany);
+  assert.ok(report.pwaManyOverview.composerOccludedPairSequence.length > 0,
+    "portrait fixture includes a project-visible group hidden by the actual composer");
+  assert.ok(report.pwaManyOverview.composerOccludedPairSequence.every((identity) =>
+    !report.pwaManyOverview.connectorPathIdentities.includes(identity)),
+  "portrait overview omits every pair whose right group surface is composer-occluded");
   await manyPwa.cdp.evaluate(`(() => {
     const tracker = document.querySelector('.live-tracker');
     const projects = document.querySelector('.active-projects');
@@ -511,11 +659,29 @@ try {
   assertOverview(report.pwaScrolled, expectedMany);
   assert.ok(report.pwaScrolled.scroll.trackerTop > 0 && report.pwaScrolled.scroll.projectTop > 0,
     "both narrow chooser panes were independently scrolled");
+  await manyPwa.cdp.evaluate(`(() => {
+    const tracker = document.querySelector('.live-tracker');
+    const projects = document.querySelector('.active-projects');
+    tracker.scrollTop = tracker.scrollHeight - tracker.clientHeight;
+    projects.scrollTop = projects.scrollHeight - projects.clientHeight;
+  })()`);
+  report.pwaDuplicateFolders = await inspect(manyPwa.cdp, "pwa-duplicate-folders", { capture: false });
+  assertOverview(report.pwaDuplicateFolders, expectedMany);
+  assert.deepEqual(report.pwaDuplicateFolders.connectorPathIdentities.filter((identity) => identity.startsWith("studio\n")),
+    ["studio\neast", "studio\nwest"],
+    "duplicate names route independently to the correct authoritative folder groups");
+  await manyPwa.cdp.evaluate(`(() => {
+    document.querySelector('.live-tracker').scrollTop = 165;
+    document.querySelector('.active-projects').scrollTop = 110;
+  })()`);
   await manyPwa.cdp.send("Emulation.setDeviceMetricsOverride", {
     width: 640, height: 390, deviceScaleFactor: 2, mobile: true, screenWidth: 640, screenHeight: 390,
   });
   report.pwaRotated = await inspect(manyPwa.cdp, "pwa-rotated");
   assertOverview(report.pwaRotated, expectedMany);
+  assert.ok(report.pwaRotated.composerOccludedPairSequence.every((identity) =>
+    !report.pwaRotated.connectorPathIdentities.includes(identity)),
+  "rotated overview omits every pair whose right group surface is composer-occluded");
   await closeChrome(manyPwa);
 
   await writeFile(join(artifacts, "report.json"), `${JSON.stringify(report, null, 2)}\n`);

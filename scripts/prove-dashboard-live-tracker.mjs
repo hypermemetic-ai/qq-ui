@@ -223,7 +223,7 @@ const connectorRail = renderProjectRail({
   dashboard: validDashboard,
 }, paths);
 assert.doesNotMatch(connectorRail, /session-connectors|<svg[^>]*>\s*<path/,
-  "project/session connector markup is absent rather than retained as dead decoration");
+  "server markup does not guess connector geometry before browser layout");
 assert.match(connectorRail, /<nav class="active-projects"[^>]*aria-keyshortcuts="ArrowUp ArrowDown Enter Space"[^>]*tabindex="0">/,
   "the project chooser surface exposes a focused keyboard route to the all-project overview");
 
@@ -303,7 +303,7 @@ assert.match(canonicalRail, />Atlas \/ North<\/span>/,
 assert.match(canonicalTracker, /class="live-tracker-project-empty">no live sessions<\/li>/,
   "an empty project has a deliberate stable group rather than disappearing or shifting peers");
 assert.doesNotMatch(canonicalRail + canonicalTracker, /session-connectors/,
-  "selected and overview server states contain no connector layer");
+  "the server preserves canonical identity surfaces while browser mode owns relationship geometry");
 
 const secondChildId = "session-7a110000-0000-4000-8000-000000000004";
 const stackedDashboard = structuredClone(validDashboard);
@@ -556,8 +556,33 @@ assert.deepEqual({ ...chooserBehavior }, {
   modifiedKeyboard: false,
   overviewCount: 8,
 }, "only genuine Projects/Sessions background or the focused chooser landmark enters overview across desktop and nav mode");
-assert.doesNotMatch(browser, /sessionConnectors|sessionConnector|paintSessionConnectors|connectorPathData/,
-  "obsolete connector geometry, observers, and scheduling are removed from the browser");
+const connectorSource = browser.match(/const SESSION_CONNECTOR_ID[\s\S]*?function scheduleSessionConnectors\(\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
+assert.match(connectorSource, /SESSION_CONNECTOR_ID = "session-connectors"[\s\S]*?const paintSessionConnectors/,
+  "the client owns a fresh viewport relationship layer after layout exists");
+assert.match(connectorSource, /new Map\(\)[\s\S]*?groups\.set\(projectIdentity\(group\.dataset\), group\)/,
+  "session groups are indexed by authoritative project plus folder identity");
+assert.match(connectorSource, /projectIdentity\(project\.dataset\)[\s\S]*?groups\.get\(key\)/,
+  "each project route resolves only its exact folder-aware group");
+assert.match(connectorSource, /projectClip = sessionConnectorRect\(projects\)[\s\S]*?trackerClip = sessionTrackerConnectorRect\(tracker\)[\s\S]*?visibleConnectorSurface\(project, projectClip\)[\s\S]*?visibleConnectorSurface\(group, trackerClip\)/,
+  "each endpoint is omitted only when it is not meaningfully visible in its own actual pane");
+assert.match(connectorSource, /sessionTrackerConnectorRect[\s\S]*?#session-composer[\s\S]*?Math\.min\(clip\.bottom, composer\.top\)/,
+  "narrow group visibility uses the right tracker band capped by the actual composer");
+assert.doesNotMatch(connectorSource, /targetVerticalScrollport|visibleConnectorSurface\(group, tracker, projects\)/,
+  "right endpoint visibility never proxies through or requires overlap with the left project list");
+assert.match(connectorSource, /setAttribute\("d", `M \${start\.x[^`]* L \${end\.x/,
+  "every relationship uses its own direct monotonic segment rather than orthogonal shared lanes");
+assert.doesNotMatch(connectorSource, /shared|trunk|lane|connectorPathData|[HV] \${/i,
+  "the new relationship design contains no shared-lane or trunk routing assumptions");
+assert.match(browser, /const showLiveTrackerOverview[\s\S]*?scheduleSessionConnectors\(\)[\s\S]*?const showLiveTrackerProject[\s\S]*?suppressSessionConnectors\(\)/,
+  "overview entry schedules routes while single-project entry synchronously removes them");
+assert.match(browser, /event\.target\?\.matches\?\.\("\.active-projects, \.live-tracker"\)[\s\S]*?scheduleSessionConnectors\(\)/,
+  "independent project and group pane scrolling recomputes relationship geometry");
+assert.match(browser, /new ResizeObserver[\s\S]*?window\.addEventListener\("resize", scheduleSessionConnectors[\s\S]*?orientationchange/,
+  "surface resize, viewport resize, and rotation all recompute relationship geometry");
+assert.match(browser, /id === "session-chrome"[\s\S]*?syncLiveTrackerProjectFilter\(\)[\s\S]*?scheduleSessionConnectors\(\)/,
+  "live chrome replacement restores mode before repainting its routes");
+assert.match(browser, /touchesComposer\(id\)[\s\S]*?restoreDraft\(\)[\s\S]*?scheduleSessionConnectors\(\)/,
+  "live composer replacement recomputes the right-side unobscured band");
 assert.match(browser, /const activeProjectEntry = \(item\) => \(\{[\s\S]*?projectLabel:[\s\S]*?folderLabel:/,
   "client reconciliation retains the labels required by canonical ordering");
 assert.match(browser, /const appendActiveProject = \(entry\) => \{[\s\S]*?restoreActiveProjects\(\)/,
@@ -615,8 +640,17 @@ assert.match(css, /width:\s*min\(90ch, calc\(100% - var\(--project-rail-width\) 
   "desktop session content consumes the space released by the narrower rail");
 assert.doesNotMatch(css, /\.live-tracker-session-current\s*\{[^}]*box-shadow/,
   "current sessions keep the original understated treatment without an inset bar");
-assert.doesNotMatch(css, /\.session-connectors|#session-connectors/,
-  "obsolete connector layer and path styling are removed");
+const connectorLayerStyle = css.match(/\.session-connectors \{([^}]*)\}/)?.[1] ?? "";
+const connectorPathStyle = css.match(/\.session-connectors path \{([^}]*)\}/)?.[1] ?? "";
+assert.match(connectorLayerStyle, /position:\s*fixed[\s\S]*?pointer-events:\s*none/,
+  "the viewport relationship layer is layout-independent and cannot block full-row interaction");
+const connectorStroke = Number(connectorPathStyle.match(/stroke-width:\s*([\d.]+)px/)?.[1]);
+assert.ok(connectorStroke > 0 && connectorStroke <= 1,
+  "relationship lines are visible hairlines no thicker than one CSS pixel");
+assert.match(connectorPathStyle, /stroke:\s*#[0-9a-f]{6}[\s\S]*?vector-effect:\s*non-scaling-stroke/i,
+  "relationship lines retain their restrained neutral stroke at actual render scale");
+assert.doesNotMatch(connectorPathStyle, /filter|animation|marker|drop-shadow|round/i,
+  "relationship lines add no glow, animation, arrows, dots, or heavy rounding");
 const overviewStyle = css.match(/\.live-tracker\[data-overview="true"\] \{([^}]*)\}/)?.[1] ?? "";
 assert.match(overviewStyle, /flex-direction:\s*column/,
   "overview preserves project order in a simple vertical flow");

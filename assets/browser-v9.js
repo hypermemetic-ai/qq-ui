@@ -1267,6 +1267,7 @@
     for (const choice of document.querySelectorAll(".projects-choice[data-project]")) {
       retargetProjectLink(choice, currentKey, currentHref);
     }
+    scheduleSessionConnectors();
   };
   const activeProjectKeys = () => new Set(activeProjectItems().map((item) => projectIdentity(activeProjectEntry(item))));
   const appendActiveProject = (entry) => {
@@ -1280,6 +1281,7 @@
     const key = projectIdentity(entry);
     const item = activeProjectItems().find((candidate) => projectIdentity(activeProjectEntry(candidate)) === key);
     item?.closest("li")?.remove();
+    scheduleSessionConnectors();
   };
   const responseHasSession = (response) => {
     if (response.status === 404) return false;
@@ -1846,6 +1848,155 @@
     } catch { /* use the console default */ }
     return "/qq";
   };
+  const SESSION_CONNECTOR_ID = "session-connectors";
+  const SESSION_CONNECTOR_INSET = 0.75;
+  const SESSION_CONNECTOR_NS = "http://www.w3.org/2000/svg";
+  let sessionConnectorFrame = 0;
+  let sessionConnectorResizeObserver = null;
+  let sessionConnectorObserved = [];
+  const removeSessionConnectors = () => {
+    document.getElementById(SESSION_CONNECTOR_ID)?.remove();
+  };
+  const sessionConnectorRect = (node) => {
+    if (!(node instanceof HTMLElement)) return null;
+    const rect = node.getBoundingClientRect();
+    return {
+      left: rect.left + node.clientLeft,
+      top: rect.top + node.clientTop,
+      right: rect.left + node.clientLeft + node.clientWidth,
+      bottom: rect.top + node.clientTop + node.clientHeight,
+    };
+  };
+  const sessionTrackerConnectorRect = (tracker) => {
+    const clip = sessionConnectorRect(tracker);
+    if (!clip || !navMode() || desktopChair()) return clip;
+    const composerShell = document.querySelector("#session-composer");
+    if (!(composerShell instanceof HTMLElement)) return clip;
+    const style = getComputedStyle(composerShell);
+    const composer = composerShell.getBoundingClientRect();
+    const coversTracker = style.display !== "none" && style.visibility !== "hidden"
+      && composer.width > 0 && composer.height > 0
+      && composer.left < clip.right && composer.right > clip.left
+      && composer.top < clip.bottom && composer.bottom > clip.top;
+    return coversTracker ? { ...clip, bottom: Math.max(clip.top, Math.min(clip.bottom, composer.top)) } : clip;
+  };
+  const visibleConnectorSurface = (node, clip) => {
+    if (!(node instanceof HTMLElement) || !clip || node.hidden) return null;
+    const rect = node.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    const visible = {
+      left: Math.max(rect.left, clip.left),
+      top: Math.max(rect.top, clip.top),
+      right: Math.min(rect.right, clip.right),
+      bottom: Math.min(rect.bottom, clip.bottom),
+    };
+    const meaningfulHeight = Math.min(12, Math.max(4, rect.height * 0.35));
+    if (visible.right - visible.left < 8 || visible.bottom - visible.top < meaningfulHeight) return null;
+    return { rect, visible };
+  };
+  const sessionConnectorModeVisible = (tracker, rail) => {
+    if (!(tracker instanceof HTMLElement) || !(rail instanceof HTMLElement)) return false;
+    if (tracker.dataset.overview !== "true") return false;
+    if (!desktopChair() && !navMode()) return false;
+    const trackerStyle = getComputedStyle(tracker);
+    const railStyle = getComputedStyle(rail);
+    return trackerStyle.display !== "none" && trackerStyle.visibility !== "hidden"
+      && railStyle.display !== "none" && railStyle.visibility !== "hidden";
+  };
+  const observeSessionConnectorSurfaces = (nodes) => {
+    if (typeof ResizeObserver !== "function") return;
+    const next = [...new Set(nodes.filter((node) => node instanceof Element))];
+    if (next.length === sessionConnectorObserved.length
+      && next.every((node, index) => node === sessionConnectorObserved[index])) return;
+    if (!sessionConnectorResizeObserver) {
+      sessionConnectorResizeObserver = new ResizeObserver(() => scheduleSessionConnectors());
+    }
+    sessionConnectorResizeObserver.disconnect();
+    sessionConnectorObserved = next;
+    for (const node of next) sessionConnectorResizeObserver.observe(node);
+  };
+  const paintSessionConnectors = () => {
+    sessionConnectorFrame = 0;
+    const rail = document.querySelector("#project-rail");
+    const projects = rail?.querySelector(".active-projects");
+    const tracker = document.querySelector(".live-tracker");
+    if (!sessionConnectorModeVisible(tracker, rail)
+      || !(projects instanceof HTMLElement) || !(tracker instanceof HTMLElement)) {
+      removeSessionConnectors();
+      sessionConnectorResizeObserver?.disconnect();
+      sessionConnectorObserved = [];
+      return;
+    }
+    const width = document.documentElement.clientWidth;
+    const height = document.documentElement.clientHeight;
+    if (width <= 0 || height <= 0) {
+      removeSessionConnectors();
+      return;
+    }
+    const groups = new Map();
+    for (const group of tracker.querySelectorAll(".live-tracker-project[data-project]")) {
+      if (!group.hidden) groups.set(projectIdentity(group.dataset), group);
+    }
+    const routes = [];
+    const projectClip = sessionConnectorRect(projects);
+    const trackerClip = sessionTrackerConnectorRect(tracker);
+    const composerShell = document.querySelector("#session-composer");
+    for (const project of projects.querySelectorAll(".active-project-item[data-project][data-folder]")) {
+      const key = projectIdentity(project.dataset);
+      const group = groups.get(key);
+      const source = visibleConnectorSurface(project, projectClip);
+      const target = visibleConnectorSurface(group, trackerClip);
+      if (!key || !source || !target) continue;
+      const start = {
+        x: source.rect.right - SESSION_CONNECTOR_INSET,
+        y: (source.visible.top + source.visible.bottom) / 2,
+      };
+      const end = {
+        x: target.rect.left + SESSION_CONNECTOR_INSET,
+        y: (target.visible.top + target.visible.bottom) / 2,
+      };
+      if (end.x - start.x < 4) continue;
+      routes.push({ project, group, start, end });
+    }
+    if (routes.length === 0) {
+      removeSessionConnectors();
+      observeSessionConnectorSurfaces([rail, projects, tracker, composerShell]);
+      return;
+    }
+    let svg = document.getElementById(SESSION_CONNECTOR_ID);
+    if (!(svg instanceof SVGElement)) {
+      removeSessionConnectors();
+      svg = document.createElementNS(SESSION_CONNECTOR_NS, "svg");
+      svg.id = SESSION_CONNECTOR_ID;
+      svg.classList.add("session-connectors");
+      svg.setAttribute("aria-hidden", "true");
+      svg.setAttribute("focusable", "false");
+      document.body.append(svg);
+    }
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("width", String(width));
+    svg.setAttribute("height", String(height));
+    svg.replaceChildren(...routes.map(({ project, start, end }) => {
+      const path = document.createElementNS(SESSION_CONNECTOR_NS, "path");
+      path.dataset.project = project.dataset.project || "";
+      path.dataset.folder = project.dataset.folder || "";
+      path.setAttribute("d", `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} L ${end.x.toFixed(2)} ${end.y.toFixed(2)}`);
+      return path;
+    }));
+    observeSessionConnectorSurfaces([rail, projects, tracker, composerShell, ...groups.values()]);
+  };
+  function scheduleSessionConnectors() {
+    if (sessionConnectorFrame) return;
+    sessionConnectorFrame = requestAnimationFrame(paintSessionConnectors);
+  }
+  const suppressSessionConnectors = () => {
+    if (sessionConnectorFrame) cancelAnimationFrame(sessionConnectorFrame);
+    sessionConnectorFrame = 0;
+    removeSessionConnectors();
+    sessionConnectorResizeObserver?.disconnect();
+    sessionConnectorObserved = [];
+  };
+
   const liveTrackerGroups = (tracker = document.querySelector(".live-tracker")) => tracker
     ? [...tracker.querySelectorAll(".live-tracker-project[data-project]")]
     : [];
@@ -1878,11 +2029,13 @@
     markGroupCurrent(".active-project-item[href]", "active-project-current", null);
     markGroupCurrent(".projects-choice[href]", "projects-choice-current", null);
     if (remember) liveTrackerProjectFilter = LIVE_TRACKER_OVERVIEW;
+    scheduleSessionConnectors();
     return true;
   };
   const showLiveTrackerProject = (group, { remember = true, item = null } = {}) => {
     const tracker = document.querySelector(".live-tracker");
     if (!(tracker instanceof HTMLElement)) return false;
+    suppressSessionConnectors();
     const project = String(group?.dataset?.project ?? item?.dataset?.project ?? "");
     const folder = String(group?.dataset?.folder ?? item?.dataset?.folder ?? "");
     if (!project) return false;
@@ -2211,6 +2364,9 @@
   const paintChairMode = (nav, persist = true) => {
     if (nav) document.body.classList.add("nav-mode");
     else document.body.classList.remove("nav-mode");
+    if (nav) scheduleSessionConnectors();
+    else if (!desktopChair()) suppressSessionConnectors();
+    else scheduleSessionConnectors();
     if (nav) {
       overlaySessionId = "";
       pendingCanonical = "";
@@ -3414,6 +3570,7 @@
   });
   document.addEventListener("scroll", (event) => {
     if (event.target?.id === "transcript") onTranscriptUserScroll(event.target);
+    if (event.target?.matches?.(".active-projects, .live-tracker")) scheduleSessionConnectors();
   }, true);
   const visualViewport = window.visualViewport;
   if (visualViewport && typeof visualViewport.addEventListener === "function") {
@@ -3858,10 +4015,14 @@
   for (const eventName of ["htmx:afterSwap", "htmx:sseMessage"]) {
     document.addEventListener(eventName, (event) => {
       const id = swapTargetId(event);
-      if (touchesComposer(id)) restoreDraft();
+      if (touchesComposer(id)) {
+        restoreDraft();
+        scheduleSessionConnectors();
+      }
       if (id === "session-chrome") {
         syncLiveTrackerElapsed();
         syncLiveTrackerProjectFilter();
+        scheduleSessionConnectors();
       }
     });
   }
@@ -3873,12 +4034,21 @@
     });
   }
 
-  window.addEventListener("load", restoreTranscriptView, { once: true });
+  window.addEventListener("resize", scheduleSessionConnectors, { passive: true });
+  window.addEventListener("orientationchange", scheduleSessionConnectors, { passive: true });
+  window.visualViewport?.addEventListener?.("resize", scheduleSessionConnectors, { passive: true });
+  window.visualViewport?.addEventListener?.("scroll", scheduleSessionConnectors, { passive: true });
+  document.fonts?.ready?.then?.(scheduleSessionConnectors).catch?.(() => {});
+  window.addEventListener("load", () => {
+    restoreTranscriptView();
+    scheduleSessionConnectors();
+  }, { once: true });
   window.addEventListener("pageshow", () => {
     adoptFileReturnFromWindowName();
     restoreFileReturnFromHistory();
     restorePersistedDraft();
     restoreTranscriptView();
+    scheduleSessionConnectors();
   });
 
   const syncInitialChrome = (options = {}) => {
@@ -3894,6 +4064,7 @@
     syncLiveTrackerElapsed();
     restoreActiveProjects();
     syncLiveTrackerProjectFilter();
+    scheduleSessionConnectors();
     if (!options.skipValidate) void validateRememberedProjects();
     if (drawerIsOpen()) requestAnimationFrame(() => openDrawer({ updateUrl: false, focus: !keepOpenerFocus }));
     restoreFileReturnFromHistory();
