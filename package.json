@@ -25,9 +25,10 @@
     "markdown-it": "15.0.0"
   },
   "scripts": {
-    "test": "node --check src/plugin.mjs && node --check assets/browser-v9.js && node scripts/prove-live-switch-enrichment.mjs && node scripts/prove-prompt-echo.mjs && node scripts/prove-server-switch-timings.mjs && node scripts/prove-snapshot-handoff-switch.mjs && node scripts/prove-selective-render-cache.mjs && node scripts/prove-root-routing.mjs && node scripts/prove-visual-latency.mjs && node scripts/prove-passive-latency.mjs && node scripts/prove-reasoning-transcript-gestures.mjs && node scripts/prove-session-switcher-polish.mjs && node scripts/prove-desktop-case-rail.mjs && node scripts/prove-plugin-context-cards.mjs && node scripts/prove-strip-metadata.mjs && node scripts/prove-dashboard-usage.mjs && node scripts/prove-dashboard-live-tracker.mjs && node scripts/prove-sessions-rendered.mjs",
+    "test": "node --check src/plugin.mjs && node --check assets/browser-v9.js && node scripts/prove-live-switch-enrichment.mjs && node scripts/prove-prompt-echo.mjs && node scripts/prove-prompt-correlation-browser.mjs && node scripts/prove-server-switch-timings.mjs && node scripts/prove-snapshot-handoff-switch.mjs && node scripts/prove-selective-render-cache.mjs && node scripts/prove-root-routing.mjs && node scripts/prove-visual-latency.mjs && node scripts/prove-passive-latency.mjs && node scripts/prove-reasoning-transcript-gestures.mjs && node scripts/prove-session-switcher-polish.mjs && node scripts/prove-desktop-case-rail.mjs && node scripts/prove-plugin-context-cards.mjs && node scripts/prove-strip-metadata.mjs && node scripts/prove-dashboard-usage.mjs && node scripts/prove-dashboard-live-tracker.mjs && node scripts/prove-sessions-rendered.mjs",
     "prove:sessions-rendered": "node scripts/prove-sessions-rendered.mjs",
     "latency:report": "node scripts/report-ui-latency.mjs",
-    "prove:prompt-echo": "node scripts/prove-prompt-echo.mjs"
+    "prove:prompt-echo": "node scripts/prove-prompt-echo.mjs",
+    "prove:prompt-correlation": "node scripts/prove-prompt-correlation-browser.mjs"
   }
 }

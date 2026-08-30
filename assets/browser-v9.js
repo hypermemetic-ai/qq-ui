@@ -1383,13 +1383,19 @@
     const maximumAuthoritativeIds = 4096;
     const records = new Set();
     const recordsByXhr = new WeakMap();
+    const recordsByClientMessageId = new Map();
     const recordsByMessageId = new Map();
+    const authoritativeClientMessageIds = new Set();
     const authoritativeMessageIds = new Set();
     let commissionedSessionId = "";
     let observer = null;
     let localSequence = 0;
     let disposed = false;
 
+    const safeClientMessageId = (value) => typeof value === "string"
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+      ? value.toLowerCase()
+      : "";
     const safeMessageId = (value) => typeof value === "string"
       && value.length <= 128
       && /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(value)
@@ -1417,51 +1423,69 @@
       if (!record || !records.has(record)) return false;
       records.delete(record);
       if (isObjectKey(record.xhr)) recordsByXhr.delete(record.xhr);
-      if (record.messageId) {
-        const matching = recordsByMessageId.get(record.messageId);
+      for (const [identity, index] of [
+        [record.clientMessageId, recordsByClientMessageId],
+        [record.messageId, recordsByMessageId],
+      ]) {
+        if (!identity) continue;
+        const matching = index.get(identity);
         matching?.delete(record);
-        if (matching?.size === 0) recordsByMessageId.delete(record.messageId);
+        if (matching?.size === 0) index.delete(identity);
       }
       record.echo?.remove?.();
       return true;
     };
     const clearRecords = () => {
       for (const record of [...records]) removeRecord(record);
+      recordsByClientMessageId.clear();
       recordsByMessageId.clear();
     };
     const trimRecords = () => {
       while (records.size > maximumEchoes) removeRecord(records.values().next().value);
     };
-    const rememberAuthoritativeId = (messageId) => {
-      if (!messageId || authoritativeMessageIds.has(messageId)) return;
-      authoritativeMessageIds.add(messageId);
-      while (authoritativeMessageIds.size > maximumAuthoritativeIds) {
-        authoritativeMessageIds.delete(authoritativeMessageIds.values().next().value);
-      }
+    const rememberAuthoritativeId = (index, identity) => {
+      if (!identity || index.has(identity)) return;
+      index.add(identity);
+      while (index.size > maximumAuthoritativeIds) index.delete(index.values().next().value);
     };
-    // Either server-owned representation supersedes the local object. Keeping
-    // this selector identity-only avoids text, position, and FIFO guesses.
-    const authoritativeSelector = ".message-user[data-message-id], .queue-item[data-message-id]";
-    const authoritativeMessageId = (node) => {
-      if (!node || (!hasClass(node, "message-user") && !hasClass(node, "queue-item"))) return "";
+    // Either server-owned representation supersedes the local object. Both
+    // namespaces are exact metadata; no content, queue order, or DOM position
+    // participates. Correlation is available at admission, while message ID is
+    // retained as the durable fallback for older core projections.
+    const authoritativeSelector = [
+      ".message-user[data-client-message-id]", ".queue-item[data-client-message-id]",
+      ".message-user[data-message-id]", ".queue-item[data-message-id]",
+    ].join(", ");
+    const authoritativeIdentity = (node) => {
+      if (!node || (!hasClass(node, "message-user") && !hasClass(node, "queue-item"))) return null;
       try {
-        if (node.getAttribute?.("data-prompt-echo-state") !== null) return "";
-      } catch { return ""; }
+        if (node.getAttribute?.("data-prompt-echo-state") !== null) return null;
+      } catch { return null; }
       const transcript = document?.querySelector?.("#transcript");
       try {
-        if (!transcript || (node !== transcript && transcript.contains?.(node) !== true)) return "";
-      } catch { return ""; }
-      let raw = "";
-      try { raw = node.getAttribute?.("data-message-id") ?? node.dataset?.messageId ?? ""; } catch {}
-      return safeMessageId(raw);
+        if (!transcript || (node !== transcript && transcript.contains?.(node) !== true)) return null;
+      } catch { return null; }
+      let clientMessageId = "";
+      let messageId = "";
+      try {
+        clientMessageId = safeClientMessageId(
+          node.getAttribute?.("data-client-message-id") ?? node.dataset?.clientMessageId ?? "",
+        );
+        messageId = safeMessageId(node.getAttribute?.("data-message-id") ?? node.dataset?.messageId ?? "");
+      } catch {}
+      return clientMessageId || messageId ? { clientMessageId, messageId } : null;
     };
     const reconcileNode = (node) => {
-      const messageId = authoritativeMessageId(node);
-      if (!messageId) return false;
-      rememberAuthoritativeId(messageId);
-      const matching = recordsByMessageId.get(messageId);
-      if (!matching?.size) return false;
-      for (const record of [...matching]) removeRecord(record);
+      const identity = authoritativeIdentity(node);
+      if (!identity) return false;
+      rememberAuthoritativeId(authoritativeClientMessageIds, identity.clientMessageId);
+      rememberAuthoritativeId(authoritativeMessageIds, identity.messageId);
+      const matching = new Set([
+        ...(recordsByClientMessageId.get(identity.clientMessageId) ?? []),
+        ...(recordsByMessageId.get(identity.messageId) ?? []),
+      ]);
+      if (!matching.size) return false;
+      for (const record of matching) removeRecord(record);
       return true;
     };
     const reconcile = (root = document) => {
@@ -1474,8 +1498,8 @@
       } catch {}
       return changed;
     };
-    // MutationObserver delivery runs at the microtask checkpoint, so direct
-    // live/reset inserts reconcile before the browser's next paint.
+    // MutationObserver delivery runs at the microtask checkpoint, so a queue or
+    // user insert and exact echo removal complete before the browser can paint.
     const onMutations = (mutations) => {
       if (!commissionedSessionId || currentSessionId() !== commissionedSessionId) return;
       for (const mutation of mutations ?? []) {
@@ -1499,6 +1523,24 @@
       }
       return typeof input?.value === "string" ? input.value : "";
     };
+    const createClientMessageId = () => {
+      try { return safeClientMessageId(host.crypto?.randomUUID?.()); } catch { return ""; }
+    };
+    const captureClientMessageId = (event, clientMessageId) => {
+      if (!clientMessageId) return false;
+      const parameters = event?.detail?.requestConfig?.parameters;
+      try {
+        if (parameters && typeof parameters.set === "function") {
+          parameters.set("clientMessageId", clientMessageId);
+          return true;
+        }
+        if (parameters && typeof parameters === "object") {
+          parameters.clientMessageId = clientMessageId;
+          return parameters.clientMessageId === clientMessageId;
+        }
+      } catch {}
+      return false;
+    };
     const composerInput = (form) => {
       try {
         const input = form?.querySelector?.("textarea[name='prompt']");
@@ -1518,15 +1560,35 @@
       if (!container || !input || String(input.tagName ?? "").toUpperCase() !== "TEXTAREA") return null;
       return { form, xhr, sessionId, container, input };
     };
-    const createEcho = (prompt, request) => {
-      const echo = document.createElement("article");
-      echo.className = "message message-user";
+    const createEcho = (prompt, request, clientMessageId) => {
+      // A direct prompt first appears authoritatively in pending/queue. Use that
+      // row's geometry and transcript location from birth; controls stay disabled
+      // until the server-owned row replaces this browser-owned object.
+      const echo = document.createElement("li");
+      echo.className = "queue-item message-queued";
       echo.setAttribute("data-prompt-echo-state", "pending");
-      echo.setAttribute("aria-label", "Your message");
+      if (clientMessageId) echo.setAttribute("data-client-message-id", clientMessageId);
+      echo.setAttribute("data-placement", "queued");
+      echo.setAttribute("aria-label", "Queued message");
 
-      const content = document.createElement("div");
-      content.className = "message-text";
+      const mark = document.createElement("span");
+      mark.className = "queue-mark";
+      mark.setAttribute("aria-hidden", "true");
+      mark.textContent = "◦";
+
+      const content = document.createElement("p");
+      content.className = "queue-preview";
       content.textContent = prompt;
+
+      const control = document.createElement("span");
+      control.className = "queue-remove";
+      const remove = document.createElement("button");
+      remove.setAttribute("type", "button");
+      remove.setAttribute("disabled", "");
+      remove.setAttribute("aria-label", "Message pending admission");
+      remove.setAttribute("title", "Pending admission");
+      remove.textContent = "×";
+      control.append(remove);
 
       const status = document.createElement("span");
       status.className = "prompt-echo-status";
@@ -1534,7 +1596,7 @@
       status.setAttribute("aria-live", "polite");
       status.setAttribute("aria-atomic", "true");
       status.textContent = "Message pending admission";
-      echo.append(content, status);
+      echo.append(mark, content, control, status);
 
       const record = {
         sequence: ++localSequence,
@@ -1543,14 +1605,23 @@
         prompt,
         echo,
         status,
+        clientMessageId,
         messageId: "",
         state: "pending",
       };
       records.add(record);
       recordsByXhr.set(request.xhr, record);
+      if (clientMessageId) {
+        const matching = recordsByClientMessageId.get(clientMessageId) ?? new Set();
+        matching.add(record);
+        recordsByClientMessageId.set(clientMessageId, matching);
+      }
       request.container.append(echo);
       trimRecords();
       options.markLocalEcho?.(request.xhr, echo);
+      // This also covers an unusual authority-before-observer ordering.
+      if (authoritativeClientMessageIds.has(clientMessageId)) removeRecord(record);
+      else reconcile(document);
       return record;
     };
     const beforeRequest = (event) => {
@@ -1558,7 +1629,12 @@
       const request = genuineComposerRequest(event);
       if (!request || recordsByXhr.has(request.xhr)) return false;
       const prompt = capturedPrompt(event, request.input);
-      createEcho(prompt, request);
+      // HTMX has already captured form parameters but has not dispatched. Bind
+      // one cryptographically random correlation UUID to those exact bytes and
+      // to the provisional object before exposing the object in the transcript.
+      const clientMessageId = createClientMessageId();
+      captureClientMessageId(event, clientMessageId);
+      createEcho(prompt, request, clientMessageId);
       // HTMX has already captured request parameters. Clearing now cannot alter
       // the admitted bytes and leaves the composer ready for the next draft.
       request.input.value = "";
@@ -1596,8 +1672,8 @@
         matching.add(record);
         recordsByMessageId.set(messageId, matching);
         setState(record, "accepted", "Message accepted");
-        // Covers both event orders: a mutation already remembered this ID, or
-        // an OOB/live node is present before its observer callback has run.
+        // Covers both event orders and old core projections that omit the
+        // correlation token but return the durable identity in the POST.
         if (authoritativeMessageIds.has(messageId)) removeRecord(record);
         else reconcile(document);
         return;
@@ -1631,6 +1707,7 @@
     };
     const reset = () => {
       clearRecords();
+      authoritativeClientMessageIds.clear();
       authoritativeMessageIds.clear();
       commissionedSessionId = "";
     };
@@ -1642,6 +1719,7 @@
       }
       if (commissionedSessionId !== next) {
         clearRecords();
+        authoritativeClientMessageIds.clear();
         authoritativeMessageIds.clear();
       }
       commissionedSessionId = next;
@@ -1665,7 +1743,7 @@
         subtree: true,
         childList: true,
         attributes: true,
-        attributeFilter: ["data-message-id"],
+        attributeFilter: ["data-client-message-id", "data-message-id"],
       });
     }
     host.addEventListener?.("pagehide", reset, true);

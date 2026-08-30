@@ -8,10 +8,11 @@ Server-rendered Cordis plugin for the qq operator console. This package is priva
 npm test
 npm run prove:sessions-rendered
 npm run prove:prompt-echo
+npm run prove:prompt-correlation
 npm run latency:report
 ```
 
-`npm test` is the full declared check: it syntax-checks [`src/plugin.mjs`](src/plugin.mjs) and [`assets/browser-v9.js`](assets/browser-v9.js), then runs the repository's UI proof scripts. `prove:sessions-rendered` runs the focused sessions-rendered proof; `prove:prompt-echo` runs the immediate echo/header/reconciliation/privacy proof; `latency:report` runs [`scripts/report-ui-latency.mjs`](scripts/report-ui-latency.mjs).
+`npm test` is the full declared check: it syntax-checks [`src/plugin.mjs`](src/plugin.mjs) and [`assets/browser-v9.js`](assets/browser-v9.js), then runs the repository's UI proof scripts. `prove:sessions-rendered` runs the focused sessions-rendered proof; `prove:prompt-echo` runs the immediate provisional/correlation/header/reconciliation/privacy proof; `prove:prompt-correlation` runs the real-Chromium, real-HTMX slow-response paint/transport proof; `latency:report` runs [`scripts/report-ui-latency.mjs`](scripts/report-ui-latency.mjs).
 
 No install or start command is declared in `package.json`. In particular, dependency installation must account for the local `../qq-core` dependency.
 

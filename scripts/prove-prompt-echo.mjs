@@ -4,7 +4,8 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createConsoleHandler, PROMPT_MESSAGE_ID_HEADER, PROMPT_OUTCOME_HEADER } from "../src/http-app.mjs";
 import { sanitizeLatencyBatch } from "../src/latency-store.mjs";
-import { renderSessionContent, renderTranscript } from "../src/render.mjs";
+import { regionFingerprints, renderSessionContent, renderTranscript } from "../src/render.mjs";
+import { safeClientMessageId } from "../src/client-message-id.mjs";
 
 const browserSource = readFileSync(new URL("../assets/browser-v9.js", import.meta.url), "utf8");
 const consoleCss = readFileSync(new URL("../assets/console.css", import.meta.url), "utf8");
@@ -16,13 +17,18 @@ assert.ok(start >= 0 && end > start, "browser asset exposes the prompt-echo cont
 const factoryBody = browserSource.slice(start + factoryStart.length, end);
 assert.doesNotMatch(factoryBody, /innerHTML/, "the prompt-echo implementation never uses innerHTML");
 assert.match(factoryBody, /parameters\.get\("prompt"\)/, "the echo reads HTMX's already-captured parameters");
+assert.match(factoryBody, /parameters\.set\("clientMessageId", clientMessageId\)/,
+  "beforeRequest adds correlation to HTMX's already-captured parameters");
+assert.match(factoryBody, /host\.crypto\?\.randomUUID/, "correlation identity is born from browser cryptographic randomness");
 assert.match(factoryBody, /new WeakMap\(\)/, "concrete XHR identity owns each prompt echo");
 assert.match(browserSource, /admissionCandidates\.findIndex\(\(candidate\) => candidate\.messageId === messageId\)/,
   "authoritative admission timing selects out-of-order requests by exact in-memory ID");
 assert.doesNotMatch(factoryBody, /shift\(\).*(?:message-user|queue-item)|(?:message-user|queue-item)[\s\S]{0,120}shift\(/,
   "authoritative reconciliation has no text/position/FIFO fallback");
+assert.match(factoryBody, /\.queue-item\[data-client-message-id\]/,
+  "safe authoritative queue correlations participate in exact pre-response reconciliation");
 assert.match(factoryBody, /\.queue-item\[data-message-id\]/,
-  "safe authoritative queue identities participate in exact reconciliation");
+  "durable queue identities remain an exact old-core fallback");
 assert.doesNotMatch(factoryBody, /replaceChildren/,
   "prompt reconciliation and cleanup remove only owned echo nodes");
 assert.match(browserSource,
@@ -39,7 +45,7 @@ const statusCss = cssRule(".prompt-echo-status");
 assert.match(statusCss, /position:\s*absolute/, "the accessible status is out of flow");
 assert.match(statusCss, /clip(?:-path)?:/, "the status is visually hidden without consuming a row");
 for (const state of ["pending", "accepted", "accepted-legacy"]) {
-  const rule = cssRule(`.message-user[data-prompt-echo-state="${state}"]`);
+  const rule = cssRule(`.queue-item[data-prompt-echo-state="${state}"]`);
   assert.ok(rule, `${state} has a non-geometric state decoration`);
   assert.doesNotMatch(rule,
     /(?:^|;)\s*(?:display|position|inset|top|right|bottom|left|width|height|min-|max-|margin|padding|border(?:-(?:width|spacing))?|font(?:-size)?|line-height|letter-spacing|white-space|overflow|transform|transition|animation|flex|grid|gap)\s*:/,
@@ -136,13 +142,15 @@ class FakeElement {
   matches(selector) {
     return String(selector).split(",").some((part) => {
       const candidate = part.trim();
-      if (candidate === ".message-user[data-message-id]") {
-        return this.classList.contains("message-user") && this.getAttribute("data-message-id") !== null;
-      }
-      if (candidate === ".queue-item[data-message-id]") {
-        return this.classList.contains("queue-item") && this.getAttribute("data-message-id") !== null;
-      }
-      return false;
+      const clientIdentity = candidate.endsWith("[data-client-message-id]");
+      const durableIdentity = candidate.endsWith("[data-message-id]");
+      if (!clientIdentity && !durableIdentity) return false;
+      const expectedClass = candidate.startsWith(".message-user") ? "message-user"
+        : candidate.startsWith(".queue-item") ? "queue-item" : "";
+      const attribute = clientIdentity ? "data-client-message-id" : "data-message-id";
+      return Boolean(expectedClass)
+        && this.classList.contains(expectedClass)
+        && this.getAttribute(attribute) !== null;
     });
   }
   querySelectorAll(selector) {
@@ -216,7 +224,7 @@ function browserFixture({ maximumEchoes = 32 } = {}) {
   live.id = "transcript-live";
   const liveNodes = new FakeElement("div");
   liveNodes.id = "transcript-live-nodes";
-  const echoes = new FakeElement("div");
+  const echoes = new FakeElement("ol");
   echoes.id = "prompt-echoes";
   echoes.setAttribute("data-session-id", "session-a");
   echoes.setAttribute("aria-live", "off");
@@ -228,7 +236,7 @@ function browserFixture({ maximumEchoes = 32 } = {}) {
   const input = new FakeElement("textarea");
   input.setAttribute("name", "prompt");
   form.append(input);
-  live.append(liveNodes, echoes, queue);
+  live.append(liveNodes, queue, echoes);
   transcript.append(live);
   body.append(transcript, form);
   document.documentElement.append(body);
@@ -241,8 +249,12 @@ function browserFixture({ maximumEchoes = 32 } = {}) {
   const anchors = [];
   let sessionId = "session-a";
   let now = 0;
+  let clientSequence = 0;
   const host = {
     document,
+    crypto: {
+      randomUUID: () => `00000000-0000-4000-8000-${String(++clientSequence).padStart(12, "0")}`,
+    },
     MutationObserver: FakeMutationObserver,
     addEventListener(name, listener) { windowListeners.set(name, listener); },
     removeEventListener(name, listener) {
@@ -263,34 +275,37 @@ function browserFixture({ maximumEchoes = 32 } = {}) {
   const observer = FakeMutationObserver.instances.at(-1);
   const submit = (prompt, xhr = new FakeXhr(), { textareaValue = prompt } = {}) => {
     input.value = textareaValue;
+    const parameters = new Map([["prompt", prompt]]);
     const event = {
       detail: {
         elt: form,
         xhr,
-        requestConfig: { parameters: new Map([["prompt", prompt]]) },
+        requestConfig: { parameters },
       },
     };
     assert.equal(controller.beforeRequest(event), true);
-    return { xhr, event };
+    return { xhr, event, clientMessageId: parameters.get("clientMessageId") };
   };
   const complete = ({ xhr, event }, successful = true) => controller.afterRequest({
     ...event,
     detail: { ...event.detail, successful, failed: !successful, xhr },
   });
-  const authoritative = (messageId, { steering = false, text = "authoritative" } = {}) => {
+  const authoritative = (messageId, { steering = false, text = "authoritative", clientMessageId = "" } = {}) => {
     const node = new FakeElement("article");
     node.className = `message message-user${steering ? " message-steering" : ""}`;
-    node.setAttribute("data-message-id", messageId);
+    if (messageId) node.setAttribute("data-message-id", messageId);
+    if (clientMessageId) node.setAttribute("data-client-message-id", clientMessageId);
     const content = new FakeElement("div");
     content.className = "message-text";
     content.textContent = text;
     node.append(content);
     return node;
   };
-  const queued = (messageId, text = "queued") => {
+  const queued = (messageId, text = "queued", { clientMessageId = "" } = {}) => {
     const node = new FakeElement("li");
     node.className = "queue-item message-queued";
-    node.setAttribute("data-message-id", messageId);
+    if (messageId) node.setAttribute("data-message-id", messageId);
+    if (clientMessageId) node.setAttribute("data-client-message-id", clientMessageId);
     const content = new FakeElement("p");
     content.className = "queue-preview";
     content.textContent = text;
@@ -305,24 +320,42 @@ function browserFixture({ maximumEchoes = 32 } = {}) {
   };
 }
 
+assert.equal(safeClientMessageId("110ec58a-a0f2-4ac4-8393-c866d813b8d1"),
+  "110ec58a-a0f2-4ac4-8393-c866d813b8d1");
+assert.equal(safeClientMessageId("110EC58A-A0F2-4AC4-8393-C866D813B8D1"),
+  "110ec58a-a0f2-4ac4-8393-c866d813b8d1", "safe UUIDs are canonicalized");
+for (const invalid of ["", "not-a-uuid", "110ec58a-a0f2-3ac4-8393-c866d813b8d1",
+  "110ec58a-a0f2-4ac4-7393-c866d813b8d1", "110ec58a-a0f2-4ac4-8393-c866d813b8d1-extra"]) {
+  assert.equal(safeClientMessageId(invalid), "", `invalid client identity is rejected: ${invalid}`);
+}
+
 const browser = browserFixture();
 const dangerous = '<script>window.pwned = true</script>\n  spaced & exact  ';
 browser.setNow(12);
 const first = browser.submit(dangerous, new FakeXhr("message-safe_1:part.2"), {
   textareaValue: "stale textarea value must not be echoed",
 });
+assert.match(first.clientMessageId, /^00000000-0000-4000-8000-\d{12}$/);
+assert.equal(first.event.detail.requestConfig.parameters.get("clientMessageId"), first.clientMessageId,
+  "the request and provisional share identity from birth");
 assert.equal(browser.echoes.children.length, 1);
 let echo = browser.echoes.children[0];
-const content = echo.children[0];
-const status = echo.children[1];
-assert.equal(echo.tagName, "ARTICLE");
-assert.equal(echo.className, "message message-user",
-  "the optimistic outer box has exactly the authoritative user classes");
-assert.equal(content.tagName, "DIV");
-assert.equal(content.className, "message-text",
-  "the optimistic literal-text element has authoritative tag/classes");
+const [mark, content, control, status] = echo.children;
+assert.equal(echo.tagName, "LI");
+assert.equal(echo.className, "queue-item message-queued",
+  "the provisional outer box has authoritative queue-row classes");
+assert.equal(echo.getAttribute("data-client-message-id"), first.clientMessageId);
+assert.equal(echo.getAttribute("data-placement"), "queued");
+assert.equal(mark.tagName, "SPAN");
+assert.equal(mark.className, "queue-mark");
+assert.equal(content.tagName, "P");
+assert.equal(content.className, "queue-preview",
+  "the provisional literal text uses queue-row geometry");
 assert.equal(content.textContent, dangerous, "script-looking prompt is inserted as exact text");
-assert.equal(status.tagName, "SPAN");
+assert.equal(control.className, "queue-remove");
+assert.equal(control.children[0].tagName, "BUTTON");
+assert.notEqual(control.children[0].getAttribute("disabled"), null,
+  "provisional queue controls remain disabled until authority");
 assert.equal(status.className, "prompt-echo-status");
 assert.equal(status.textContent, "Message pending admission");
 assert.equal(status.textContent.includes(dangerous), false,
@@ -330,12 +363,12 @@ assert.equal(status.textContent.includes(dangerous), false,
 assert.equal(status.getAttribute("role"), "status");
 assert.equal(status.getAttribute("aria-live"), "polite");
 assert.equal(status.getAttribute("aria-atomic"), "true");
-assert.equal(echo.getAttribute("aria-label"), "Your message");
+assert.equal(echo.getAttribute("aria-label"), "Queued message");
 assert.equal(browser.echoes.getAttribute("aria-live"), "off", "raw content is not its own live announcement");
-assert.equal(browser.input.value, "", "composer clears only after HTMX captured the prompt");
+assert.equal(browser.input.value, "", "composer clears only after HTMX captured prompt and correlation");
 assert.equal(innerHtmlWrites, 0);
 assert.equal(browser.marks[0].at, 12);
-assert.ok(browser.marks[0].at < 50, "deterministic interaction-to-local-echo target is below 50ms");
+assert.ok(browser.marks[0].at < 50, "deterministic interaction-to-local-row target is below 50ms");
 assert.deepEqual(browser.anchors, ["session-a"], "submit performs exactly the original follow-anchor action");
 assert.equal(browser.input.blurCalls, 1, "submit performs exactly the original composer blur");
 const pendingGeometry = {
@@ -348,6 +381,7 @@ const pendingGeometry = {
 browser.complete(first);
 echo = browser.echoes.children[0];
 assert.equal(echo.getAttribute("data-message-id"), "message-safe_1:part.2");
+assert.equal(echo.getAttribute("data-client-message-id"), first.clientMessageId);
 assert.equal(echo.getAttribute("data-prompt-echo-state"), "accepted");
 assert.equal(status.textContent, "Message accepted");
 assert.equal(echo.className, pendingGeometry.outerClass);
@@ -359,51 +393,71 @@ assert.deepEqual(echo.children.map((node) => [node.tagName, node.className, node
 assert.deepEqual(browser.anchors, ["session-a"], "response does not add a follow-anchor cycle");
 assert.equal(browser.input.blurCalls, 1, "response does not add a focus/blur cycle");
 
-const queueCopy = browser.queued("message-safe_1:part.2", dangerous);
+// Old core/backend fallback: no correlation is projected, but the durable ID
+// returned by POST still removes exactly the matching provisional.
+const queueCopy = browser.queued("message-safe_1:part.2", dangerous, {
+  clientMessageId: first.clientMessageId,
+});
 browser.queue.append(queueCopy);
 browser.controller.reconcile(browser.queue);
-assert.equal(browser.echoes.children.length, 0, "response-before-queue removes the exact accepted echo");
-assert.equal(queueCopy.parentElement, browser.queue, "the authoritative queue row remains as the one representation");
-assert.equal(browser.echoes.replaceChildrenCalls, 0, "ordinary queue reconciliation never replaces the echo container");
+assert.equal(browser.echoes.children.length, 0,
+  "response-before-queue correlation leaves only authoritative queue truth");
+assert.equal(queueCopy.parentElement, browser.queue);
+assert.equal(browser.echoes.replaceChildrenCalls, 0, "reconciliation removes only the owned provisional node");
 
+// The field-rejected ordering: queue authority arrives while durable POST is
+// unresolved. Correlation must remove the provisional in this same mutation turn.
 const queueFirst = browserFixture();
-const queueFirstRequest = queueFirst.submit("queue arrived first", new FakeXhr("queue-first"));
-const queueFirstTruth = queueFirst.queued("queue-first", "queue arrived first");
+const queueFirstRequest = queueFirst.submit("queue arrived first", new FakeXhr("queue-first-core"));
+const queueFirstTruth = queueFirst.queued("queue-first-core", "queue arrived first", {
+  clientMessageId: queueFirstRequest.clientMessageId,
+});
 queueFirst.queue.append(queueFirstTruth);
 queueFirst.observer.emit([{ type: "childList", target: queueFirst.queue, addedNodes: [queueFirstTruth] }]);
-assert.equal(queueFirst.echoes.children.length, 1,
-  "queue-before-response is remembered without guessing which pending request it owns");
-queueFirst.complete(queueFirstRequest);
 assert.equal(queueFirst.echoes.children.length, 0,
-  "binding the response ID immediately removes an echo whose queue truth arrived first");
-assert.equal(queueFirst.queue.children.length, 1, "queue-before-response converges to exactly one object");
+  "queue-before-response correlation atomically removes the provisional before paint");
+assert.equal(queueFirst.queue.children.length, 1, "queue-before-response immediately has exactly one representation");
+queueFirst.complete(queueFirstRequest);
+assert.equal(queueFirst.echoes.children.length, 0, "late durable completion cannot recreate a removed provisional");
 
 const liveInsert = browserFixture();
-const liveRequest = liveInsert.submit("live exact", new FakeXhr("live-exact"));
-liveInsert.complete(liveRequest);
-const liveTruth = liveInsert.authoritative("live-exact", { text: "live exact" });
+const liveRequest = liveInsert.submit("live exact", new FakeXhr("live-core"));
+const liveTruth = liveInsert.authoritative("live-core", {
+  text: "live exact",
+  clientMessageId: liveRequest.clientMessageId,
+});
 liveInsert.liveNodes.append(liveTruth);
 liveInsert.observer.emit([{ type: "childList", target: liveInsert.liveNodes, addedNodes: [liveTruth] }]);
-assert.equal(liveInsert.echoes.children.length, 0, "matching user live insert leaves only authoritative truth");
+assert.equal(liveInsert.echoes.children.length, 0,
+  "user authority can reconcile correlation before POST completion too");
 assert.equal(liveTruth.parentElement, liveInsert.liveNodes);
+liveInsert.complete(liveRequest);
 
 const resetInsert = browserFixture();
-const resetRequest = resetInsert.submit("reset exact", new FakeXhr("reset-exact"));
-resetInsert.complete(resetRequest);
-const resetTruth = resetInsert.authoritative("reset-exact", { steering: true, text: "reset exact" });
+const resetRequest = resetInsert.submit("reset exact", new FakeXhr("reset-core"));
+const resetTruth = resetInsert.authoritative("reset-core", {
+  steering: true,
+  text: "reset exact",
+  clientMessageId: resetRequest.clientMessageId,
+});
 const reset = new FakeElement("div");
 reset.id = "transcript-settled";
 reset.append(resetTruth);
 resetInsert.transcript.append(reset);
 resetInsert.observer.emit([{ type: "childList", target: resetInsert.transcript, addedNodes: [reset] }]);
-assert.equal(resetInsert.echoes.children.length, 0, "matching transcript-reset subtree leaves only authoritative truth");
-assert.equal(resetTruth.parentElement, reset);
+assert.equal(resetInsert.echoes.children.length, 0,
+  "matching transcript-reset subtree leaves only authoritative truth before completion");
+resetInsert.complete(resetRequest);
 
 const unmatched = browserFixture();
 const unmatchedRequest = unmatched.submit("local exact only", new FakeXhr("local-exact"));
-unmatched.complete(unmatchedRequest);
-const externalQueue = unmatched.queued("external-queue");
-const externalUser = unmatched.authoritative("external-user");
+const externalQueue = unmatched.queued("external-queue", "same text is irrelevant", {
+  clientMessageId: "00000000-0000-4000-8000-999999999999",
+});
+const externalUser = unmatched.authoritative("external-user", {
+  text: "local exact only",
+  clientMessageId: "00000000-0000-4000-8000-999999999998",
+});
 unmatched.queue.append(externalQueue);
 unmatched.liveNodes.append(externalUser);
 unmatched.observer.emit([
@@ -411,37 +465,59 @@ unmatched.observer.emit([
   { type: "childList", target: unmatched.liveNodes, addedNodes: [externalUser] },
 ]);
 assert.equal(unmatched.echoes.children.length, 1,
-  "unmatched authoritative queue/user objects never consume a local echo");
-assert.equal(unmatched.echoes.children[0].getAttribute("data-message-id"), "local-exact");
+  "unmatched authority and identical text never consume a local provisional");
+assert.equal(unmatched.echoes.children[0].getAttribute("data-client-message-id"), unmatchedRequest.clientMessageId);
 
+// Multiple rapid identical submissions reconcile individually, in reverse queue
+// order, without waiting for any POST and without text/FIFO/position matching.
 const ordered = browserFixture();
 const orderedRequests = [
-  ordered.submit("first concurrent", new FakeXhr("ordered-one")),
-  ordered.submit("middle concurrent", new FakeXhr("ordered-two")),
-  ordered.submit("last concurrent", new FakeXhr("ordered-three")),
+  ordered.submit("identical concurrent", new FakeXhr("ordered-one")),
+  ordered.submit("identical concurrent", new FakeXhr("ordered-two")),
+  ordered.submit("identical concurrent", new FakeXhr("ordered-three")),
 ];
-// Deliberately bind response IDs out of order; concrete XHR identity must win.
-ordered.complete(orderedRequests[2]);
-ordered.complete(orderedRequests[0]);
-ordered.complete(orderedRequests[1]);
+assert.equal(new Set(orderedRequests.map((request) => request.clientMessageId)).size, 3,
+  "each rapid identical submission gets a distinct cryptographic correlation");
 const [firstEcho, middleEcho, lastEcho] = ordered.echoes.children;
-assert.deepEqual(ordered.echoes.children.map((node) => node.getAttribute("data-message-id")),
-  ["ordered-one", "ordered-two", "ordered-three"]);
-const middleTruth = ordered.queued("ordered-two");
+const lastTruth = ordered.queued("ordered-three", "identical concurrent", {
+  clientMessageId: orderedRequests[2].clientMessageId,
+});
+ordered.queue.append(lastTruth);
+ordered.observer.emit([{ type: "childList", target: ordered.queue, addedNodes: [lastTruth] }]);
+assert.deepEqual(ordered.echoes.children, [firstEcho, middleEcho], "last correlation removes only last provisional");
+const firstTruth = ordered.queued("ordered-one", "identical concurrent", {
+  clientMessageId: orderedRequests[0].clientMessageId,
+});
+ordered.queue.append(firstTruth);
+ordered.observer.emit([{ type: "childList", target: ordered.queue, addedNodes: [firstTruth] }]);
+assert.deepEqual(ordered.echoes.children, [middleEcho], "first correlation removes only first provisional");
+const middleTruth = ordered.queued("ordered-two", "identical concurrent", {
+  clientMessageId: orderedRequests[1].clientMessageId,
+});
 ordered.queue.append(middleTruth);
 ordered.observer.emit([{ type: "childList", target: ordered.queue, addedNodes: [middleTruth] }]);
-assert.deepEqual(ordered.echoes.children, [firstEcho, lastEcho],
-  "resolving the middle echo preserves sibling order and node identity");
+assert.equal(ordered.echoes.children.length, 0, "all identical prompts converge independently before responses");
+for (const request of orderedRequests.reverse()) ordered.complete(request);
 assert.equal(middleEcho.parentElement, null);
-assert.equal(ordered.echoes.replaceChildrenCalls, 0,
-  "middle reconciliation removes one node rather than recreating the container");
+assert.equal(ordered.echoes.replaceChildrenCalls, 0);
 assert.deepEqual(ordered.anchors, ["session-a", "session-a", "session-a"],
-  "responses and reconciliation add no follow-anchor cycles");
+  "authority and responses add no follow-anchor cycles");
+
+const oldCore = browserFixture();
+const oldCoreRequest = oldCore.submit("projection omits correlation", new FakeXhr("old-core-durable"));
+const oldCoreTruth = oldCore.queued("old-core-durable", "projection omits correlation");
+oldCore.queue.append(oldCoreTruth);
+oldCore.observer.emit([{ type: "childList", target: oldCore.queue, addedNodes: [oldCoreTruth] }]);
+assert.equal(oldCore.echoes.children.length, 1,
+  "without projected correlation the controller refuses unsafe early matching");
+oldCore.complete(oldCoreRequest);
+assert.equal(oldCore.echoes.children.length, 0,
+  "an old core still converges through the later exact durable-ID fallback");
 
 const cleanupBrowser = browserFixture();
 const failed = cleanupBrowser.submit("restore this exact failed draft", new FakeXhr("", 503));
 cleanupBrowser.complete(failed, false);
-assert.equal(cleanupBrowser.echoes.children.length, 0, "failure removes only that request's echo");
+assert.equal(cleanupBrowser.echoes.children.length, 0, "failure removes only that request's provisional");
 assert.equal(cleanupBrowser.input.value, "restore this exact failed draft");
 assert.deepEqual(cleanupBrowser.persisted.at(-1), ["restore this exact failed draft", "session-a"]);
 cleanupBrowser.input.value = "";
@@ -452,33 +528,30 @@ assert.equal(cleanupBrowser.input.value, "restore a 200 OOB failure",
   "fixed failure outcome overrides successful HTTP status");
 
 cleanupBrowser.input.value = "";
-const staleDetached = cleanupBrowser.authoritative("late-old-id");
 const oldSession = cleanupBrowser.submit("must not cross sessions", new FakeXhr("late-old-id"));
 cleanupBrowser.controller.reset();
 cleanupBrowser.setSession("session-b");
 cleanupBrowser.controller.commission("session-b");
-cleanupBrowser.observer.emit([{ type: "childList", addedNodes: [staleDetached] }]);
 assert.equal(cleanupBrowser.echoes.children.length, 0);
 assert.equal(cleanupBrowser.echoes.dataset.sessionId, "session-b");
 cleanupBrowser.complete(oldSession);
 assert.equal(cleanupBrowser.echoes.children.length, 0,
   "late old-session completion has no mapping in the adopted session");
 assert.notEqual(cleanupBrowser.input.value, "must not cross sessions");
-const reusedId = cleanupBrowser.submit("new session may reuse a backend ID namespace", new FakeXhr("late-old-id"));
-cleanupBrowser.complete(reusedId);
-assert.equal(cleanupBrowser.echoes.children.length, 1,
-  "detached old-session mutation cannot pre-consume a new-session echo");
-const currentAuthoritative = cleanupBrowser.authoritative("late-old-id");
+const reused = cleanupBrowser.submit("new session correlation", new FakeXhr("new-session-id"));
+const currentAuthoritative = cleanupBrowser.authoritative("new-session-id", {
+  clientMessageId: reused.clientMessageId,
+});
 cleanupBrowser.liveNodes.append(currentAuthoritative);
 cleanupBrowser.observer.emit([{ type: "childList", target: cleanupBrowser.liveNodes, addedNodes: [currentAuthoritative] }]);
-assert.equal(cleanupBrowser.echoes.children.length, 0, "the connected current-session node still reconciles exactly");
+assert.equal(cleanupBrowser.echoes.children.length, 0, "current-session correlation still reconciles exactly");
 const cleanup = cleanupBrowser.submit("cleanup", new FakeXhr("cleanup-id"));
 assert.ok(cleanup);
 cleanupBrowser.windowListeners.get("pagehide")?.();
-assert.equal(cleanupBrowser.echoes.children.length, 0, "page cleanup removes all in-memory and DOM echoes");
-assert.equal(cleanupBrowser.echoes.replaceChildrenCalls, 0, "cleanup removes owned nodes without container replacement");
+assert.equal(cleanupBrowser.echoes.children.length, 0, "page cleanup removes all in-memory and DOM provisionals");
+assert.equal(cleanupBrowser.echoes.replaceChildrenCalls, 0);
 
-for (const fixture of [browser, queueFirst, liveInsert, resetInsert, unmatched, ordered, cleanupBrowser]) {
+for (const fixture of [browser, queueFirst, liveInsert, resetInsert, unmatched, ordered, oldCore, cleanupBrowser]) {
   fixture.controller.dispose();
 }
 const legacy = browserFixture({ maximumEchoes: 2 });
@@ -486,13 +559,13 @@ for (const text of ["legacy one", "legacy two", "legacy three"]) {
   const request = legacy.submit(text, new FakeXhr());
   legacy.complete(request);
 }
-assert.equal(legacy.echoes.children.length, 2, "legacy missing-ID echoes have an explicit session bound");
+assert.equal(legacy.echoes.children.length, 2, "missing durable/projection identity remains explicitly bounded");
 assert.ok(legacy.echoes.children.every((node) => node.getAttribute("data-prompt-echo-state") === "accepted-legacy"));
-assert.ok(legacy.echoes.children.every((node) => node.children[1].textContent === "Message accepted; awaiting authoritative identity"));
+assert.ok(legacy.echoes.children.every((node) => node.children[3].textContent === "Message accepted; awaiting authoritative identity"));
 const unrelatedLegacyNode = legacy.authoritative("some-external-id");
 legacy.liveNodes.append(unrelatedLegacyNode);
 legacy.controller.reconcile(unrelatedLegacyNode);
-assert.equal(legacy.echoes.children.length, 2, "legacy echoes never use unsafe FIFO reconciliation");
+assert.equal(legacy.echoes.children.length, 2, "legacy provisionals never use unsafe FIFO reconciliation");
 legacy.controller.dispose();
 assert.equal(innerHtmlWrites, 0);
 
@@ -505,31 +578,65 @@ const paths = {
   queue: `/qq/session/${sessionId}/queue`,
   close: `/qq/session/${sessionId}/close`,
 };
-const transcriptHtml = renderTranscript({
+const userCorrelation = "110ec58a-a0f2-4ac4-8393-c866d813b8d1";
+const steeringCorrelation = "220ec58a-a0f2-4ac4-9393-c866d813b8d2";
+const pendingCorrelation = "330ec58a-a0f2-4ac4-a393-c866d813b8d3";
+const renderSnapshot = {
   id: sessionId,
   conversation: {
     nodes: [
-      { seq: 1, kind: "user", messageId: "valid-user_1", content: [{ type: "text", text: "<script>literal</script>" }] },
-      { seq: 2, kind: "steering", messageId: "valid-steering:2", content: [{ type: "text", text: "steer" }] },
-      { seq: 3, kind: "user", messageId: 'invalid" onclick="bad', content: [{ type: "text", text: "invalid id" }] },
+      {
+        seq: 1, kind: "user", messageId: "valid-user_1", clientMessageId: userCorrelation,
+        content: [{ type: "text", text: "<script>literal</script>" }],
+      },
+      {
+        seq: 2, kind: "steering", messageId: "valid-steering:2",
+        source: { kind: "user", clientMessageId: steeringCorrelation },
+        content: [{ type: "text", text: "steer" }],
+      },
+      {
+        seq: 3, kind: "user", messageId: 'invalid" onclick="bad', clientMessageId: 'bad" onmouseover="bad',
+        content: [{ type: "text", text: "invalid id" }],
+      },
     ],
-    pending: [],
+    pending: [{
+      id: "pending-core-id", placement: "queued", text: "pending exact", editable: true,
+      message: { source: { kind: "user", clientMessageId: pendingCorrelation } },
+    }],
   },
-}, paths);
+};
+const transcriptHtml = renderTranscript(renderSnapshot, paths);
 assert.match(transcriptHtml,
-  /<article class="message message-user"[^>]*data-message-id="valid-user_1"[^>]*>\s*<div class="message-text">&lt;script&gt;literal&lt;\/script&gt;<\/div>\s*<\/article>/,
-  "authoritative literal user text uses the exact outer and text tag/classes pinned for the echo");
-assert.match(transcriptHtml, /class="message message-user message-steering"[^>]*data-message-id="valid-steering:2"/);
-assert.doesNotMatch(transcriptHtml, /invalid&quot;|onclick=/, "invalid authoritative IDs are omitted, not escaped into an identity");
+  /<article class="message message-user"[^>]*data-message-id="valid-user_1"[^>]*data-client-message-id="110ec58a-a0f2-4ac4-8393-c866d813b8d1"[^>]*>[\s\S]*?<div class="message-text">&lt;script&gt;literal&lt;\/script&gt;<\/div>[\s\S]*?<\/article>/,
+  "durable user nodes expose safe explicit correlation independently of core identity");
+assert.match(transcriptHtml,
+  /class="message message-user message-steering"[^>]*data-message-id="valid-steering:2"[^>]*data-client-message-id="220ec58a-a0f2-4ac4-9393-c866d813b8d2"/,
+  "steering nodes expose safe source correlation");
+assert.match(transcriptHtml,
+  /class="queue-item message-queued"[^>]*data-message-id="pending-core-id"[^>]*data-client-message-id="330ec58a-a0f2-4ac4-a393-c866d813b8d3"/,
+  "pending queue rows expose correlation retained on their raw message source");
+assert.doesNotMatch(transcriptHtml, /invalid&quot;|onclick=|onmouseover=/,
+  "invalid authoritative and correlation IDs are omitted, not escaped into identity attributes");
 assert.match(transcriptHtml, /&lt;script&gt;literal&lt;\/script&gt;/, "authoritative prompt text remains escaped");
 const liveNodesAt = transcriptHtml.indexOf('id="transcript-live-nodes"');
-const echoesAt = transcriptHtml.indexOf('id="prompt-echoes"');
 const queueAt = transcriptHtml.indexOf('id="session-queue"');
-assert.ok(liveNodesAt >= 0 && liveNodesAt < echoesAt && echoesAt < queueAt,
-  "the stable browser-owned echo container sits between live nodes and the SSE queue");
-const echoesTag = transcriptHtml.match(/<div id="prompt-echoes"[^>]*>/)?.[0] ?? "";
-assert.doesNotMatch(echoesTag, /sse-swap|hx-swap/, "the echo container is not an SSE swap target");
+const echoesAt = transcriptHtml.indexOf('id="prompt-echoes"');
+assert.ok(liveNodesAt >= 0 && liveNodesAt < queueAt && queueAt < echoesAt,
+  "the browser-owned tail follows the SSE queue, matching direct-prompt admission order");
+const echoesTag = transcriptHtml.match(/<ol id="prompt-echoes"[^>]*>/)?.[0] ?? "";
+assert.doesNotMatch(echoesTag, /sse-swap|hx-swap/, "the provisional container is not an SSE swap target");
 assert.match(echoesTag, /aria-live="off"/);
+const baseFingerprints = regionFingerprints(renderSnapshot);
+const changedPendingCorrelation = structuredClone(renderSnapshot);
+changedPendingCorrelation.conversation.pending[0].message.source.clientMessageId =
+  "440ec58a-a0f2-4ac4-b393-c866d813b8d4";
+assert.notEqual(regionFingerprints(changedPendingCorrelation).queue, baseFingerprints.queue,
+  "a pending correlation-only change cannot be suppressed by the SSE queue fingerprint");
+const changedNodeCorrelation = structuredClone(renderSnapshot);
+changedNodeCorrelation.conversation.nodes.at(-1).clientMessageId =
+  "550ec58a-a0f2-4ac4-8393-c866d813b8d5";
+assert.notEqual(regionFingerprints(changedNodeCorrelation).transcript, baseFingerprints.transcript,
+  "a durable correlation-only change invalidates transcript rendering");
 const pageContent = renderSessionContent({
   id: sessionId,
   project: "proof",
@@ -540,13 +647,18 @@ const pageContent = renderSessionContent({
 }, paths);
 assert.match(pageContent, /id="prompt-echoes"/, "full-page session render recommissions the stable container");
 
+const validHttpCorrelation = "660EC58A-A0F2-4AC4-8393-C866D813B8D6";
+const canonicalHttpCorrelation = validHttpCorrelation.toLowerCase();
 const resultQueue = [
   { kind: "accepted", messageId: "accepted-http_1" },
   { kind: "accepted", messageId: "progressive-http:2" },
+  { kind: "accepted", messageId: "repeat-authority-a" },
+  { kind: "accepted", messageId: "repeat-authority-b" },
   { kind: "accepted", messageId: 'bad\r\nInjected: yes' },
   { kind: "other", messageId: "must-not-leak" },
   new Error("backend refused PRIVATE prompt"),
 ];
+const backendCalls = [];
 const snapshot = () => ({
   id: sessionId,
   project: "proof",
@@ -561,7 +673,10 @@ const backend = {
   read: async () => snapshot(),
   list: async () => [{ id: sessionId, project: "proof" }],
   create: async () => snapshot(),
-  prompt: async () => {
+  // Declared as a legacy two-argument function on purpose. JavaScript safely
+  // ignores the optional third argument while the spy proves what UI supplied.
+  prompt: async function legacyPrompt(session, prompt) {
+    backendCalls.push([...arguments]);
     const result = resultQueue.shift();
     if (result instanceof Error) throw result;
     return result;
@@ -577,22 +692,32 @@ await new Promise((resolve, reject) => {
 });
 const base = `http://127.0.0.1:${server.address().port}`;
 const promptUrl = `${base}/qq/session/${sessionId}/prompt`;
-const postPrompt = (prompt, htmx) => fetch(promptUrl, {
+const postParameters = (prompt, clientMessageId) => {
+  const parameters = new URLSearchParams({ prompt });
+  if (clientMessageId !== undefined) parameters.set("clientMessageId", clientMessageId);
+  return parameters;
+};
+const postPrompt = (prompt, htmx, clientMessageId) => fetch(promptUrl, {
   method: "POST",
   redirect: "manual",
   headers: {
     "Content-Type": "application/x-www-form-urlencoded",
     ...(htmx ? { "HX-Request": "true" } : {}),
   },
-  body: new URLSearchParams({ prompt }),
+  body: postParameters(prompt, clientMessageId),
 });
 try {
-  const accepted = await postPrompt("PRIVATE <script> prompt", true);
+  const accepted = await postPrompt("PRIVATE <script> prompt", true, validHttpCorrelation);
   assert.equal(accepted.status, 200);
   assert.equal(accepted.headers.get(PROMPT_MESSAGE_ID_HEADER), "accepted-http_1");
   assert.equal(accepted.headers.get(PROMPT_OUTCOME_HEADER), "accepted");
+  assert.deepEqual(backendCalls[0], [sessionId, "PRIVATE <script> prompt", {
+    clientMessageId: canonicalHttpCorrelation,
+  }], "valid correlation is canonicalized and passed only as optional metadata");
+  assert.notEqual(backendCalls[0][2].clientMessageId, accepted.headers.get(PROMPT_MESSAGE_ID_HEADER),
+    "browser correlation never controls or replaces authoritative core identity");
   const acceptedBody = await accepted.text();
-  assert.doesNotMatch(acceptedBody, /PRIVATE|accepted-http_1/, "prompt and accepted ID never enter mutation HTML");
+  assert.doesNotMatch(acceptedBody, /PRIVATE|accepted-http_1/, "prompt and accepted ID never enter unrelated mutation HTML");
 
   const progressive = await postPrompt("ordinary fallback", false);
   assert.equal(progressive.status, 303);
@@ -600,17 +725,47 @@ try {
   assert.equal(progressive.headers.get(PROMPT_MESSAGE_ID_HEADER), "progressive-http:2");
   assert.equal(progressive.headers.get(PROMPT_OUTCOME_HEADER), "accepted");
   assert.equal(await progressive.text(), "See other\n", "progressive fallback remains an ordinary redirect");
+  assert.deepEqual(backendCalls[1], [sessionId, "ordinary fallback"],
+    "absent token preserves the exact two-argument backend call");
 
-  const invalid = await postPrompt("invalid id", true);
+  const callsBeforeInvalid = backendCalls.length;
+  const invalidCorrelation = await postPrompt("malformed correlation", true, "not-a-uuid");
+  assert.equal(invalidCorrelation.status, 200, "HTMX validation failure remains an OOB-swappable response");
+  assert.equal(invalidCorrelation.headers.get(PROMPT_OUTCOME_HEADER), "failed");
+  assert.equal(backendCalls.length, callsBeforeInvalid, "malformed correlation never reaches backend admission");
+  const progressiveInvalid = await postPrompt("malformed progressive", false, "not-a-uuid");
+  assert.equal(progressiveInvalid.status, 422);
+  assert.equal(backendCalls.length, callsBeforeInvalid);
+  const duplicateParameters = postParameters("duplicate correlation fields", canonicalHttpCorrelation);
+  duplicateParameters.append("clientMessageId", "770ec58a-a0f2-4ac4-9393-c866d813b8d7");
+  const duplicateCorrelation = await fetch(promptUrl, {
+    method: "POST",
+    redirect: "manual",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "HX-Request": "true" },
+    body: duplicateParameters,
+  });
+  assert.equal(duplicateCorrelation.headers.get(PROMPT_OUTCOME_HEADER), "failed");
+  assert.equal(backendCalls.length, callsBeforeInvalid, "parameter pollution is rejected before admission");
+
+  const repeatedA = await postPrompt("metadata is not idempotency a", true, canonicalHttpCorrelation);
+  const repeatedB = await postPrompt("metadata is not idempotency b", true, canonicalHttpCorrelation);
+  assert.equal(repeatedA.headers.get(PROMPT_MESSAGE_ID_HEADER), "repeat-authority-a");
+  assert.equal(repeatedB.headers.get(PROMPT_MESSAGE_ID_HEADER), "repeat-authority-b");
+  assert.equal(backendCalls.at(-2)[2].clientMessageId, canonicalHttpCorrelation);
+  assert.equal(backendCalls.at(-1)[2].clientMessageId, canonicalHttpCorrelation);
+  assert.equal(backendCalls.length, callsBeforeInvalid + 2,
+    "correlation metadata alone provides no authorization or idempotency behavior");
+
+  const invalid = await postPrompt("invalid authoritative id", true, canonicalHttpCorrelation);
   assert.equal(invalid.status, 200);
-  assert.equal(invalid.headers.get(PROMPT_MESSAGE_ID_HEADER), null, "invalid accepted ID is safely omitted");
-  const wrongKind = await postPrompt("wrong kind", true);
+  assert.equal(invalid.headers.get(PROMPT_MESSAGE_ID_HEADER), null, "invalid accepted core ID is safely omitted");
+  const wrongKind = await postPrompt("wrong kind", true, canonicalHttpCorrelation);
   assert.equal(wrongKind.status, 200);
   assert.equal(wrongKind.headers.get(PROMPT_MESSAGE_ID_HEADER), null,
     "a non-accepted backend result cannot attach a message ID");
   assert.equal(wrongKind.headers.get(PROMPT_OUTCOME_HEADER), "accepted",
     "a legacy backend success gets only a fixed acceptance signal");
-  const refused = await postPrompt("PRIVATE refused prompt", true);
+  const refused = await postPrompt("PRIVATE refused prompt", true, canonicalHttpCorrelation);
   assert.equal(refused.status, 200, "existing OOB error notice behavior remains swappable");
   assert.equal(refused.headers.get(PROMPT_OUTCOME_HEADER), "failed");
   assert.equal(refused.headers.get(PROMPT_MESSAGE_ID_HEADER), null);

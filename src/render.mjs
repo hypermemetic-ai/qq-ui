@@ -1,4 +1,5 @@
 import { orderedProjectPlaces, projectPlaceIdentity } from "./project-order.mjs";
+import { projectedClientMessageId } from "./client-message-id.mjs";
 import { escapeHtml, renderHighlightedCode, renderMarkdownText, renderMessageText } from "./markdown.mjs";
 import { safeMessageId } from "./message-id.mjs";
 
@@ -378,8 +379,12 @@ function renderConversationNode(node) {
     const label = steering ? "Steering message" : "Your message";
     const accessibleLabel = time ? `${label} at ${time}` : label;
     const messageId = safeMessageId(node.messageId);
+    const clientMessageId = projectedClientMessageId(node);
     const messageIdAttr = messageId ? ` data-message-id="${escapeHtml(messageId)}"` : "";
-    return `<article class="message message-user${steering ? " message-steering" : ""}" data-seq="${seq}"${messageIdAttr} aria-label="${escapeHtml(accessibleLabel)}">
+    const clientMessageIdAttr = clientMessageId
+      ? ` data-client-message-id="${escapeHtml(clientMessageId)}"`
+      : "";
+    return `<article class="message message-user${steering ? " message-steering" : ""}" data-seq="${seq}"${messageIdAttr}${clientMessageIdAttr} aria-label="${escapeHtml(accessibleLabel)}">
       ${contentBlocks(node.content)}
     </article>`;
   }
@@ -516,6 +521,12 @@ function renderPendingQueue(snapshot, paths) {
   const mutable = !isChildSession(snapshot) && snapshot.canMutatePending === true && Boolean(paths.queue);
   const rows = pending.map((item, index) => {
     const id = escapeHtml(item.id ?? "");
+    const messageId = safeMessageId(item.id);
+    const clientMessageId = projectedClientMessageId(item);
+    const messageIdAttr = messageId ? ` data-message-id="${escapeHtml(messageId)}"` : "";
+    const clientMessageIdAttr = clientMessageId
+      ? ` data-client-message-id="${escapeHtml(clientMessageId)}"`
+      : "";
     const steering = item.placement === "steering";
     const n = index + 1;
     const text = item.text ?? "";
@@ -533,7 +544,7 @@ function renderPendingQueue(snapshot, paths) {
           <button type="submit" name="operation" value="remove" aria-label="Remove pending message ${n}" title="Remove">&times;</button>
         </form>`
       : "";
-    return `<li class="queue-item message-queued" data-message-id="${id}" data-placement="${steering ? "steering" : "queued"}" aria-label="${steering ? "Steering message" : "Queued message"}"><span class="queue-mark" aria-hidden="true">◦</span>${edit}${remove}</li>`;
+    return `<li class="queue-item message-queued"${messageIdAttr}${clientMessageIdAttr} data-placement="${steering ? "steering" : "queued"}" aria-label="${steering ? "Steering message" : "Queued message"}"><span class="queue-mark" aria-hidden="true">◦</span>${edit}${remove}</li>`;
   }).join("");
   return `<section id="pending-queue" class="pending-queue" aria-label="Queued messages">
     <ol>${rows}</ol>
@@ -1672,6 +1683,7 @@ function nodeFingerprint(node) {
     node.eventType,
     node.callId ?? "",
     node.messageId ?? "",
+    projectedClientMessageId(node),
     node.outcome?.kind ?? "",
     last?.type ?? "",
     lastText.length,
@@ -1946,8 +1958,11 @@ function renderProviderGapSlot() {
 
 export function renderTranscriptLive(snapshot, paths = {}) {
   if (!snapshot?.id) return "";
-  const echoes = `<div id="prompt-echoes" class="prompt-echoes" data-session-id="${escapeHtml(snapshot.id)}" aria-live="off"></div>`;
-  return `${regionShell("transcript-live-nodes", "transcript-live-nodes", "live", renderLiveNodes(snapshot), true)}${echoes}${regionShell("session-queue", "session-queue", "queue", renderQueue(snapshot, paths), true)}${renderProviderGapSlot()}`;
+  const echoes = `<ol id="prompt-echoes" class="prompt-echoes" data-session-id="${escapeHtml(snapshot.id)}" aria-live="off"></ol>`;
+  // New direct prompts enter at the tail of pending admission order. Keeping the
+  // browser-owned slot after the server queue gives its provisional row the same
+  // transcript location while the queue region remains independently swappable.
+  return `${regionShell("transcript-live-nodes", "transcript-live-nodes", "live", renderLiveNodes(snapshot), true)}${regionShell("session-queue", "session-queue", "queue", renderQueue(snapshot, paths), true)}${echoes}${renderProviderGapSlot()}`;
 }
 
 export function renderTranscript(snapshot, paths = {}) {
@@ -2196,7 +2211,9 @@ export function regionFingerprints(snapshot) {
       snapshot?.id,
       live.map(nodeFingerprint),
     ]),
-    queue: JSON.stringify((snapshot?.conversation?.pending ?? []).map((item) => [item.id, item.target, item.text])),
+    queue: JSON.stringify((snapshot?.conversation?.pending ?? []).map((item) => [
+      item.id, item.target, item.text, projectedClientMessageId(item),
+    ])),
     children: JSON.stringify([
       snapshot?.id,
       snapshot?.origin,

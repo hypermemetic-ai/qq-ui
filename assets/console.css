@@ -996,6 +996,19 @@ details.session-menu.session-controls {
   padding-bottom: var(--provider-gap-slot);
 }
 
+/* Browser-owned admissions use the same row cadence as the authoritative
+   pending queue, but remain outside its SSE swap target. */
+.prompt-echoes {
+  gap: .55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-queue:not(:empty) + .prompt-echoes:not(:empty) {
+  margin-top: calc(.55rem - var(--transcript-gap));
+}
+
 .transcript-live-nodes:empty,
 .prompt-echoes:empty,
 .transcript-anchor {
@@ -1145,24 +1158,21 @@ details.session-menu.session-controls {
   color: #e4ddf4;
 }
 
-.message-user[data-prompt-echo-state] {
-  outline: 1px dashed rgba(184, 168, 232, .34);
-  outline-offset: -1px;
+.queue-item[data-prompt-echo-state] {
+  outline: 1px dashed rgba(184, 168, 232, .28);
+  outline-offset: 2px;
 }
 
-.message-user[data-prompt-echo-state="pending"] {
-  background: rgba(107, 86, 176, .17);
-  color: #d2c9e8;
+.queue-item[data-prompt-echo-state="pending"] {
+  color: #777;
 }
 
-.message-user[data-prompt-echo-state="accepted"] {
-  background: rgba(107, 86, 176, .28);
-  color: #e4ddf4;
+.queue-item[data-prompt-echo-state="accepted"] {
+  color: #8a8a8a;
 }
 
-.message-user[data-prompt-echo-state="accepted-legacy"] {
-  background: rgba(107, 86, 176, .24);
-  color: #ded5ef;
+.queue-item[data-prompt-echo-state="accepted-legacy"] {
+  color: #858085;
 }
 
 .prompt-echo-status {
