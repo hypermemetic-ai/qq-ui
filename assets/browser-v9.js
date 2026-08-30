@@ -1073,12 +1073,13 @@
     if (mode === "home") transcript.scrollTop = 0;
     if (mode === "end") transcript.scrollTop = transcript.scrollHeight;
   };
-  const workflowsMenu = () => document.querySelector(".workflows-menu");
-  const workflowChoices = (menu = workflowsMenu()) => menu
-    ? [...menu.querySelectorAll(".workflows-choice")].filter((choice) => !choice.disabled)
+  const consoleMenu = () => document.querySelector(".console-menu");
+  const consoleMenuChoices = (menu = consoleMenu()) => menu
+    ? [...menu.querySelectorAll(".console-menu-choice, .workflows-choice")]
+        .filter((choice) => !choice.disabled)
     : [];
-  const closeWorkflowsMenu = (restoreFocus = false) => {
-    const menu = workflowsMenu();
+  const closeConsoleMenu = (restoreFocus = false) => {
+    const menu = consoleMenu();
     if (menu instanceof HTMLDetailsElement && menu.open) {
       menu.open = false;
       if (restoreFocus) menu.querySelector(":scope > summary")?.focus();
@@ -1086,39 +1087,41 @@
     }
     return false;
   };
-  const openWorkflowsMenu = () => {
-    const menu = workflowsMenu();
+  const openConsoleMenu = () => {
+    const menu = consoleMenu();
     if (!(menu instanceof HTMLDetailsElement)) return false;
     menu.open = true;
-    const choices = workflowChoices(menu);
+    const choices = consoleMenuChoices(menu);
     const choice = choices.find((candidate) => candidate.classList.contains("workflows-current")) ?? choices[0];
     choice?.focus();
     return true;
   };
-  const handleWorkflowMenuKey = (event) => {
-    const menu = workflowsMenu();
+  const handleConsoleMenuKey = (event) => {
+    const menu = consoleMenu();
     if (!(menu instanceof HTMLDetailsElement)) return false;
     const summary = menu.querySelector(":scope > summary");
     if (event.key === "Enter" && event.target === summary) {
       event.preventDefault();
-      if (menu.open) closeWorkflowsMenu(true);
-      else openWorkflowsMenu();
+      if (menu.open) closeConsoleMenu(true);
+      else openConsoleMenu();
       return true;
     }
     if (!menu.open) return false;
     if (event.key === "Escape") {
       event.preventDefault();
-      closeWorkflowsMenu(true);
+      closeConsoleMenu(true);
       return true;
     }
-    const choices = workflowChoices(menu);
+    const choices = consoleMenuChoices(menu);
     const current = choices.indexOf(document.activeElement);
-    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+    if (event.key === "ArrowUp" || event.key === "ArrowDown" || event.key === "Home" || event.key === "End") {
       event.preventDefault();
       const fallback = choices.findIndex((choice) => choice.classList.contains("workflows-current"));
       const start = current >= 0 ? current : fallback >= 0 ? fallback : 0;
-      const delta = event.key === "ArrowUp" ? -1 : 1;
-      choices[(start + delta + choices.length) % choices.length]?.focus();
+      const next = event.key === "Home" ? 0
+        : event.key === "End" ? choices.length - 1
+          : (start + (event.key === "ArrowUp" ? -1 : 1) + choices.length) % choices.length;
+      choices[next]?.focus();
       return true;
     }
     if (event.key === "Enter" && current >= 0) {
@@ -1127,6 +1130,38 @@
       return true;
     }
     return false;
+  };
+  const usageView = () => document.querySelector("#session-usage");
+  const usageViewOpen = () => document.querySelector("#session-panel")?.dataset.consoleView === "usage";
+  const syncUsageAction = () => {
+    const action = document.querySelector(".usage-choice");
+    if (action instanceof HTMLElement) action.setAttribute("aria-expanded", usageViewOpen() ? "true" : "false");
+  };
+  const showUsageView = ({ focus = true } = {}) => {
+    const panel = document.querySelector("#session-panel");
+    const view = usageView();
+    if (!(panel instanceof HTMLElement) || !(view instanceof HTMLElement)) return false;
+    panel.dataset.consoleView = "usage";
+    syncUsageAction();
+    closeConsoleMenu();
+    if (focus) view.querySelector("#usage-heading")?.focus({ preventScroll: true });
+    return true;
+  };
+  const closeUsageView = ({ focus = true } = {}) => {
+    const panel = document.querySelector("#session-panel");
+    if (!(panel instanceof HTMLElement) || !usageViewOpen()) return false;
+    delete panel.dataset.consoleView;
+    syncUsageAction();
+    if (location.hash === "#session-usage") {
+      try { history.replaceState(history.state, "", `${location.pathname}${location.search}`); } catch {}
+    }
+    restoreTranscriptView();
+    if (focus) document.querySelector(".console-menu > summary")?.focus({ preventScroll: true });
+    return true;
+  };
+  const syncUsageView = () => {
+    if (location.hash === "#session-usage") showUsageView({ focus: false });
+    else syncUsageAction();
   };
   const dismissSheet = () => {
     const ignore = document.querySelector(".offer-ignore");
@@ -1139,7 +1174,7 @@
       workflows.remove();
       return true;
     }
-    if (closeWorkflowsMenu()) return true;
+    if (closeConsoleMenu()) return true;
     return false;
   };
   const editingElsewhere = (node) => {
@@ -3234,6 +3269,19 @@
   }, true);
   document.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;
+    const usageChoice = target?.closest(".usage-choice");
+    if (usageChoice instanceof HTMLAnchorElement && event.button === 0
+      && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+      event.preventDefault();
+      showUsageView();
+      return;
+    }
+    if (target?.closest(".usage-close")) {
+      event.preventDefault();
+      closeUsageView();
+      return;
+    }
+    if (!target?.closest(".console-menu")) closeConsoleMenu();
     const toolCard = target?.closest(".message-tool[data-tool-output]");
     const toolSummary = toolCard?.querySelector(":scope > summary[data-tool-output-summary]");
     if (toolCard instanceof HTMLDetailsElement && toolSummary instanceof HTMLElement
@@ -3311,8 +3359,8 @@
     const menu = event.target;
     if (!(menu instanceof HTMLDetailsElement)) return;
     if (!menu.open) return;
-    if (!menu.classList.contains("session-menu") && !menu.classList.contains("workflows-menu") && !menu.classList.contains("projects-menu")) return;
-    for (const other of document.querySelectorAll("details.session-menu, details.workflows-menu, details.projects-menu")) {
+    if (!menu.classList.contains("session-menu") && !menu.classList.contains("console-menu") && !menu.classList.contains("projects-menu")) return;
+    for (const other of document.querySelectorAll("details.session-menu, details.console-menu, details.projects-menu")) {
       if (other !== menu) other.open = false;
     }
   }, true);
@@ -3385,7 +3433,7 @@
     if (editingElsewhere(input)) return;
 
     const key = event.key;
-    if (handleWorkflowMenuKey(event)) return;
+    if (handleConsoleMenuKey(event)) return;
     if (handleProjectTreeKey(event)) return;
     if (pendingClose) {
       if (key === "x" || key === "X") {
@@ -3399,7 +3447,7 @@
           document.querySelector(".workflows-popup")?.remove();
           return;
         }
-        if (closeWorkflowsMenu()) return;
+        if (closeConsoleMenu()) return;
         submitForm("#close-session");
         return;
       }
@@ -3455,7 +3503,7 @@
     }
     if (key === "w" || key === "W") {
       event.preventDefault();
-      openWorkflowsMenu();
+      openConsoleMenu();
       return;
     }
     if (key === "ArrowUp") {
@@ -4020,10 +4068,12 @@
         scheduleSessionConnectors();
       }
       if (id === "session-chrome") {
+        syncUsageAction();
         syncLiveTrackerElapsed();
         syncLiveTrackerProjectFilter();
         scheduleSessionConnectors();
       }
+      if (id === "session-usage") syncUsageAction();
     });
   }
 
@@ -4064,6 +4114,7 @@
     syncLiveTrackerElapsed();
     restoreActiveProjects();
     syncLiveTrackerProjectFilter();
+    syncUsageView();
     scheduleSessionConnectors();
     if (!options.skipValidate) void validateRememberedProjects();
     if (drawerIsOpen()) requestAnimationFrame(() => openDrawer({ updateUrl: false, focus: !keepOpenerFocus }));

@@ -36,6 +36,7 @@ const DASHBOARD_SCHEMA = "qq.dashboard/v1";
 const DASHBOARD_SESSION_ID = LAST_SESSION_ID;
 const DASHBOARD_UUID_TEXT = /(?:session-)?[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
 const DASHBOARD_PHASES = new Set(["planning", "plan", "work", "none", "unknown"]);
+const DASHBOARD_USAGE_STATES = new Set(["ready", "estimated", "stale", "unavailable"]);
 
 function dashboardText(value, { empty = false, display = false } = {}) {
   if (typeof value !== "string") return null;
@@ -48,10 +49,61 @@ function dashboardDuration(value) {
   return value === null || (Number.isFinite(value) && Number.isInteger(value) && value >= 0);
 }
 
+function dashboardTimestamp(value, nullable = false) {
+  return (nullable && value === null)
+    || (Number.isSafeInteger(value) && value >= 0 && value <= 8_640_000_000_000_000);
+}
+
+function validatedDashboardUsage(candidate) {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)
+    || !dashboardTimestamp(candidate.generatedAt) || !Array.isArray(candidate.providers)) return null;
+  const providerIds = new Set();
+  const providers = [];
+  for (const provider of candidate.providers) {
+    if (!provider || typeof provider !== "object" || Array.isArray(provider)
+      || !Array.isArray(provider.meters)) return null;
+    const id = dashboardText(provider.id);
+    const label = dashboardText(provider.label, { display: true });
+    const { state, observedAt } = provider;
+    if (id === null || label === null || providerIds.has(id)
+      || !DASHBOARD_USAGE_STATES.has(state) || !dashboardTimestamp(observedAt, true)) return null;
+    providerIds.add(id);
+    const meterIds = new Set();
+    const meters = [];
+    for (const meter of provider.meters) {
+      if (!meter || typeof meter !== "object" || Array.isArray(meter)) return null;
+      const meterId = dashboardText(meter.id);
+      const meterLabel = dashboardText(meter.label, { display: true });
+      const detail = dashboardText(meter.detail, { empty: true });
+      if (meterId === null || meterLabel === null || detail === null || meterIds.has(meterId)
+        || typeof meter.usedRatio !== "number" || !Number.isFinite(meter.usedRatio) || meter.usedRatio < 0
+        || !dashboardTimestamp(meter.resetAt, true)) return null;
+      meterIds.add(meterId);
+      meters.push(Object.freeze({
+        id: meterId,
+        label: meterLabel,
+        usedRatio: meter.usedRatio,
+        resetAt: meter.resetAt,
+        detail,
+      }));
+    }
+    if (state === "unavailable" && (observedAt !== null || meters.length !== 0)) return null;
+    providers.push(Object.freeze({
+      id, label, state, observedAt, meters: Object.freeze(meters),
+    }));
+  }
+  providers.sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
+  return Object.freeze({
+    generatedAt: candidate.generatedAt,
+    providers: Object.freeze(providers),
+  });
+}
+
 /**
- * Validate and isolate the presentation fields consumed by qq-ui. generatedAt
- * is intentionally omitted because it advances on cache refresh even when the
- * semantic tracker is unchanged. Provider usage is neither read nor copied.
+ * Validate and isolate the presentation fields consumed by qq-ui. The top-level
+ * generatedAt is intentionally omitted because it advances on cache refresh
+ * even when the semantic tracker is unchanged. Optional usage is validated in
+ * its own boundary so a malformed provider cycle cannot suppress tracking.
  */
 export function validatedDashboardSnapshot(candidate) {
   try {
@@ -142,9 +194,18 @@ export function validatedDashboardSnapshot(candidate) {
         sessions: Object.freeze(orderedSessions),
       }));
     }
+    let usage;
+    try {
+      if (Object.prototype.hasOwnProperty.call(candidate, "usage")) {
+        usage = validatedDashboardUsage(candidate.usage) ?? undefined;
+      }
+    } catch {
+      // Usage is an optional independently produced subtree. Discard only it.
+    }
     return Object.freeze({
       schema: DASHBOARD_SCHEMA,
       projects: Object.freeze(orderedProjectPlaces(projects)),
+      ...(usage ? { usage } : {}),
     });
   } catch {
     return null;
@@ -1938,6 +1999,7 @@ export function createConsoleHandler(backend, options = {}) {
           };
           res.write(sseEvent("switch-meta", JSON.stringify(meta)));
           res.write(sseEvent("chrome", render.renderSessionRegion("chrome", surface, paths)));
+          res.write(sseEvent("usage", render.renderSessionRegion("usage", surface, paths)));
           res.write(sseEvent("transcript-reset", render.transcriptSettledInner(surface)));
           res.write(sseEvent("live", render.renderLiveNodes(surface)));
           res.write(sseEvent("queue", render.renderSessionRegion("queue", surface, paths)));

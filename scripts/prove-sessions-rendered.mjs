@@ -93,7 +93,25 @@ const sourceProjects = [
   { key: "p:iota:", name: "iota", label: "Iota", folder: "", folderLabel: "", sessions: [idleRow(30, "iota-arch")] },
   { key: "p:epsilon:", name: "epsilon", label: "Epsilon", folder: "", folderLabel: "", sessions: [idleRow(31, "epsilon-arch")] },
 ];
-const dashboard = validatedDashboardSnapshot({ schema: "qq.dashboard/v1", projects: sourceProjects });
+const dashboard = validatedDashboardSnapshot({
+  schema: "qq.dashboard/v1",
+  projects: sourceProjects,
+  usage: {
+    generatedAt: now,
+    providers: [{
+      id: "qwen", label: "Qwen", state: "estimated", observedAt: now - 90_000,
+      meters: [
+        { id: "five-hour", label: "5h", usedRatio: .42, resetAt: null, detail: "4200 / 10000 estimated" },
+        { id: "weekly", label: "7d", usedRatio: 1.1, resetAt: now + 4 * 86_400_000, detail: "44000 / 40000 estimated" },
+      ],
+    }, {
+      id: "grok", label: "Grok", state: "unavailable", observedAt: null, meters: [],
+    }, {
+      id: "codex", label: "Codex", state: "ready", observedAt: now - 60_000,
+      meters: [{ id: "weekly", label: "7d", usedRatio: .25, resetAt: now + 6 * 86_400_000, detail: "" }],
+    }],
+  },
+});
 assert.ok(dashboard, "representative dashboard fixture validates");
 const expectedMany = dashboard.projects.map((project) => `${project.name}\n${project.folder}`);
 assert.deepEqual(expectedMany.slice(-2), ["theta\n", "zeta\n"], "fixture canonical order is deterministic");
@@ -132,7 +150,9 @@ const snapshotFor = (projects) => {
     agentStatus: "idle",
     children: [],
     conversation: { nodes: [], pending: [] },
-    dashboard: { schema: "qq.dashboard/v1", projects },
+    sessionMode: "architect",
+    workflows: ["architect", "iterate", "find", "base"],
+    dashboard: { schema: "qq.dashboard/v1", projects, usage: dashboard.usage },
   };
 };
 const smallProjects = dashboard.projects.slice(0, 4);
@@ -540,6 +560,97 @@ function assertOverview(state, expected) {
     "every overview group has a visible human heading instead of relying on a line");
 }
 
+
+async function menuState(cdp) {
+  return cdp.evaluate(`(() => {
+    const menu = document.querySelector('.console-menu');
+    const summary = menu?.querySelector(':scope > summary');
+    const action = menu?.querySelector('.usage-choice');
+    return {
+      exists: Boolean(menu),
+      open: Boolean(menu?.open),
+      summaryLabel: summary?.getAttribute('aria-label') ?? '',
+      actionText: action?.textContent ?? '',
+      actionTag: action?.tagName ?? '',
+      actionExpanded: action?.getAttribute('aria-expanded') ?? '',
+      workflowValues: [...(menu?.querySelectorAll('.workflows-choice') ?? [])].map((button) => button.value),
+      formMethod: menu?.querySelector('.workflows-menu-list')?.method ?? '',
+      focused: document.activeElement?.className || document.activeElement?.tagName || '',
+    };
+  })()`);
+}
+
+async function pressKey(cdp, key) {
+  await cdp.evaluate(`document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, bubbles: true, cancelable: true }))`);
+}
+
+async function usageLayout(cdp, name, { capture = true } = {}) {
+  await waitForPaint(cdp);
+  if (capture) await screenshot(cdp, name);
+  return cdp.evaluate(`(() => {
+    const rect = (node) => {
+      if (!node) return null;
+      const box = node.getBoundingClientRect();
+      return { top: box.top, right: box.right, bottom: box.bottom, left: box.left, width: box.width, height: box.height };
+    };
+    const view = document.querySelector('#session-usage');
+    const chrome = document.querySelector('#session-chrome');
+    const composer = document.querySelector('#session-composer');
+    const providers = [...document.querySelectorAll('.usage-provider')];
+    const qwen = providers.find((provider) => provider.querySelector('h3')?.textContent === 'Qwen');
+    const unavailable = providers.find((provider) => provider.querySelector('h3')?.textContent === 'Grok');
+    const bars = [...document.querySelectorAll('.usage-meter-fill')];
+    const values = [...document.querySelectorAll('.usage-meter-value')].map((node) => ({ text: node.textContent, aria: node.getAttribute('aria-label') }));
+    const providerTops = providers.map((provider) => provider.getBoundingClientRect().top);
+    return {
+      selected: document.querySelector('#session-panel')?.dataset.consoleView ?? '',
+      display: getComputedStyle(view).display,
+      transcriptDisplay: getComputedStyle(document.querySelector('#transcript')).display,
+      view: rect(view), chrome: rect(chrome), composer: rect(composer),
+      viewport: { width: innerWidth, height: innerHeight },
+      overflow: view.scrollWidth > view.clientWidth + 1,
+      providerCount: providers.length,
+      providerTops,
+      values,
+      qwenMeters: [...(qwen?.querySelectorAll('.usage-meter-label') ?? [])].map((node) => node.textContent),
+      qwenDetails: [...(qwen?.querySelectorAll('.usage-meter-detail') ?? [])].map((node) => node.textContent),
+      qwenResetCount: qwen?.querySelectorAll('.usage-reset').length ?? 0,
+      unavailableMeters: unavailable?.querySelectorAll('.usage-meter').length ?? -1,
+      unavailableText: unavailable?.textContent ?? '',
+      maximumBarWidth: Math.max(0, ...bars.map((bar) => bar.getBoundingClientRect().width / bar.parentElement.getBoundingClientRect().width)),
+      idsLeaked: document.querySelector('.usage-content')?.textContent.includes('five-hour')
+        || document.querySelector('.usage-content')?.textContent.includes('weekly')
+        || document.querySelector('.usage-content')?.textContent.includes('qwen'),
+      menuOpen: Boolean(document.querySelector('.console-menu')?.open),
+      activeId: document.activeElement?.id ?? '',
+      connectorPaths: document.querySelectorAll('.session-connectors path').length,
+    };
+  })()`);
+}
+
+function assertUsageLayout(state, { narrow = false } = {}) {
+  assert.equal(state.selected, "usage", "the general action selects usage view state");
+  assert.equal(state.display, "flex", "usage view is visibly rendered");
+  assert.equal(state.transcriptDisplay, "none", "usage replaces rather than overlays transcript content");
+  assert.ok(state.view && state.chrome && state.composer
+    && state.view.top >= state.chrome.bottom - 1
+    && state.view.bottom <= state.composer.top + 1,
+  "usage remains between protected chrome and composer controls");
+  assert.equal(state.overflow, false, "usage view has no horizontal viewport overflow");
+  assert.equal(state.providerCount, 3, "all provider rows render");
+  assert.deepEqual(state.qwenMeters, ["5h", "7d"], "Qwen renders both human meter labels");
+  assert.deepEqual(state.qwenDetails, ["4200 / 10000 estimated", "44000 / 40000 estimated"]);
+  assert.equal(state.qwenResetCount, 1, "null reset is omitted while known reset is shown");
+  assert.equal(state.unavailableMeters, 0, "unavailable provider has no fake meter");
+  assert.match(state.unavailableText, /unavailable[\s\S]*No usage reading is available\./);
+  assert.ok(state.values.some((value) => value.text === "110%" && value.aria === "110% used"),
+    "over-limit usage remains numeric and assistive");
+  assert.ok(state.maximumBarWidth <= 1.001, "visual bars alone are clamped");
+  assert.equal(state.idsLeaked, false, "provider and meter IDs are not visible");
+  assert.equal(state.menuOpen, false, "usage action closes its menu");
+  if (narrow) assert.equal(new Set(state.providerTops).size, 3, "narrow installed app stacks providers in one column");
+}
+
 await mkdir(artifacts, { recursive: true });
 try {
   const report = {};
@@ -549,6 +660,83 @@ try {
   const desktop = await launchChrome("/many");
   await desktop.cdp.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await waitForPaint(desktop.cdp);
+  report.menuClosed = await menuState(desktop.cdp);
+  assert.deepEqual({
+    exists: report.menuClosed.exists,
+    open: report.menuClosed.open,
+    summaryLabel: report.menuClosed.summaryLabel,
+    actionText: report.menuClosed.actionText,
+    actionTag: report.menuClosed.actionTag,
+    workflowValues: report.menuClosed.workflowValues,
+    formMethod: report.menuClosed.formMethod,
+  }, {
+    exists: true,
+    open: false,
+    summaryLabel: "Console menu",
+    actionText: "usage",
+    actionTag: "A",
+    workflowValues: ["/workflows architect", "/workflows iterate", "/workflows find"],
+    formMethod: "post",
+  }, "general menu retains exact workflow submissions and adds one non-submit usage action");
+  await desktop.cdp.evaluate(`document.querySelector('.console-menu > summary').focus()`);
+  await pressKey(desktop.cdp, "Enter");
+  report.menuKeyboardOpen = await menuState(desktop.cdp);
+  assert.ok(report.menuKeyboardOpen.open && String(report.menuKeyboardOpen.focused).includes("workflows-current"),
+    "Enter opens the general menu and preserves current-workflow focus semantics");
+  await desktop.cdp.evaluate(`(() => {
+    const form = document.querySelector('.workflows-menu-list');
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      window.__workflowSubmission = event.submitter?.name === 'prompt' ? event.submitter.value : null;
+    }, { capture: true, once: true });
+  })()`);
+  await pressKey(desktop.cdp, "Enter");
+  assert.equal(await desktop.cdp.evaluate(`window.__workflowSubmission`), "/workflows architect",
+    "keyboard activation still submits the exact current workflow form value");
+  await pressKey(desktop.cdp, "ArrowUp");
+  report.menuUsageFocused = await menuState(desktop.cdp);
+  assert.ok(String(report.menuUsageFocused.focused).includes("usage-choice"), "arrow traversal includes usage");
+  await pressKey(desktop.cdp, "Escape");
+  report.menuEscape = await menuState(desktop.cdp);
+  assert.ok(!report.menuEscape.open && report.menuEscape.focused === "SUMMARY", "Escape closes and restores summary focus");
+  await desktop.cdp.evaluate(`document.querySelector('.console-menu > summary').click()`);
+  await desktop.cdp.evaluate(`document.body.click()`);
+  assert.equal((await menuState(desktop.cdp)).open, false, "outside click closes the general menu");
+  report.menuOpenUsageSwap = await desktop.cdp.evaluate(`(() => {
+    const menu = document.querySelector('.console-menu');
+    menu.open = true;
+    const current = menu.querySelector('.workflows-current');
+    current.focus();
+    const usage = document.querySelector('#session-usage');
+    usage.innerHTML = usage.innerHTML.replace('4200 / 10000 estimated', '4300 / 10000 estimated');
+    document.dispatchEvent(new CustomEvent('htmx:afterSwap', { detail: { target: usage } }));
+    return {
+      sameMenu: menu === document.querySelector('.console-menu'),
+      open: menu.open,
+      focused: document.activeElement === current,
+      detailUpdated: usage.textContent.includes('4300 / 10000 estimated'),
+    };
+  })()`);
+  assert.deepEqual(report.menuOpenUsageSwap, { sameMenu: true, open: true, focused: true, detailUpdated: true },
+    "meaningful usage update replaces only usage while an open menu and its focus persist");
+  await pressKey(desktop.cdp, "Escape");
+  report.menuClosedUsageSwap = await desktop.cdp.evaluate(`(() => {
+    const menu = document.querySelector('.console-menu');
+    const usage = document.querySelector('#session-usage');
+    usage.innerHTML = usage.innerHTML.replace('4300 / 10000 estimated', '4200 / 10000 estimated');
+    document.dispatchEvent(new CustomEvent('htmx:afterSwap', { detail: { target: usage } }));
+    return { sameMenu: menu === document.querySelector('.console-menu'), open: menu.open };
+  })()`);
+  assert.deepEqual(report.menuClosedUsageSwap, { sameMenu: true, open: false },
+    "usage update also leaves closed menu chrome untouched");
+  await desktop.cdp.evaluate(`document.querySelector('.console-menu > summary').click(); document.querySelector('.usage-choice').click()`);
+  report.desktopUsage = await usageLayout(desktop.cdp, "desktop-usage");
+  assertUsageLayout(report.desktopUsage);
+  assert.equal(report.desktopUsage.activeId, "usage-heading", "usage action moves focus to the view heading");
+  assert.equal(report.desktopUsage.connectorPaths, 0, "selected-project mode keeps zero connector paths with usage open");
+  await desktop.cdp.evaluate(`document.querySelector('.usage-close').click()`);
+  assert.equal(await desktop.cdp.evaluate(`getComputedStyle(document.querySelector('#transcript')).display`), "flex",
+    "transcript action restores the transcript content view");
   report.desktopSelected = await inspect(desktop.cdp, "desktop-selected", { capture: false });
   assertSelected(report.desktopSelected, expectedMany);
   report.desktopFocusSequence = await nativeProjectFocusSequence(desktop.cdp, expectedMany.length);
@@ -631,6 +819,18 @@ try {
   await openOverview(smallPwa.cdp);
   report.pwaOverviewReentered = await inspect(smallPwa.cdp, "pwa-overview-reentered", { capture: false });
   assertOverview(report.pwaOverviewReentered, expectedSmall);
+  await smallPwa.cdp.evaluate(`document.body.click()`);
+  await waitForPaint(smallPwa.cdp);
+  await smallPwa.cdp.evaluate(`document.querySelector('.console-menu > summary').click(); document.querySelector('.usage-choice').click()`);
+  report.pwaUsagePortrait = await usageLayout(smallPwa.cdp, "pwa-usage-portrait");
+  assertUsageLayout(report.pwaUsagePortrait, { narrow: true });
+  assert.equal(report.pwaUsagePortrait.connectorPaths, 0, "portrait selected mode keeps zero connector paths with usage open");
+  await smallPwa.cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 640, height: 390, deviceScaleFactor: 2, mobile: true, screenWidth: 640, screenHeight: 390,
+  });
+  report.pwaUsageRotated = await usageLayout(smallPwa.cdp, "pwa-usage-rotated");
+  assertUsageLayout(report.pwaUsageRotated, { narrow: true });
+  assert.equal(report.pwaUsageRotated.connectorPaths, 0, "rotated selected mode keeps zero connector paths with usage open");
   await closeChrome(smallPwa);
 
   // Installed/standalone many-project PWA: mandatory many, independently

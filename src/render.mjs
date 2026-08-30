@@ -1164,21 +1164,26 @@ function renderWorkflowMenu(snapshot, paths) {
     .map(workflowName)
     .filter((name) => name && name !== "none" && name !== "base");
   const selected = workflowName(snapshot?.sessionMode);
-  if (names.length === 0 || !paths.prompt) return "";
-  const action = escapeHtml(paths.prompt);
+  const action = paths.prompt ? escapeHtml(paths.prompt) : "";
   const buttons = names.map((name) => {
     const current = name === selected ? " workflows-current" : "";
-    return `<button class="workflows-choice${current}" type="submit" name="prompt" value="/workflows ${escapeHtml(name)}">${escapeHtml(name)}</button>`;
+    return `<button class="workflows-choice${current}" role="menuitem" type="submit" name="prompt" value="/workflows ${escapeHtml(name)}">${escapeHtml(name)}</button>`;
   }).join("");
-  const summary = selected && selected !== "none" ? selected : "workflow";
-  return `<details class="workflows-menu"${selected && selected !== "none" ? ` data-mode="${escapeHtml(selected)}"` : ""}>
-    <summary aria-label="Choose workflow" aria-keyshortcuts="W">${escapeHtml(summary)}</summary>
-    <form class="workflows-menu-list" action="${action}" method="post"
+  const workflows = action && buttons
+    ? `<form class="workflows-menu-list" action="${action}" method="post"
       hx-post="${action}"
       ${hxMutateAttrs()}
       hx-disabled-elt=".workflows-choice">
       ${buttons}
-    </form>
+    </form>`
+    : "";
+  const summary = selected && selected !== "none" ? selected : "console";
+  return `<details class="workflows-menu console-menu"${selected && selected !== "none" ? ` data-mode="${escapeHtml(selected)}"` : ""}>
+    <summary aria-label="Console menu" aria-haspopup="menu" aria-keyshortcuts="W">${escapeHtml(summary)}</summary>
+    <div class="console-menu-list" role="menu" aria-label="Console actions">
+      <a class="console-menu-choice usage-choice" role="menuitem" href="#session-usage" aria-controls="session-usage" aria-expanded="false">usage</a>
+      ${workflows}
+    </div>
   </details>`;
 }
 
@@ -1266,13 +1271,14 @@ export function renderSessionChildren(snapshot, paths) {
   return rows ? `<nav class="session-child-list" aria-label="Child sessions"><ol>${rows}</ol></nav>` : "";
 }
 
-export const SSE_REGION_NAMES = Object.freeze(["chrome", "transcript", "live", "queue", "children", "composer", "popups", "case"]);
+export const SSE_REGION_NAMES = Object.freeze(["chrome", "usage", "transcript", "live", "queue", "children", "composer", "popups", "case"]);
 export const LIVE_SSE_EVENTS = Object.freeze(["live"]);
 export const MUTATION_REGION_NAMES = Object.freeze(["chrome", "children", "queue", "composer", "popups"]);
 /** Prompt/interrupt: SSE owns the queue. POST OOB of pending races claim and sticks a duplicate. */
 export const PROMPT_MUTATION_REGION_NAMES = Object.freeze(["chrome", "children", "composer", "popups"]);
 export const SSE_REGION_IDS = Object.freeze({
   chrome: "session-chrome",
+  usage: "session-usage",
   transcript: "transcript-log",
   live: "transcript-live-nodes",
   queue: "session-queue",
@@ -1849,10 +1855,86 @@ export function renderPopups(snapshot, paths, notice = "") {
     ${popupNotice}`;
 }
 
+const USAGE_MONTHS = Object.freeze(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]);
+
+function usageTime(epochMs) {
+  const date = new Date(epochMs);
+  const iso = date.toISOString();
+  const hours = String(date.getUTCHours()).padStart(2, "0");
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+  return {
+    iso,
+    readable: `${USAGE_MONTHS[date.getUTCMonth()]} ${date.getUTCDate()}, ${date.getUTCFullYear()}, ${hours}:${minutes} UTC`,
+  };
+}
+
+function usagePercent(ratio) {
+  const scaled = ratio * 100;
+  if (!Number.isFinite(scaled)) {
+    const [coefficient, exponent] = ratio.toExponential(2).split("e");
+    return `${coefficient.replace(/\.?0+$/, "")}e${Number(exponent) + 2 >= 0 ? "+" : ""}${Number(exponent) + 2}`;
+  }
+  if (scaled !== 0 && scaled < .1) return scaled.toPrecision(2).replace(/\.?0+e/, "e");
+  const rounded = Math.round(scaled * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1).replace(/\.0$/, "");
+}
+
+function renderUsageMeter(meter) {
+  const percent = usagePercent(meter.usedRatio);
+  const visualPercent = Math.min(100, meter.usedRatio * 100);
+  const reset = meter.resetAt === null ? "" : (() => {
+    const time = usageTime(meter.resetAt);
+    return `<time class="usage-reset" datetime="${time.iso}">reset ${time.readable}</time>`;
+  })();
+  return `<li class="usage-meter">
+    <div class="usage-meter-heading"><span class="usage-meter-label">${escapeHtml(meter.label)}</span><strong class="usage-meter-value" aria-label="${percent}% used">${percent}%</strong></div>
+    <span class="usage-meter-track" aria-hidden="true"><span class="usage-meter-fill" style="width:${visualPercent}%"></span></span>
+    ${meter.detail ? `<p class="usage-meter-detail">${escapeHtml(meter.detail)}</p>` : ""}
+    ${reset}
+  </li>`;
+}
+
+function renderUsageProvider(provider) {
+  const observed = provider.observedAt === null ? "" : (() => {
+    const time = usageTime(provider.observedAt);
+    return `<span class="usage-observed">observed <time datetime="${time.iso}">${time.readable}</time></span>`;
+  })();
+  const meters = provider.meters.length > 0
+    ? `<ul class="usage-meters">${provider.meters.map(renderUsageMeter).join("")}</ul>`
+    : `<p class="usage-provider-empty">${provider.state === "unavailable" ? "No usage reading is available." : "No meter reading is available."}</p>`;
+  return `<li class="usage-provider usage-provider-${provider.state}">
+    <header class="usage-provider-heading">
+      <h3>${escapeHtml(provider.label)}</h3>
+      <span class="usage-provider-state">${provider.state}</span>
+    </header>
+    ${observed}
+    ${meters}
+  </li>`;
+}
+
+/** Render only validated dashboard usage. Missing/malformed and valid empty truth stay distinct. */
+export function renderUsageView(snapshot) {
+  const usage = snapshot?.dashboard?.usage;
+  let content;
+  if (!usage || !Array.isArray(usage.providers)) {
+    content = '<p class="usage-message usage-unavailable">Usage data is unavailable.</p>';
+  } else if (usage.providers.length === 0) {
+    content = '<p class="usage-message usage-empty">Usage is not available yet.</p>';
+  } else {
+    content = `<ol class="usage-providers">${usage.providers.map(renderUsageProvider).join("")}</ol>`;
+  }
+  return `<section class="usage-content" aria-labelledby="usage-heading" aria-live="polite">
+    <header class="usage-heading"><h2 id="usage-heading" tabindex="-1">usage</h2><button class="usage-close" type="button">transcript</button></header>
+    ${content}
+  </section>`;
+}
+
 export function renderSessionRegion(name, snapshot, paths, notice = "") {
   switch (name) {
     case "chrome":
       return renderChrome(snapshot, paths, notice);
+    case "usage":
+      return renderUsageView(snapshot);
     case "transcript":
       return renderTranscriptSettled(snapshot);
     case "live":
@@ -1894,6 +1976,24 @@ function liveTrackerFingerprint(dashboard) {
   ]);
 }
 
+function usageFingerprint(dashboard) {
+  const usage = dashboard?.usage;
+  if (!usage || !Array.isArray(usage.providers)) return null;
+  return usage.providers.map((provider) => [
+    provider.id,
+    provider.label,
+    provider.state,
+    provider.observedAt,
+    (Array.isArray(provider.meters) ? provider.meters : []).map((meter) => [
+      meter.id,
+      meter.label,
+      meter.usedRatio,
+      meter.resetAt,
+      meter.detail,
+    ]),
+  ]);
+}
+
 /** Compact per-region tokens. SSE emits a named event only when that token changes. */
 export function regionFingerprints(snapshot) {
   const sessions = Array.isArray(snapshot?.sessions) ? snapshot.sessions : [];
@@ -1920,6 +2020,7 @@ export function regionFingerprints(snapshot) {
       snapshot?.sessionMode ?? "",
       (snapshot?.workflows ?? []).join(","),
     ]),
+    usage: JSON.stringify(usageFingerprint(snapshot?.dashboard)),
     transcript: JSON.stringify([
       snapshot?.id,
       settled.length,
@@ -1972,6 +2073,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
   const chrome = regionShell("session-chrome", "session-chrome", "chrome", renderChrome(snapshot, paths, notice), true);
   const popups = regionShell("session-popups", "session-popups", "popups", renderPopups(snapshot, paths, notice), true);
   if (emptyProject) return `${chrome}${popups}`;
+  const usage = regionShell("session-usage", "usage-view", "usage", renderUsageView(snapshot), true);
   const children = regionShell("session-children", "session-children", "children", renderSessionChildren(snapshot, paths), true);
   const composerRegion = regionShell(
     "session-composer",
@@ -1981,6 +2083,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
     true,
   );
   return `${chrome}
+    ${usage}
     <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" data-tool-base="${escapeHtml(paths.canonical ?? "")}" hx-history="false">
       <div id="transcript-log" class="transcript-log" hx-history="false">
         ${regionShell("transcript-settled", "transcript-settled", "transcript-reset", transcriptSettledInner(snapshot), true)}
