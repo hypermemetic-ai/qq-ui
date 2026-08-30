@@ -1,10 +1,8 @@
-# `@hypermemetic-ai/qq-ui`
+# @hypermemetic-ai/qq-ui
 
-Server-rendered Cordis plugin for the qq operator console. This is a private ES-module package; its main entry point is [`src/plugin.mjs`](src/plugin.mjs), and it depends on the sibling `@hypermemetic-ai/qq-core` package through `file:../qq-core`.
+Server-rendered Cordis plugin for the qq operator console. This package is private, uses ES modules, and depends on the sibling `../qq-core` package through `@hypermemetic-ai/qq-core`.
 
-## Commands
-
-No `start` script is defined. The established package tasks are:
+## Established commands
 
 ```sh
 npm test
@@ -12,38 +10,29 @@ npm run prove:sessions-rendered
 npm run latency:report
 ```
 
-`npm test` syntax-checks the plugin and current browser asset, then runs the visual, latency, interaction, dashboard, metadata, and rendered-session proof scripts declared in [`package.json`](package.json).
+`npm test` is the full declared check: it syntax-checks [`src/plugin.mjs`](src/plugin.mjs) and [`assets/browser-v9.js`](assets/browser-v9.js), then runs the repository's UI proof scripts. `prove:sessions-rendered` runs the focused sessions-rendered proof; `latency:report` runs [`scripts/report-ui-latency.mjs`](scripts/report-ui-latency.mjs).
 
-## Where to start
+No install or start command is declared in `package.json`. In particular, dependency installation must account for the local `../qq-core` dependency.
 
-The package's exported boundaries are the most useful routing points:
+## Code map
 
-- [`src/plugin.mjs`](src/plugin.mjs) — package root and declared main entry point.
-- [`src/http-app.mjs`](src/http-app.mjs) — `./http` export.
-- [`src/render.mjs`](src/render.mjs) — `./render` export and a high-change, high-fan-in area.
-- [`src/markdown.mjs`](src/markdown.mjs) — `./markdown` export.
+The package exposes four module entry points:
 
-Browser-facing files live under [`assets/`](assets/console.css): [`assets/console.css`](assets/console.css) and [`assets/browser-v9.js`](assets/browser-v9.js) are the most frequently changed assets, and `browser-v9.js` is the browser file checked by `npm test`. Vendored files and their recorded versions are under [`vendor/`](vendor/htmx-2.0.10.min.js) and [`vendor-pins.json`](vendor-pins.json).
+| Export | Source |
+| --- | --- |
+| package root | [`src/plugin.mjs`](src/plugin.mjs) |
+| `./http` | [`src/http-app.mjs`](src/http-app.mjs) |
+| `./render` | [`src/render.mjs`](src/render.mjs) |
+| `./markdown` | [`src/markdown.mjs`](src/markdown.mjs) |
 
-## Change routing
+For a first change, route by boundary rather than surveying every file:
 
-| Change | Begin with | Verification established by the package |
-| --- | --- | --- |
-| Plugin/package entry | [`src/plugin.mjs`](src/plugin.mjs) | `npm test` |
-| HTTP boundary | [`src/http-app.mjs`](src/http-app.mjs) | `npm test` |
-| Rendering or console presentation | [`src/render.mjs`](src/render.mjs), [`assets/console.css`](assets/console.css), [`assets/browser-v9.js`](assets/browser-v9.js) | `npm test` |
-| Markdown export | [`src/markdown.mjs`](src/markdown.mjs) | `npm test` |
-| Rendered sessions | [`scripts/prove-sessions-rendered.mjs`](scripts/prove-sessions-rendered.mjs) | `npm run prove:sessions-rendered` |
-| UI latency reporting | [`scripts/report-ui-latency.mjs`](scripts/report-ui-latency.mjs) | `npm run latency:report` |
+- **HTTP or rendering work:** start with [`src/http-app.mjs`](src/http-app.mjs) and [`src/render.mjs`](src/render.mjs). They have the highest relative-module fan-in and are among the most frequently changed source files.
+- **Browser presentation:** start with [`assets/browser-v9.js`](assets/browser-v9.js) and [`assets/console.css`](assets/console.css). The former is explicitly checked by `npm test`; both are active change surfaces.
+- **Verification:** [`scripts/`](scripts/prove-root-routing.mjs) contains focused proof scripts. Use the proof whose filename matches the affected area, then run `npm test` for the full declared check.
+- **Vendored browser dependencies:** start at [`vendor-pins.json`](vendor-pins.json) and the tracked distributions and licenses under [`vendor/`](vendor/htmx-2.0.10.min.js).
 
-The full proof suite is the default check for cross-boundary changes; there are additional narrowly named proof scripts under [`scripts/`](scripts/prove-visual-latency.mjs), but only the two focused commands above have dedicated package scripts.
+## Further orientation
 
-For existing repository documentation, see the [`wiki` index](wiki/index.md) and [operator-console notes](wiki/operator-console.md).
-
-## Passive startup and admission telemetry
-
-`npm run latency:report` reads the user-private rolling NDJSON log and reports startup/session-open, live-switch, prompt-admission, immediate composer feedback, collector health, and diagnostic SSE timing separately. Startup rows retain the original `page.startedAt` meaning (navigation to collector execution), so old records remain useful even without Navigation Timing. New records add only fixed allowlisted `PerformanceNavigationTiming`, FP/FCP, byte-size, navigation-intent, SSE-channel, and conversation-sequence fields. They never include URLs, query strings, headers, prompt/message content, arbitrary DOM text, Server-Timing descriptions, or SSE payloads. Initial session HTML exposes only fixed numeric `qq-view` and `qq-render` Server-Timing phases.
-
-A cross-document intent is a one-shot same-origin `sessionStorage` handoff with a safe normalized path/action and target. Session and project route identities are replaced by fixed `:id`, `:project`, and `:folder` labels. The handoff expires after 60 seconds (long enough to preserve the observed pre-script delays); after click propagation, a prevented/intercepted activation is removed immediately while an unprevented native navigation retains its handoff during a slow response. Reload, back/forward, and cold/PWA opens remain measurable through Navigation Timing without an intent.
-
-Exact local prompt admission is the `prompt-admitted` stage emitted when a genuinely new `.message-user[data-seq]` node appears after a successful local composer request. Existing/re-rendered sequences are ignored and candidates are bounded. The operational assumption is FIFO: the next new user conversation node is matched to the oldest successfully completed local prompt request. An external concurrent submitter cannot be cryptographically distinguished without backend-provided identity. The report therefore shows admitted, still-unmatched, failed, and external-unmatched-node counts. Generic first transcript SSE timing is diagnostic only; the immediate request-correlated visual is explicitly labeled composer/pending feedback and is not message admission.
+- [`wiki/index.md`](wiki/index.md) — repository documentation index
+- [`wiki/operator-console.md`](wiki/operator-console.md) — operator-console detail
