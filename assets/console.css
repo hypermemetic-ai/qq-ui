@@ -983,6 +983,7 @@ details.session-menu.session-controls {
 .transcript-live,
 .transcript-live-nodes,
 .transcript-live-node,
+.prompt-echoes,
 .transcript-settled {
   display: flex;
   flex-direction: column;
@@ -996,6 +997,7 @@ details.session-menu.session-controls {
 }
 
 .transcript-live-nodes:empty,
+.prompt-echoes:empty,
 .transcript-anchor {
   display: none;
 }
@@ -1142,6 +1144,41 @@ details.session-menu.session-controls {
   background: rgba(107, 86, 176, 0.28);
   color: #e4ddf4;
 }
+
+.prompt-local-echo {
+  outline: 1px dashed rgba(184, 168, 232, .34);
+  outline-offset: -1px;
+}
+
+.message-pending-admission {
+  background: rgba(107, 86, 176, .17);
+  color: #d2c9e8;
+}
+
+.message-accepted-queued {
+  background: rgba(107, 86, 176, .24);
+  color: #ded5ef;
+}
+
+.prompt-echo-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.prompt-echo-status {
+  display: block;
+  margin-top: .42rem;
+  color: #a99dc9;
+  font-size: .7rem;
+  font-weight: 650;
+  letter-spacing: .035em;
+  line-height: 1.25;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.message-accepted-queued .prompt-echo-status { color: #bbb2d4; }
 
 .message-assistant {
   padding-right: clamp(1rem, 4vw, 3rem);

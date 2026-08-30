@@ -428,6 +428,17 @@
       const value = typeof raw === "string" && /^[1-9][0-9]*$/.test(raw) ? Number(raw) : NaN;
       return Number.isSafeInteger(value) && value > 0 ? value : null;
     };
+    const fixedMessageId = (value) => typeof value === "string"
+      && value.length <= 128
+      && /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(value)
+      ? value
+      : "";
+    const conversationMessageIdFor = (node) => {
+      try { return fixedMessageId(node?.getAttribute?.("data-message-id") ?? node?.dataset?.messageId ?? ""); } catch { return ""; }
+    };
+    const responseMessageIdFor = (event) => {
+      try { return fixedMessageId(event?.detail?.xhr?.getResponseHeader?.("X-QQ-Message-Id")); } catch { return ""; }
+    };
     const isUserConversationNode = (node) => {
       try { return node?.matches?.(".message-user[data-seq]") === true; } catch { return false; }
     };
@@ -455,7 +466,7 @@
       knownUserSequences = new Set();
       rememberExistingUserNodes();
     };
-    const appendAdmissionStage = (kind, request, { conversationSequence = null, at = now() } = {}) => {
+    const appendAdmissionStage = (kind, request, { conversationSequence = null, at = now(), target = null } = {}) => {
       const completedAt = request?.completedAt ?? null;
       return appendBounded("stages", {
         at: round(at),
@@ -470,7 +481,7 @@
         conversationSequence,
         channel: null,
         sessionSwitchId: null,
-        target: request?.target ?? null,
+        target: safeTargetLabel(target) ?? request?.target ?? null,
         action: request?.action ?? "",
       });
     };
@@ -492,17 +503,24 @@
       for (const [sequence, node] of [...discovered.entries()].sort((left, right) => left[0] - right[0])) {
         if (knownUserSequences.has(sequence)) continue;
         rememberUserSequence(sequence);
-        const request = admissionCandidates.shift() ?? null;
+        const messageId = conversationMessageIdFor(node);
+        let request = null;
+        if (messageId) {
+          const exactIndex = admissionCandidates.findIndex((candidate) => candidate.messageId === messageId);
+          if (exactIndex >= 0) [request] = admissionCandidates.splice(exactIndex, 1);
+        } else {
+          // Explicitly retained/proven compatibility heuristic for legacy pairs
+          // where neither the response nor authoritative node has identity.
+          // Identity-bearing external nodes categorically never enter this FIFO.
+          request = admissionCandidates.find((candidate) => !candidate.messageId) ?? null;
+          if (request) admissionCandidates.splice(admissionCandidates.indexOf(request), 1);
+        }
         const at = now();
         appendAdmissionStage(request ? "prompt-admitted" : "prompt-admission-unmatched", request, {
           conversationSequence: sequence,
           at,
         });
         if (request) {
-          // Operational assumption: without backend identity support, the next
-          // genuinely new user node belongs to the oldest local successful
-          // composer submission. External concurrent submitters cannot be
-          // cryptographically distinguished.
           const pending = ensurePending();
           if (!pending.admissionPrimed) {
             pending.requestContext = requestContextFor(request);
@@ -692,6 +710,7 @@
         request.admissionCompleted = true;
         request.completedAt = now();
         if (requestSucceeded(event)) {
+          request.messageId = responseMessageIdFor(event);
           appendAdmissionStage("prompt-admission-pending", request, { at: request.completedAt });
           admissionCandidates.push(request);
           while (admissionCandidates.length > maximumAdmissionCandidates) admissionCandidates.shift();
@@ -710,6 +729,14 @@
           });
         }
       }
+    };
+    const markPromptLocalEcho = (xhr, target = null) => {
+      if (!active || !xhr || (typeof xhr !== "object" && typeof xhr !== "function")) return false;
+      const request = requestByXhr.get(xhr);
+      if (!request || request.localEchoMarked) return false;
+      request.localEchoMarked = true;
+      appendAdmissionStage("prompt-local-echo", request, { target });
+      return true;
     };
     const clearWrittenNavigationIntent = (id = writtenNavigationIntentId) => {
       if (!id) return;
@@ -1320,7 +1347,7 @@
       return rows;
     };
     const api = Object.freeze({
-      start, stop, clear, snapshot, summary, report, markStreamPaint, markNavigationIntent, markSessionSwitch,
+      start, stop, clear, snapshot, summary, report, markStreamPaint, markPromptLocalEcho, markNavigationIntent, markSessionSwitch,
       markSessionSwitchResponse: (sessionSwitchId, target) =>
         markSessionSwitchMilestone(sessionSwitchId, "session-switch-response", target),
       markSessionSwitchReady: (sessionSwitchId, target, serverTimings = null) =>
@@ -1344,6 +1371,301 @@
     return api;
   };
   /* qq-latency-factory:end */
+
+  /* qq-prompt-echo-factory:start */
+  const createQQPromptEchoController = (host, options = {}) => {
+    const document = host.document;
+    const messageIdHeader = "X-QQ-Message-Id";
+    const promptOutcomeHeader = "X-QQ-Prompt-Outcome";
+    const maximumEchoes = Number.isInteger(options.maximumEchoes) && options.maximumEchoes > 0
+      ? options.maximumEchoes
+      : 32;
+    const maximumAuthoritativeIds = 4096;
+    const records = new Set();
+    const recordsByXhr = new WeakMap();
+    const recordsByMessageId = new Map();
+    const authoritativeMessageIds = new Set();
+    let commissionedSessionId = "";
+    let observer = null;
+    let localSequence = 0;
+    let disposed = false;
+
+    const safeMessageId = (value) => typeof value === "string"
+      && value.length <= 128
+      && /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(value)
+      ? value
+      : "";
+    const isObjectKey = (value) => value !== null
+      && (typeof value === "object" || typeof value === "function");
+    const hasClass = (node, name) => {
+      try { return node?.classList?.contains?.(name) === true; } catch { return false; }
+    };
+    const setState = (record, state, statusText, accessibleLabel) => {
+      record.state = state;
+      record.echo.setAttribute("data-prompt-echo-state", state);
+      record.echo.setAttribute("aria-label", accessibleLabel);
+      record.status.textContent = statusText;
+    };
+    const echoContainer = () => document?.querySelector?.("#prompt-echoes") ?? null;
+    const activeContainer = (sessionId = commissionedSessionId) => {
+      const container = echoContainer();
+      return container && String(container.dataset?.sessionId ?? "") === sessionId
+        ? container
+        : null;
+    };
+    const currentSessionId = () => String(options.currentSessionId?.() ?? commissionedSessionId ?? "");
+    const removeRecord = (record) => {
+      if (!record || !records.has(record)) return false;
+      records.delete(record);
+      if (isObjectKey(record.xhr)) recordsByXhr.delete(record.xhr);
+      if (record.messageId) {
+        const matching = recordsByMessageId.get(record.messageId);
+        matching?.delete(record);
+        if (matching?.size === 0) recordsByMessageId.delete(record.messageId);
+      }
+      record.echo?.remove?.();
+      return true;
+    };
+    const clearRecords = () => {
+      for (const record of [...records]) removeRecord(record);
+      recordsByMessageId.clear();
+      echoContainer()?.replaceChildren?.();
+    };
+    const trimRecords = () => {
+      while (records.size > maximumEchoes) removeRecord(records.values().next().value);
+    };
+    const rememberAuthoritativeId = (messageId) => {
+      if (!messageId || authoritativeMessageIds.has(messageId)) return;
+      authoritativeMessageIds.add(messageId);
+      while (authoritativeMessageIds.size > maximumAuthoritativeIds) {
+        authoritativeMessageIds.delete(authoritativeMessageIds.values().next().value);
+      }
+    };
+    const authoritativeMessageId = (node) => {
+      if (!node || hasClass(node, "prompt-local-echo") || !hasClass(node, "message-user")) return "";
+      const transcript = document?.querySelector?.("#transcript");
+      try {
+        if (!transcript || (node !== transcript && transcript.contains?.(node) !== true)) return "";
+      } catch { return ""; }
+      let raw = "";
+      try { raw = node.getAttribute?.("data-message-id") ?? node.dataset?.messageId ?? ""; } catch {}
+      return safeMessageId(raw);
+    };
+    const reconcileNode = (node) => {
+      const messageId = authoritativeMessageId(node);
+      if (!messageId) return false;
+      rememberAuthoritativeId(messageId);
+      const matching = recordsByMessageId.get(messageId);
+      if (!matching?.size) return false;
+      for (const record of [...matching]) removeRecord(record);
+      return true;
+    };
+    const reconcile = (root = document) => {
+      if (!commissionedSessionId || currentSessionId() !== commissionedSessionId) return false;
+      let changed = reconcileNode(root);
+      try {
+        for (const node of root?.querySelectorAll?.(".message-user[data-message-id]") ?? []) {
+          if (reconcileNode(node)) changed = true;
+        }
+      } catch {}
+      return changed;
+    };
+    const onMutations = (mutations) => {
+      if (!commissionedSessionId || currentSessionId() !== commissionedSessionId) return;
+      for (const mutation of mutations ?? []) {
+        if (mutation?.type === "attributes") reconcileNode(mutation.target);
+        if (mutation?.type !== "childList") continue;
+        for (const node of mutation.addedNodes ?? []) reconcile(node);
+      }
+    };
+    const capturedPrompt = (event, input) => {
+      const parameters = event?.detail?.requestConfig?.parameters;
+      try {
+        if (parameters && typeof parameters.get === "function") {
+          const value = parameters.get("prompt");
+          if (typeof value === "string") return value;
+        }
+      } catch {}
+      if (parameters && typeof parameters === "object") {
+        const value = parameters.prompt;
+        if (typeof value === "string") return value;
+        if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+      }
+      return typeof input?.value === "string" ? input.value : "";
+    };
+    const composerInput = (form) => {
+      try {
+        const input = form?.querySelector?.("textarea[name='prompt']");
+        if (input) return input;
+      } catch {}
+      return options.composer?.() ?? null;
+    };
+    const genuineComposerRequest = (event) => {
+      const form = event?.detail?.elt;
+      if (!form || String(form.tagName ?? "").toUpperCase() !== "FORM" || form.id !== "composer") return null;
+      const xhr = event?.detail?.xhr;
+      if (!isObjectKey(xhr)) return null;
+      const sessionId = String(form.dataset?.sessionId ?? "");
+      if (!sessionId || sessionId !== commissionedSessionId || sessionId !== currentSessionId()) return null;
+      const container = activeContainer(sessionId);
+      const input = composerInput(form);
+      if (!container || !input || String(input.tagName ?? "").toUpperCase() !== "TEXTAREA") return null;
+      return { form, xhr, sessionId, container, input };
+    };
+    const createEcho = (prompt, request) => {
+      const echo = document.createElement("article");
+      echo.className = "message message-user prompt-local-echo message-pending-admission";
+      echo.setAttribute("data-prompt-echo-state", "pending");
+      echo.setAttribute("aria-label", "Your message, pending admission");
+
+      const content = document.createElement("p");
+      content.className = "message-text prompt-echo-text";
+      content.textContent = prompt;
+
+      const status = document.createElement("span");
+      status.className = "prompt-echo-status";
+      status.setAttribute("role", "status");
+      status.setAttribute("aria-live", "polite");
+      status.setAttribute("aria-atomic", "true");
+      status.textContent = "Admitting…";
+      echo.append(content, status);
+
+      const record = {
+        sequence: ++localSequence,
+        xhr: request.xhr,
+        sessionId: request.sessionId,
+        prompt,
+        echo,
+        status,
+        messageId: "",
+        state: "pending",
+      };
+      records.add(record);
+      recordsByXhr.set(request.xhr, record);
+      request.container.append(echo);
+      trimRecords();
+      options.markLocalEcho?.(request.xhr, echo);
+      return record;
+    };
+    const beforeRequest = (event) => {
+      if (disposed) return false;
+      const request = genuineComposerRequest(event);
+      if (!request || recordsByXhr.has(request.xhr)) return false;
+      const prompt = capturedPrompt(event, request.input);
+      createEcho(prompt, request);
+      // HTMX has already captured request parameters. Clearing now cannot alter
+      // the admitted bytes and leaves the composer ready for the next draft.
+      request.input.value = "";
+      options.clearComposerDraft?.(request.sessionId);
+      options.fitComposer?.(request.input);
+      request.input.blur?.();
+      options.anchorTranscript?.();
+      return true;
+    };
+    const requestFailed = (event) => {
+      if (event?.detail?.successful === false || event?.detail?.failed === true) return true;
+      try {
+        if (event?.detail?.xhr?.getResponseHeader?.(promptOutcomeHeader) === "failed") return true;
+      } catch {}
+      if (event?.detail?.successful === true) return false;
+      const status = Number(event?.detail?.xhr?.status);
+      return !Number.isInteger(status) || status < 200 || status >= 400;
+    };
+    const acceptedMessageId = (xhr) => {
+      try { return safeMessageId(xhr?.getResponseHeader?.(messageIdHeader)); } catch { return ""; }
+    };
+    const restoreFailedDraft = (record) => {
+      if (record.sessionId !== commissionedSessionId || currentSessionId() !== record.sessionId) return;
+      const input = options.composer?.();
+      if (!input || String(input.tagName ?? "").toUpperCase() !== "TEXTAREA" || input.value) return;
+      input.value = record.prompt;
+      options.persistComposerDraft?.(input, record.sessionId);
+      options.fitComposer?.(input, { shrink: false });
+    };
+    const markAccepted = (record, messageId) => {
+      record.echo.classList?.remove?.("message-pending-admission");
+      record.echo.classList?.add?.("message-accepted-queued");
+      if (messageId) {
+        record.messageId = messageId;
+        record.echo.setAttribute("data-message-id", messageId);
+        const matching = recordsByMessageId.get(messageId) ?? new Set();
+        matching.add(record);
+        recordsByMessageId.set(messageId, matching);
+        setState(record, "accepted", "Accepted · queued", "Your message, accepted and queued");
+        if (authoritativeMessageIds.has(messageId)) removeRecord(record);
+        else reconcile(document);
+        return;
+      }
+      // Legacy acceptance is deliberately not matched by position or content.
+      setState(record, "accepted-legacy", "Accepted · awaiting transcript", "Your message, accepted; awaiting authoritative transcript identity");
+    };
+    const afterRequest = (event) => {
+      if (disposed) return false;
+      const xhr = event?.detail?.xhr;
+      if (!isObjectKey(xhr)) return false;
+      const record = recordsByXhr.get(xhr);
+      if (!record) return false;
+      if (requestFailed(event)) {
+        removeRecord(record);
+        restoreFailedDraft(record);
+        return true;
+      }
+      if (record.sessionId !== commissionedSessionId || currentSessionId() !== record.sessionId) {
+        removeRecord(record);
+        return true;
+      }
+      markAccepted(record, acceptedMessageId(xhr));
+      const input = options.composer?.();
+      if (input && String(input.tagName ?? "").toUpperCase() === "TEXTAREA" && input.value) {
+        options.persistComposerDraft?.(input, record.sessionId);
+      } else {
+        options.clearComposerDraft?.(record.sessionId);
+      }
+      return true;
+    };
+    const reset = () => {
+      clearRecords();
+      authoritativeMessageIds.clear();
+      commissionedSessionId = "";
+    };
+    const commission = (sessionId) => {
+      const next = String(sessionId ?? "");
+      if (!next) {
+        reset();
+        return false;
+      }
+      if (commissionedSessionId !== next) {
+        clearRecords();
+        authoritativeMessageIds.clear();
+      }
+      commissionedSessionId = next;
+      const container = echoContainer();
+      if (!container) return false;
+      if (String(container.dataset?.sessionId ?? "") !== next) container.setAttribute("data-session-id", next);
+      reconcile(document);
+      return true;
+    };
+    const dispose = () => {
+      if (disposed) return;
+      disposed = true;
+      reset();
+      observer?.disconnect?.();
+      host.removeEventListener?.("pagehide", reset, true);
+    };
+
+    if (typeof host.MutationObserver === "function" && document?.documentElement) {
+      observer = new host.MutationObserver(onMutations);
+      observer.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ["data-message-id"],
+      });
+    }
+    host.addEventListener?.("pagehide", reset, true);
+    return Object.freeze({ beforeRequest, afterRequest, commission, reset, reconcile, dispose });
+  };
+  /* qq-prompt-echo-factory:end */
 
   const ownScript = document.currentScript;
   const qqLatency = createQQLatencyStudy(window, { script: ownScript });
@@ -1535,7 +1857,6 @@
   let activeSseSource = null;
   let liveSwitchMeta = null;
   const viewingSessionId = () => overlaySessionId || liveSessionId;
-  let inFlightDraft = "";
   const composerDraftKey = (sessionId = liveSessionId || currentSessionId()) => (sessionId ? `qq:composer:${sessionId}` : "");
   const persistComposerDraft = (input = composer(), sessionId = liveSessionId || currentSessionId()) => {
     const key = composerDraftKey(sessionId);
@@ -1560,6 +1881,16 @@
       if (input.value) fitComposer(input, { shrink: false });
     } catch { /* private mode */ }
   };
+  const promptEchoes = createQQPromptEchoController(window, {
+    currentSessionId: () => liveSessionId,
+    composer,
+    fitComposer,
+    clearComposerDraft,
+    persistComposerDraft,
+    anchorTranscript,
+    markLocalEcho: (xhr, echo) => qqLatency.markPromptLocalEcho?.(xhr, echo),
+  });
+  promptEchoes.commission(liveSessionId);
   const sessionLinks = () => {
     const seen = new Set();
     const links = [];
@@ -2355,6 +2686,8 @@
     if (keepNav) next.classList.add("nav-mode");
     document.title = parsed.title;
     document.documentElement.replaceChild(next, document.body);
+    liveSessionId = currentSessionId();
+    promptEchoes.commission(liveSessionId);
     if (historyMode === "push") {
       if (!history.state?.qqPage) history.replaceState({ qqPage: true }, "", location.href);
       history.pushState({ qqPage: true }, "", url);
@@ -2899,6 +3232,7 @@
       || !state.meta) return false;
     const meta = state.meta;
     liveSessionId = state.id;
+    promptEchoes.commission(liveSessionId);
     liveSwitchMeta = meta;
     bootstrapSwitch = null;
     pendingCanonical = meta.canonical || state.canonical;
@@ -4180,36 +4514,10 @@
   });
 
   document.addEventListener("htmx:beforeRequest", (event) => {
-    const form = event.detail?.elt;
-    if (!(form instanceof HTMLFormElement) || form.id !== "composer") return;
-    const input = composer();
-    // htmx has already captured the request parameters. Empty the admitted
-    // draft now so typing can continue while the short admission is in flight.
-    if (input instanceof HTMLTextAreaElement) {
-      inFlightDraft = input.value;
-      input.value = "";
-      clearComposerDraft();
-      fitComposer(input);
-      input.blur();
-    }
-    anchorTranscript();
+    promptEchoes.beforeRequest(event);
   });
   document.addEventListener("htmx:afterRequest", (event) => {
-    const form = event.detail?.elt;
-    if (!(form instanceof HTMLFormElement) || form.id !== "composer") return;
-    const failed = event.detail?.successful === false || event.detail?.failed === true;
-    const input = composer();
-    if (failed) {
-      if (input instanceof HTMLTextAreaElement && !input.value && inFlightDraft) {
-        input.value = inFlightDraft;
-        persistComposerDraft(input);
-        fitComposer(input, { shrink: false });
-      }
-      return;
-    }
-    inFlightDraft = "";
-    if (input instanceof HTMLTextAreaElement && input.value) persistComposerDraft(input);
-    else clearComposerDraft();
+    promptEchoes.afterRequest(event);
   });
   document.addEventListener("scroll", (event) => {
     if (event.target?.id === "transcript") onTranscriptUserScroll(event.target);
@@ -4282,6 +4590,7 @@
     }
   };
   resetAdoptedSession = () => {
+    promptEchoes.reset();
     liveBuffers.clear();
     if (liveRaf) {
       cancelAnimationFrame(liveRaf);
@@ -4685,6 +4994,7 @@
   for (const eventName of ["htmx:afterSwap", "htmx:afterSettle", "htmx:sseMessage"]) {
     document.addEventListener(eventName, (event) => {
       const id = swapTargetId(event);
+      if (touchesTranscript(id)) promptEchoes.reconcile();
       if (touchesTranscript(id) || id === "session-composer" || id === "composer-turn-controls" || id === "composer") prepareSession();
     });
   }
@@ -4701,6 +5011,7 @@
   window.addEventListener("pageshow", () => {
     adoptFileReturnFromWindowName();
     restoreFileReturnFromHistory();
+    promptEchoes.commission(liveSessionId);
     restorePersistedDraft();
     restoreTranscriptView();
     scheduleSessionConnectors();
@@ -4708,6 +5019,8 @@
 
   const syncInitialChrome = (options = {}) => {
     adoptFileReturnFromWindowName();
+    liveSessionId = currentSessionId();
+    promptEchoes.commission(liveSessionId);
     const keepOpenerFocus = pendingFileReturn();
     if (keepOpenerFocus) {
       const payload = fileReturnState();

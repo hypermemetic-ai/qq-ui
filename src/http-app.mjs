@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { orderedProjectPlaces, projectPlaceIdentity } from "./project-order.mjs";
+import { safeMessageId } from "./message-id.mjs";
 import {
   createLatencyStore,
   MAX_LATENCY_BODY_BYTES,
@@ -898,6 +899,14 @@ function isHtmx(req) {
   return String(req.headers["hx-request"] ?? "").toLowerCase() === "true";
 }
 
+export const PROMPT_MESSAGE_ID_HEADER = "X-QQ-Message-Id";
+export const PROMPT_OUTCOME_HEADER = "X-QQ-Prompt-Outcome";
+
+function acceptedPromptMessageId(result) {
+  if (!result || typeof result !== "object" || result.kind !== "accepted") return "";
+  return safeMessageId(result.messageId);
+}
+
 function isNavigateResult(result) {
   return Boolean(
     result
@@ -1535,9 +1544,23 @@ export function createConsoleHandler(backend, options = {}) {
     }
   }
 
-  async function mutationResponse(req, res, sessionId, notice = "", regions) {
+  async function mutationResponse(
+    req,
+    res,
+    sessionId,
+    notice = "",
+    regions,
+    acceptedMessageId = "",
+    promptOutcome = "",
+  ) {
     const snapshot = await view(sessionId);
     const paths = routes(basePath, snapshot.id, snapshot.project, snapshot.folder);
+    const fixedMessageId = safeMessageId(acceptedMessageId);
+    const fixedOutcome = promptOutcome === "accepted" || promptOutcome === "failed" ? promptOutcome : "";
+    const acceptanceHeader = {
+      ...(fixedMessageId ? { [PROMPT_MESSAGE_ID_HEADER]: fixedMessageId } : {}),
+      ...(fixedOutcome ? { [PROMPT_OUTCOME_HEADER]: fixedOutcome } : {}),
+    };
     if (isHtmx(req)) {
       const { renderMutationOob, PROMPT_MUTATION_REGION_NAMES } = await loadRender();
       const body = renderMutationOob(
@@ -1546,13 +1569,13 @@ export function createConsoleHandler(backend, options = {}) {
         notice,
         regions ?? PROMPT_MUTATION_REGION_NAMES ?? bundledPromptMutationRegionNames,
       );
-      write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, body);
+      write(res, 200, { "Content-Type": "text/html; charset=utf-8", ...acceptanceHeader }, body);
       return;
     }
     write(
       res,
       303,
-      { Location: paths.canonical, "Content-Type": "text/plain; charset=utf-8" },
+      { Location: paths.canonical, "Content-Type": "text/plain; charset=utf-8", ...acceptanceHeader },
       "See other\n",
     );
   }
@@ -2441,7 +2464,15 @@ export function createConsoleHandler(backend, options = {}) {
             navigationResponse(req, res, next);
             return;
           }
-          await mutationResponse(req, res, selected.sessionId, typeof result === "string" ? result : "");
+          await mutationResponse(
+            req,
+            res,
+            selected.sessionId,
+            typeof result === "string" ? result : "",
+            undefined,
+            acceptedPromptMessageId(result),
+            "accepted",
+          );
         } finally {
           findWork.delete(selected.sessionId);
         }
@@ -2463,7 +2494,7 @@ export function createConsoleHandler(backend, options = {}) {
         const unknownSlash = /unknown slash command/.test(message);
         if (!unknownSlash && isHtmx(req) && errorStatus(error) !== 409) {
           try {
-            await mutationResponse(req, res, selected.sessionId, message);
+            await mutationResponse(req, res, selected.sessionId, message, undefined, "", "failed");
             return;
           } catch {
             // Fall through when the DSH session itself cannot be read.
