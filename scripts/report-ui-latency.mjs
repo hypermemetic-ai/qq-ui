@@ -166,8 +166,8 @@ function comparableStageTarget(entry) {
 function compatibleStageTarget(pending, entry) {
   const target = comparableStageTarget(entry);
   // Missing target labels occur in old logs. Ignore HTMX's transient classes,
-  // which can be present at afterSwap, but reject a genuinely different SSE or
-  // OOB target when both stable labels are available.
+  // which can still be present on the closing SSE event, but reject a genuinely
+  // different SSE source when both stable labels are available.
   return pending.correlationTarget === null || target === null || target === pending.correlationTarget;
 }
 
@@ -209,12 +209,13 @@ function sseTimingRows(stages) {
       if (!pending) continue;
       pending.lastSequence = entry.sequence;
       if (entry.kind === "response-after-swap") {
-        // SSE extension swaps have no XHR request identity. Ignore prompt swaps
-        // and OOB/different-target swaps while waiting for compatible evidence.
+        // SSE extension swaps have no XHR request identity. Their afterSwap
+        // target is the replaced response region, while the surrounding SSE
+        // events are recorded on the in-flight request source, so those target
+        // labels are intentionally not compared. Request identity still keeps
+        // an interleaved prompt/XHR swap from becoming SSE evidence.
         const requestFree = entry.requestId === null || entry.requestId === undefined;
-        if (pending.swapMs === null && requestFree && compatibleStageTarget(pending, entry)) {
-          pending.swapMs = at - pending.at;
-        }
+        if (pending.swapMs === null && requestFree) pending.swapMs = at - pending.at;
         continue;
       }
       if (entry.kind !== "sse-message-after" || !compatibleStageTarget(pending, entry)) continue;

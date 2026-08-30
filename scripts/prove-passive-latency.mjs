@@ -524,6 +524,26 @@ assert.deepEqual(replacedSse.sseRows, [{
   swapP95Ms: 4,
 }], "a newer SSE before replaces an older pending record and pairs within the bounded window");
 
+const sourceRegionSse = sseReport("page-source-region-sse", [
+  sseStage(100, 1_000, "sse-message-before", "form#composer.composer", "POST /qq/session/:id/prompt", "request-prompt"),
+  sseStage(101, 1_005, "response-after-swap", "div#transcript-settled.htmx-settling"),
+  sseStage(102, 1_006, "sse-message-after", "form#composer.composer", "POST /qq/session/:id/prompt", "request-prompt"),
+]);
+assert.deepEqual(sourceRegionSse.sseRows, [{
+  target: "form#composer.composer",
+  action: "POST /qq/session/:id/prompt",
+  messages: 1,
+  handlerSamples: 1,
+  handlerP50Ms: 6,
+  handlerP95Ms: 6,
+  swapSamples: 1,
+  swapP50Ms: 5,
+  swapP95Ms: 5,
+}], "an SSE source and its swapped response region may have different target labels");
+assert.equal(sourceRegionSse.sampleCounts.sseHandlers, 1);
+assert.equal(sourceRegionSse.sampleCounts.sseSwaps, 1,
+  "the reporter retains request-free swaps from the recorded source/region event shape");
+
 const groupedSse = sseReport("page-grouped-sse", [
   sseStage(1, 200, "sse-message-before", "div#transcript", "GET /qq/transcript"),
   sseStage(2, 202, "response-after-swap", "form#prompt", "POST /qq/prompt", "request-prompt"),
