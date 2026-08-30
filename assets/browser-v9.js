@@ -1893,7 +1893,6 @@
     if (create instanceof HTMLFormElement) create.hidden = child || projectsScope;
     if (!projectsScope && project) {
       syncLiveTrackerProjectFilter();
-      if (create instanceof HTMLFormElement) create.hidden = child;
     }
     if (oldProject !== project || oldFolder !== folder) {
       closeDrawer({ updateUrl: false, restoreFocus: false });

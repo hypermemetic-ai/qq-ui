@@ -354,6 +354,10 @@ assert.match(filterSyncSource, /liveTrackerProjectFilter === LIVE_TRACKER_OVERVI
 const railSyncSource = browser.match(/const syncRailAfterSwitch = \(meta\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
 assert.match(railSyncSource, /liveTrackerProjectFilter !== LIVE_TRACKER_OVERVIEW[\s\S]*?liveTrackerProjectFilter = projectIdentity\(\{ project, folder \}\)/,
   "selecting a session updates navigation without collapsing an active all-project overview");
+assert.match(railSyncSource, /create\.hidden = child \|\| projectsScope[\s\S]*?syncLiveTrackerProjectFilter\(\)/,
+  "session defaults are applied before the active tracker filter restores overview create state");
+assert.doesNotMatch(railSyncSource, /syncLiveTrackerProjectFilter\(\);[\s\S]*?create\.hidden\s*=/,
+  "a root session switch cannot unhide project-specific creation after overview restoration");
 const pickerSource = browser.match(/const selectOverlaySession = \(link\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
 assert.match(pickerSource, /const tracker = link\.matches\("\.live-tracker-session"\)[\s\S]*?const canonical = tracker[\s\S]*?\? link\.href/,
   "tracker switching keeps its authoritative session-open href rather than constructing a project route");
