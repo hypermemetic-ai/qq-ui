@@ -625,6 +625,8 @@ assert.match(browser, /const filterOnlyProject = link\.matches[\s\S]*?const clos
 assert.match(browser, /id === "session-chrome"[\s\S]*?syncLiveTrackerProjectFilter\(\)/,
   "SSE chrome refreshes preserve the chosen project filter");
 const filterSyncSource = browser.match(/const syncLiveTrackerProjectFilter = \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
+assert.match(filterSyncSource, /liveTrackerProjectFilter === LIVE_TRACKER_OVERVIEW\s*\|\|\s*\(!liveTrackerProjectFilter && tracker\.dataset\.overview === "true"\)/,
+  "server overview markup initializes an empty filter without overriding a remembered project selection");
 assert.match(filterSyncSource, /liveTrackerProjectFilter === LIVE_TRACKER_OVERVIEW[\s\S]*?showLiveTrackerOverview\(\{ remember: false \}\)/,
   "SSE chrome refreshes also preserve the all-project overview");
 const railSyncSource = browser.match(/const syncRailAfterSwitch = \(meta\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";

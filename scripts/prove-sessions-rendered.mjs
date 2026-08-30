@@ -967,6 +967,16 @@ try {
   report.desktopResized = await inspect(desktop.cdp, "desktop-resized", { capture: false });
   assertOverview(report.desktopResized, expectedMany);
   await desktop.cdp.evaluate(`(() => {
+    const serverOverviewChrome = document.querySelector('#session-chrome').cloneNode(true);
+    document.querySelector('.active-project-item[data-project="studio"][data-folder="east"]')?.click();
+    const selectedChrome = document.querySelector('#session-chrome');
+    selectedChrome.replaceWith(serverOverviewChrome);
+    document.dispatchEvent(new CustomEvent('htmx:afterSwap', { detail: { target: serverOverviewChrome } }));
+  })()`);
+  report.desktopSelectedLiveSwap = await inspect(desktop.cdp, "desktop-selected-live-swap", { capture: false });
+  assertSelected(report.desktopSelectedLiveSwap, expectedMany, "studio\neast");
+  await openOverview(desktop.cdp);
+  await desktop.cdp.evaluate(`(() => {
     const oldChrome = document.querySelector('#session-chrome');
     const replacement = oldChrome.cloneNode(true);
     oldChrome.replaceWith(replacement);

@@ -3163,7 +3163,8 @@
     const tracker = document.querySelector(".live-tracker");
     const groups = liveTrackerGroups(tracker);
     if (!(tracker instanceof HTMLElement)) return;
-    if (liveTrackerProjectFilter === LIVE_TRACKER_OVERVIEW || tracker.dataset.overview === "true") {
+    if (liveTrackerProjectFilter === LIVE_TRACKER_OVERVIEW
+      || (!liveTrackerProjectFilter && tracker.dataset.overview === "true")) {
       showLiveTrackerOverview({ remember: false });
       liveTrackerProjectFilter = LIVE_TRACKER_OVERVIEW;
       return;
