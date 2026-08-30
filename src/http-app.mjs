@@ -1132,6 +1132,44 @@ export function createConsoleHandler(backend, options = {}) {
     return locationFor(snapshot);
   }
 
+  function inspectedRootLocation(sessionId) {
+    if (!sessionId || typeof backend.inspectAgent !== "function") return "";
+    try {
+      // qq-core's live-agent lookup is deliberately synchronous. Do not await
+      // an incompatible thenable here: root routing must not acquire an async
+      // persistence lookup through a similarly named fixture method.
+      const row = backend.inspectAgent(sessionId);
+      if (row && typeof row.then === "function") {
+        row.catch?.(() => {});
+        return "";
+      }
+      if (!row || row.live === false || String(row.id ?? "") !== sessionId) return "";
+      // Current qq-core agent rows prove liveness but expose only cwd identity.
+      // The legacy session route canonicalizes project/folder/child identity
+      // through inspect() without loading a transcript. Richer fixtures may
+      // already provide project metadata and can skip that extra redirect.
+      return routes(basePath, row.id, row.project, row.folder).canonical;
+    } catch {
+      return "";
+    }
+  }
+
+  async function rootLiveLocation(remembered) {
+    const inspected = inspectedRootLocation(remembered);
+    if (inspected) return inspected;
+
+    // list() is live-only metadata in qq-core and is the compatibility path for
+    // older fixtures. In particular, never use read() to validate a stale root
+    // cookie: that can scan and project an entire persisted transcript.
+    const listed = typeof backend.list === "function" ? await backend.list() : [];
+    const rows = Array.isArray(listed) ? listed : [];
+    const rememberedRow = remembered
+      ? rows.find((row) => String(row?.id ?? "") === remembered)
+      : undefined;
+    const row = rememberedRow ?? rows.find((candidate) => candidate?.id);
+    return row ? routes(basePath, row.id, row.project, row.folder).canonical : "";
+  }
+
   async function assertChairMutation(sessionId) {
     const snapshot = await backend.read(sessionId);
     if (snapshot?.origin !== "subagent") return snapshot;
@@ -1746,33 +1784,12 @@ export function createConsoleHandler(backend, options = {}) {
       try {
         if (rootPage && isProjectAware(backend)) {
           const remembered = lastSessionCookie(req) || lastViewedSessionId;
-          if (remembered && typeof backend.read === "function") {
-            try {
-              const snapshot = await backend.read(remembered);
-              if (snapshot?.id) {
-                write(
-                  res,
-                  303,
-                  {
-                    Location: `${routes(basePath, snapshot.id, snapshot.project, snapshot.folder).canonical}${url.search}`,
-                    "Content-Type": "text/plain; charset=utf-8",
-                  },
-                  "See other\n",
-                  head,
-                );
-                return;
-              }
-            } catch {
-              /* fall through to the latest live session */
-            }
-          }
-          const rows = typeof backend.list === "function" ? await backend.list() : [];
-          if (rows.length > 0) {
-            const location = `${routes(basePath, rows[0].id, rows[0].project, rows[0].folder).canonical}${url.search}`;
+          const liveRoot = await rootLiveLocation(remembered);
+          if (liveRoot) {
             write(
               res,
               303,
-              { Location: location, "Content-Type": "text/plain; charset=utf-8" },
+              { Location: `${liveRoot}${url.search}`, "Content-Type": "text/plain; charset=utf-8" },
               "See other\n",
               head,
             );
@@ -1798,7 +1815,7 @@ export function createConsoleHandler(backend, options = {}) {
           const location = await liveLocation(selected.sessionId);
           const current = `${basePath}/session/${encodeURIComponent(selected.sessionId)}`;
           if (location !== current) {
-            navigationResponse(req, res, location, head);
+            navigationResponse(req, res, `${location}${url.search}`, head);
             return;
           }
         }
