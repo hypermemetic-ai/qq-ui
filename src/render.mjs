@@ -738,6 +738,7 @@ function renderLiveTrackerRow(row, paths, selectedId) {
   const face = trackerSessionFace(row);
   const secondary = row.alias && row.label !== row.alias ? row.label : "";
   const depthClass = ` live-tracker-depth-${Math.min(row.depth, 8)}`;
+  const childClass = row.depth === 1 ? " live-tracker-child-strip" : "";
   const workflow = row.workflow
     ? `<span class="live-tracker-workflow">${escapeHtml(row.workflow)}</span>`
     : "";
@@ -745,7 +746,7 @@ function renderLiveTrackerRow(row, paths, selectedId) {
   const elapsed = startedAt === null
     ? ""
     : `<time class="live-tracker-elapsed" data-phase-started-at="${startedAt}"></time>`;
-  return `<li class="live-tracker-row${depthClass}"><a class="live-tracker-session${current ? " live-tracker-session-current" : ""}" href="${escapeHtml(sessionSwitchHref(paths, row.sessionId))}" data-session-id="${escapeHtml(row.sessionId)}" data-depth="${row.depth}"${current ? ' aria-current="page"' : ""}>
+  return `<li class="live-tracker-row${depthClass}${childClass}"><a class="live-tracker-session${current ? " live-tracker-session-current" : ""}" href="${escapeHtml(sessionSwitchHref(paths, row.sessionId))}" data-session-id="${escapeHtml(row.sessionId)}" data-depth="${row.depth}"${current ? ' aria-current="page"' : ""}>
       <span class="live-tracker-identity"><span class="live-tracker-face">${escapeHtml(face)}</span>${secondary ? `<span class="live-tracker-label">${escapeHtml(secondary)}</span>` : ""}</span>
       <span class="live-tracker-state"><span class="live-tracker-activity" data-activity="${escapeHtml(row.activity)}">${escapeHtml(row.activity)}</span>${workflow}<span class="live-tracker-phase" data-phase="${escapeHtml(row.phase)}">${escapeHtml(row.phase)}</span>${elapsed}</span>
     </a></li>`;
@@ -774,8 +775,11 @@ function renderLiveTracker(snapshot, paths, create) {
     const rows = project.sessions.length > 0
       ? project.sessions.map((row) => renderLiveTrackerRow(row, paths, selectedId)).join("")
       : '<li class="live-tracker-project-empty">no live sessions</li>';
+    const hierarchyClass = project.sessions.some((row) => row.depth === 1)
+      ? " live-tracker-sessions-hierarchical"
+      : "";
     const current = `${project.name}\n${String(project.folder ?? "")}` === selectedKey;
-    return `<section class="live-tracker-project" data-project="${escapeHtml(project.name)}" data-folder="${escapeHtml(project.folder ?? "")}" data-project-label="${escapeHtml(project.label)}" data-current="${current ? "true" : "false"}" aria-labelledby="live-tracker-project-${index}"${current ? "" : " hidden"}><h2 id="live-tracker-project-${index}" class="live-tracker-project-name">${escapeHtml(project.label)}${folder}</h2><ol class="live-tracker-sessions">${rows}</ol></section>`;
+    return `<section class="live-tracker-project" data-project="${escapeHtml(project.name)}" data-folder="${escapeHtml(project.folder ?? "")}" data-project-label="${escapeHtml(project.label)}" data-current="${current ? "true" : "false"}" aria-labelledby="live-tracker-project-${index}"${current ? "" : " hidden"}><h2 id="live-tracker-project-${index}" class="live-tracker-project-name">${escapeHtml(project.label)}${folder}</h2><ol class="live-tracker-sessions${hierarchyClass}">${rows}</ol></section>`;
   }).join("");
   return `<nav id="live-session-list" class="session-traversal live-tracker" aria-label="${escapeHtml(selectedProject.label)} sessions" aria-keyshortcuts="ArrowLeft ArrowRight" data-filter-project="${escapeHtml(selectedProject.name)}" data-filter-folder="${escapeHtml(selectedProject.folder ?? "")}">${groups}<span class="live-tracker-filter-empty" hidden>no live sessions</span>${create}</nav>`;
 }
@@ -1127,7 +1131,8 @@ export function renderProjectRail(snapshot, paths, inert = false) {
     <section id="inactive-project-tree" class="inactive-project-tree" aria-label="Files" aria-keyshortcuts="F" data-root-url="${escapeHtml(rootUrl)}" hidden>
       <div class="project-tree-columns" role="tree" aria-label="Project files"><span class="project-tree-loading" role="status">···</span></div>
     </section>
-  </aside>`;
+  </aside>
+  <svg id="session-connectors" class="session-connectors" aria-hidden="true" focusable="false" hidden></svg>`;
 }
 
 function renderWorkflowMenu(snapshot, paths) {
