@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { orderedProjectPlaces, projectPlaceIdentity } from "./project-order.mjs";
 import {
   createLatencyStore,
   MAX_LATENCY_BODY_BYTES,
@@ -58,6 +59,7 @@ export function validatedDashboardSnapshot(candidate) {
       || candidate.schema !== DASHBOARD_SCHEMA || !Array.isArray(candidate.projects)) return null;
     const projects = [];
     const projectKeys = new Set();
+    const projectPlaces = new Set();
     const sessionIds = new Set();
     for (const project of candidate.projects) {
       if (!project || typeof project !== "object" || Array.isArray(project)
@@ -67,10 +69,12 @@ export function validatedDashboardSnapshot(candidate) {
       const label = dashboardText(project.label, { display: true });
       const folder = dashboardText(project.folder, { empty: true });
       const folderLabel = dashboardText(project.folderLabel, { empty: true, display: true });
+      const place = projectPlaceIdentity({ name, folder });
       if (key === null || name === null || label === null || folder === null || folderLabel === null
-        || projectKeys.has(key) || (folder && !folderLabel) || (!folder && folderLabel)
-        || project.sessions.length === 0) return null;
+        || projectKeys.has(key) || projectPlaces.has(place)
+        || (folder && !folderLabel) || (!folder && folderLabel)) return null;
       projectKeys.add(key);
+      projectPlaces.add(place);
       const sessions = [];
       const projectSessions = new Map();
       for (const row of project.sessions) {
@@ -101,12 +105,6 @@ export function validatedDashboardSnapshot(candidate) {
           || !DASHBOARD_PHASES.has(phase)
           || !dashboardDuration(phaseStartedAt)
           || ((phase === "none" || phase === "unknown") && phaseStartedAt !== null)) return null;
-        if (depth === 0) {
-          if (parentSessionId !== "") return null;
-        } else {
-          const parent = projectSessions.get(parentSessionId);
-          if (!parent || parent.depth + 1 !== depth) return null;
-        }
         sessionIds.add(sessionId);
         const normalized = Object.freeze({
           sessionId, alias, label: rowLabel, parentSessionId, depth, activity,
@@ -115,12 +113,39 @@ export function validatedDashboardSnapshot(candidate) {
         sessions.push(normalized);
         projectSessions.set(sessionId, normalized);
       }
+
+      // Parent IDs are authoritative. Rebuild a stable pre-order from the
+      // producer's root and sibling order so each family stays contiguous even
+      // when activity polling supplies rows in a flat or interleaved order.
+      const roots = [];
+      const children = new Map();
+      for (const row of sessions) {
+        if (row.depth === 0) {
+          if (row.parentSessionId !== "") return null;
+          roots.push(row);
+          continue;
+        }
+        const parent = projectSessions.get(row.parentSessionId);
+        if (!parent || parent.depth + 1 !== row.depth) return null;
+        if (!children.has(parent.sessionId)) children.set(parent.sessionId, []);
+        children.get(parent.sessionId).push(row);
+      }
+      const orderedSessions = [];
+      const appendFamily = (row) => {
+        orderedSessions.push(row);
+        for (const child of children.get(row.sessionId) ?? []) appendFamily(child);
+      };
+      for (const root of roots) appendFamily(root);
+      if (orderedSessions.length !== sessions.length) return null;
       projects.push(Object.freeze({
         key, name, label, folder, folderLabel,
-        sessions: Object.freeze(sessions),
+        sessions: Object.freeze(orderedSessions),
       }));
     }
-    return Object.freeze({ schema: DASHBOARD_SCHEMA, projects: Object.freeze(projects) });
+    return Object.freeze({
+      schema: DASHBOARD_SCHEMA,
+      projects: Object.freeze(orderedProjectPlaces(projects)),
+    });
   } catch {
     return null;
   }

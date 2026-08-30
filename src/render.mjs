@@ -1,3 +1,4 @@
+import { orderedProjectPlaces, projectPlaceIdentity } from "./project-order.mjs";
 import { escapeHtml, renderHighlightedCode, renderMarkdownText, renderMessageText } from "./markdown.mjs";
 
 export { escapeHtml };
@@ -769,17 +770,18 @@ function renderLiveTracker(snapshot, paths, create) {
   if (!valid) {
     return `<nav id="live-session-list" class="session-traversal live-tracker live-tracker-unavailable" aria-label="Live session tracker" aria-keyshortcuts="ArrowLeft ArrowRight"><span class="live-tracker-message">live tracking unavailable</span>${create}</nav>`;
   }
-  if (dashboard.projects.length === 0) {
+  const projects = orderedProjectPlaces(dashboard.projects);
+  if (projects.length === 0) {
     return `<nav id="live-session-list" class="session-traversal live-tracker live-tracker-empty" aria-label="Live session tracker" aria-keyshortcuts="ArrowLeft ArrowRight"><span class="live-tracker-message">no live sessions</span>${create}</nav>`;
   }
   const selectedId = String(snapshot?.id ?? "");
-  const selectedProject = dashboard.projects.find((project) => (
+  const selectedProject = projects.find((project) => (
     project.sessions.some((row) => row.sessionId === selectedId)
-  )) ?? dashboard.projects.find((project) => (
+  )) ?? projects.find((project) => (
     project.name === snapshot?.project && String(project.folder ?? "") === String(snapshot?.folder ?? "")
-  )) ?? dashboard.projects[0];
+  )) ?? projects[0];
   const selectedKey = `${selectedProject.name}\n${String(selectedProject.folder ?? "")}`;
-  const groups = dashboard.projects.map((project, index) => {
+  const groups = projects.map((project, index) => {
     const folder = project.folder && project.folderLabel
       ? `<span class="live-tracker-folder">${escapeHtml(project.folderLabel)}</span>`
       : "";
@@ -1038,16 +1040,24 @@ function activeProjectList(snapshot) {
     const project = String(entry?.project ?? entry?.name ?? "").trim();
     if (!project) return;
     const folder = String(entry?.folder ?? "").trim();
-    const key = `${project}\n${folder}`;
-    const projectLabel = String(entry?.projectLabel ?? entry?.label ?? project);
-    const folderLabel = String(entry?.folderLabel ?? folder);
-    const sessionId = String(entry?.id ?? "").trim();
+    const key = projectPlaceIdentity({ project, folder });
+    const projectLabel = String(entry?.projectLabel ?? entry?.label ?? project).trim() || project;
+    const folderLabel = String(entry?.folderLabel ?? folder).trim() || folder;
+    const row = seen.has(key) ? projects[seen.get(key)] : null;
+    const sessionId = String(
+      entry?.id
+        ?? (Array.isArray(entry?.sessions)
+          ? entry.sessions.find((session) => session?.depth === 0)?.sessionId ?? entry.sessions[0]?.sessionId
+          : ""),
+    ).trim();
     const recency = Number(entry?.latestEventAt ?? entry?.createdAt ?? 0);
-    if (seen.has(key)) {
-      const existing = projects[seen.get(key)];
-      if (sessionId && recency >= (existing.recency ?? 0)) {
-        existing.sessionId = sessionId;
-        existing.recency = recency;
+    if (row) {
+      if (entry?.projectLabel || entry?.label) row.projectLabel = projectLabel;
+      if (folder && entry?.folderLabel) row.folderLabel = folderLabel;
+      row.label = row.folder ? `${row.projectLabel} / ${row.folderLabel}` : row.projectLabel;
+      if (sessionId && (!row.sessionId || recency >= row.recency)) {
+        row.sessionId = sessionId;
+        row.recency = recency;
       }
       return;
     }
@@ -1057,15 +1067,19 @@ function activeProjectList(snapshot) {
       folder,
       projectLabel,
       folderLabel,
-      label: folder ? folderLabel : projectLabel,
+      label: folder ? `${projectLabel} / ${folderLabel}` : projectLabel,
       sessionId,
       recency,
     });
   };
+  // Dashboard places are the canonical overview set, including deliberate
+  // empty groups. Legacy live sources enrich navigation without controlling
+  // visual order.
+  for (const entry of Array.isArray(snapshot?.dashboard?.projects) ? snapshot.dashboard.projects : []) add(entry);
   for (const entry of Array.isArray(snapshot?.activeProjects) ? snapshot.activeProjects : []) add(entry);
   for (const entry of Array.isArray(snapshot?.sessions) ? snapshot.sessions : []) add(entry);
   if (snapshot?.id && snapshot?.scope !== "projects" && !isChildSession(snapshot)) add(snapshot);
-  return projects;
+  return orderedProjectPlaces(projects);
 }
 
 function livePlaceKey(entry) {
@@ -1108,7 +1122,7 @@ function renderProjectsMenu(snapshot, paths) {
         const sessions = sessionGroups.get(`${entry.project}\n${entry.folder}`) ?? [];
         const sessionId = entry.sessionId || sessions[0]?.id || "";
         const sessionAttr = sessionId ? ` data-session-id="${escapeHtml(sessionId)}"` : "";
-        return `<a class="projects-choice${isCurrent ? " projects-choice-current" : ""}" href="${escapeHtml(href)}" data-project="${escapeHtml(entry.project)}" data-folder="${escapeHtml(entry.folder)}"${sessionAttr}${projectSessionsAttr(sessions)} aria-controls="live-session-list"${isCurrent ? ' aria-current="page"' : ""}>${escapeHtml(entry.label)}</a>`;
+        return `<a class="projects-choice${isCurrent ? " projects-choice-current" : ""}" href="${escapeHtml(href)}" data-project="${escapeHtml(entry.project)}" data-folder="${escapeHtml(entry.folder)}" data-project-label="${escapeHtml(entry.projectLabel)}" data-folder-label="${escapeHtml(entry.folderLabel)}"${sessionAttr}${projectSessionsAttr(sessions)} aria-controls="live-session-list"${isCurrent ? ' aria-current="page"' : ""}>${escapeHtml(entry.label)}</a>`;
       }).join("")
     : `<p class="session-empty">no live projects</p>`;
   return `<details class="projects-menu">
@@ -1132,7 +1146,7 @@ export function renderProjectRail(snapshot, paths, inert = false) {
     const sessions = sessionGroups.get(`${entry.project}\n${entry.folder}`) ?? [];
     const sessionId = entry.sessionId || sessions[0]?.id || "";
     const sessionAttr = sessionId ? ` data-session-id="${escapeHtml(sessionId)}"` : "";
-    return `<li><a class="active-project-item${current ? " active-project-current" : ""}" href="${escapeHtml(href)}" data-project="${escapeHtml(entry.project)}" data-folder="${escapeHtml(entry.folder)}" data-live="true"${sessionAttr}${projectSessionsAttr(sessions)} aria-controls="live-session-list"${current ? ' aria-current="page"' : ""} title="${escapeHtml(entry.label)}"><span class="active-project-mark" aria-hidden="true"></span><span class="active-project-label">${escapeHtml(entry.label)}</span></a></li>`;
+    return `<li><a class="active-project-item${current ? " active-project-current" : ""}" href="${escapeHtml(href)}" data-project="${escapeHtml(entry.project)}" data-folder="${escapeHtml(entry.folder)}" data-project-label="${escapeHtml(entry.projectLabel)}" data-folder-label="${escapeHtml(entry.folderLabel)}" data-live="true"${sessionAttr}${projectSessionsAttr(sessions)} aria-controls="live-session-list"${current ? ' aria-current="page"' : ""} title="${escapeHtml(entry.label)}"><span class="active-project-mark" aria-hidden="true"></span><span class="active-project-label">${escapeHtml(entry.label)}</span></a></li>`;
   }).join("");
   const sessions = sessionNavigation(snapshot, paths);
   const rootUrl = `${paths.canonical}${paths.canonical.includes("?") ? "&" : "?"}drawer=~`;
@@ -1142,8 +1156,7 @@ export function renderProjectRail(snapshot, paths, inert = false) {
     <section id="inactive-project-tree" class="inactive-project-tree" aria-label="Files" aria-keyshortcuts="F" data-root-url="${escapeHtml(rootUrl)}" hidden>
       <div class="project-tree-columns" role="tree" aria-label="Project files"><span class="project-tree-loading" role="status">···</span></div>
     </section>
-  </aside>
-  <svg id="session-connectors" class="session-connectors" aria-hidden="true" focusable="false" hidden></svg>`;
+  </aside>`;
 }
 
 function renderWorkflowMenu(snapshot, paths) {

@@ -946,8 +946,6 @@
   let overlaySessionId = "";
   const LIVE_TRACKER_OVERVIEW = "all-projects";
   let liveTrackerProjectFilter = "";
-  let sessionConnectorFrame = 0;
-  let sessionConnectorObserver = null;
   let liveSessionId = currentSessionId();
   let committedLocation = location.href;
   let pendingCanonical = "";
@@ -1158,35 +1156,14 @@
   const activeProjectItems = () => [...document.querySelectorAll(".active-project-item[data-project][href]")];
   const projectRailItems = () => [...document.querySelectorAll(".active-project-item[href]")];
   const projectIdentity = (entry) => `${String(entry?.project ?? "")}\n${String(entry?.folder ?? "")}`;
-  const projectStorageKey = () => {
-    const consolePath = location.pathname.replace(/\/(?:projects|project|session)(?:\/.*)?$/, "") || "/";
-    return `qq-active-projects:${consolePath}`;
-  };
   const activeProjectEntry = (item) => ({
     project: String(item?.dataset?.project ?? ""),
     folder: String(item?.dataset?.folder ?? ""),
+    projectLabel: String(item?.dataset?.projectLabel || item?.dataset?.project || "").trim(),
+    folderLabel: String(item?.dataset?.folderLabel || item?.dataset?.folder || "").trim(),
     label: String(item?.title || item?.querySelector?.(".active-project-label")?.textContent || item?.dataset?.folder || item?.dataset?.project || "").trim(),
     href: String(item?.href ?? ""),
   });
-  const readRememberedProjects = () => {
-    try {
-      const parsed = JSON.parse(sessionStorage.getItem(projectStorageKey()) || "[]");
-      if (!Array.isArray(parsed)) return [];
-      return parsed.filter((entry) => {
-        if (!entry || typeof entry !== "object" || !entry.project || !entry.label || !entry.href) return false;
-        try { return new URL(entry.href, location.href).origin === location.origin; } catch { return false; }
-      });
-    } catch {
-      return [];
-    }
-  };
-  const rememberActiveProjects = () => {
-    try {
-      sessionStorage.setItem(projectStorageKey(), JSON.stringify(activeProjectItems().map(activeProjectEntry)));
-    } catch {
-      /* the visible rail still works when browser storage is unavailable */
-    }
-  };
   const buildActiveProjectItem = (entry) => {
     const row = document.createElement("li");
     const link = document.createElement("a");
@@ -1194,9 +1171,12 @@
     link.href = entry.href;
     link.dataset.project = entry.project;
     link.dataset.folder = entry.folder || "";
-    const display = entry.folder && String(entry.label || "").includes(" / ")
-      ? entry.folder
-      : (entry.label || entry.folder || entry.project);
+    link.dataset.projectLabel = entry.projectLabel || entry.project || "";
+    link.dataset.folderLabel = entry.folderLabel || entry.folder || "";
+    const projectLabel = entry.projectLabel || entry.project || "project";
+    const folderLabel = entry.folderLabel || entry.folder || "";
+    const display = entry.label
+      || (entry.folder ? `${projectLabel} / ${folderLabel}` : projectLabel);
     link.title = display;
     const mark = document.createElement("span");
     mark.className = "active-project-mark";
@@ -1231,36 +1211,54 @@
     const next = projectSwitchHref(link.dataset.project, link.dataset.folder);
     if (next) link.href = next;
   };
-  const restoreListOrder = (list, items, keyOf) => {
-    const remembered = readRememberedProjects();
-    if (!list || !remembered.length || items.length < 2) return;
+  const compareProjectText = (left, right) => {
+    const primary = left.localeCompare(right, "en", { numeric: true, sensitivity: "base" });
+    return primary || left.localeCompare(right, "en", { numeric: true, sensitivity: "variant" });
+  };
+  const compareProjectEntries = (left, right) => {
+    const leftProject = String(left?.project || "").trim();
+    const rightProject = String(right?.project || "").trim();
+    const byProjectLabel = compareProjectText(
+      String(left?.projectLabel || leftProject).trim(),
+      String(right?.projectLabel || rightProject).trim(),
+    );
+    if (byProjectLabel) return byProjectLabel;
+    const byProject = compareProjectText(leftProject, rightProject);
+    if (byProject) return byProject;
+    const leftFolder = String(left?.folder || "").trim();
+    const rightFolder = String(right?.folder || "").trim();
+    if (!leftFolder && rightFolder) return -1;
+    if (leftFolder && !rightFolder) return 1;
+    const byFolderLabel = compareProjectText(
+      String(left?.folderLabel || leftFolder).trim(),
+      String(right?.folderLabel || rightFolder).trim(),
+    );
+    return byFolderLabel || compareProjectText(leftFolder, rightFolder);
+  };
+  const orderProjectItems = (list, items, entryOf) => {
+    if (!list || items.length < 2) return;
     const movable = new Set(items.map((item) => item.closest("li") ?? item));
     const fixed = [...list.children].filter((item) => !movable.has(item));
-    const rows = new Map(items.map((item) => [keyOf(item), item.closest("li") ?? item]));
-    const next = [];
-    const used = new Set();
-    for (const entry of remembered) {
-      const key = projectIdentity(entry);
-      const row = rows.get(key);
-      if (!row || used.has(key)) continue;
-      next.push(row);
-      used.add(key);
-    }
-    for (const [key, row] of rows) {
-      if (used.has(key) || !row) continue;
-      next.push(row);
-    }
-    if (next.length) list.replaceChildren(...fixed, ...next);
+    const ordered = items
+      .map((item, index) => ({ item, index, entry: entryOf(item) }))
+      .sort((left, right) => compareProjectEntries(left.entry, right.entry) || left.index - right.index)
+      .map(({ item }) => item.closest("li") ?? item);
+    list.replaceChildren(...fixed, ...ordered);
   };
   const restoreActiveProjects = () => {
     const rail = document.querySelector("#project-rail");
     const list = rail?.querySelector(".active-projects ol");
     if (!rail || !list) return;
-    restoreListOrder(list, activeProjectItems(), (item) => projectIdentity(activeProjectEntry(item)));
-    restoreListOrder(
+    orderProjectItems(list, activeProjectItems(), activeProjectEntry);
+    orderProjectItems(
       document.querySelector(".projects-menu-list"),
       [...document.querySelectorAll(".projects-choice[data-project]")],
-      (item) => projectIdentity({ project: item.dataset.project, folder: item.dataset.folder }),
+      (item) => ({
+        project: item.dataset.project,
+        folder: item.dataset.folder,
+        projectLabel: item.dataset.projectLabel,
+        folderLabel: item.dataset.folderLabel,
+      }),
     );
     const currentKey = projectIdentity({ project: rail.dataset.currentProject, folder: rail.dataset.currentFolder });
     const currentIsActive = rail.dataset.currentActive === "true";
@@ -1269,7 +1267,6 @@
     for (const choice of document.querySelectorAll(".projects-choice[data-project]")) {
       retargetProjectLink(choice, currentKey, currentHref);
     }
-    rememberActiveProjects();
   };
   const activeProjectKeys = () => new Set(activeProjectItems().map((item) => projectIdentity(activeProjectEntry(item))));
   const appendActiveProject = (entry) => {
@@ -1277,13 +1274,12 @@
     const list = document.querySelector(".active-projects ol");
     if (!list) return;
     list.append(buildActiveProjectItem(entry));
-    rememberActiveProjects();
+    restoreActiveProjects();
   };
   const removeActiveProject = (entry) => {
     const key = projectIdentity(entry);
     const item = activeProjectItems().find((candidate) => projectIdentity(activeProjectEntry(candidate)) === key);
     item?.closest("li")?.remove();
-    rememberActiveProjects();
   };
   const responseHasSession = (response) => {
     if (response.status === 404) return false;
@@ -1853,109 +1849,6 @@
   const liveTrackerGroups = (tracker = document.querySelector(".live-tracker")) => tracker
     ? [...tracker.querySelectorAll(".live-tracker-project[data-project]")]
     : [];
-  const sessionConnectors = () => document.querySelector("#session-connectors");
-  const hideSessionConnectors = () => {
-    const svg = sessionConnectors();
-    if (!(svg instanceof SVGElement)) return;
-    svg.setAttribute("hidden", "");
-    svg.replaceChildren();
-  };
-  const connectorOverflowClientRect = (element) => {
-    const rect = element.getBoundingClientRect();
-    const left = rect.left + element.clientLeft;
-    const top = rect.top + element.clientTop;
-    return {
-      left,
-      top,
-      right: left + element.clientWidth,
-      bottom: top + element.clientHeight,
-    };
-  };
-  const intersectConnectorRect = (rect, clipRect) => {
-    const left = Math.max(rect.left, clipRect.left, 0);
-    const top = Math.max(rect.top, clipRect.top, 0);
-    const right = Math.min(rect.right, clipRect.right, document.documentElement.clientWidth);
-    const bottom = Math.min(rect.bottom, clipRect.bottom, document.documentElement.clientHeight);
-    if (right <= left || bottom <= top) return null;
-    return { left, top, right, bottom, width: right - left, height: bottom - top };
-  };
-  const connectorCoordinate = (value) => Math.floor(value) + .5;
-  const connectorPathData = (projectRect, groupRect, narrow) => {
-    // Let the route visibly lead out of and back into the related surfaces.
-    // Edge-only endpoints disappear into the PWA pane divider and can look
-    // detached on desktop even when the SVG itself is painting correctly.
-    const projectInset = Math.min(8, projectRect.width / 3);
-    const groupInset = Math.min(8, groupRect.width / 3);
-    const startX = connectorCoordinate(projectRect.right - projectInset);
-    const startY = connectorCoordinate(projectRect.top + projectRect.height / 2);
-    const endX = connectorCoordinate(groupRect.left + groupInset);
-    const endY = connectorCoordinate(groupRect.top + groupRect.height / 2);
-    const laneX = connectorCoordinate((projectRect.right + groupRect.left) / 2);
-    return {
-      d: `M ${startX} ${startY} H ${laneX} V ${endY} H ${endX}`,
-      layout: narrow ? "narrow" : "desktop",
-    };
-  };
-  const connectorProjectItem = (group) => {
-    const key = projectIdentity(group?.dataset);
-    return activeProjectItems().find((item) => projectIdentity(item.dataset) === key) ?? null;
-  };
-  const paintSessionConnectors = () => {
-    sessionConnectorFrame = 0;
-    const svg = sessionConnectors();
-    const tracker = document.querySelector(".live-tracker");
-    if (!(svg instanceof SVGElement) || !(tracker instanceof HTMLElement)) {
-      hideSessionConnectors();
-      return;
-    }
-    const width = document.documentElement.clientWidth;
-    const height = document.documentElement.clientHeight;
-    const paths = document.createDocumentFragment();
-    let count = 0;
-    for (const group of liveTrackerGroups(tracker)) {
-      const projectItem = connectorProjectItem(group);
-      const projectOverflow = projectItem?.closest(".active-projects");
-      if (!(projectItem instanceof HTMLElement) || !(projectOverflow instanceof HTMLElement) || group.hidden) continue;
-      const projectRect = intersectConnectorRect(
-        projectItem.getBoundingClientRect(),
-        connectorOverflowClientRect(projectOverflow),
-      );
-      const groupRect = intersectConnectorRect(
-        group.getBoundingClientRect(),
-        connectorOverflowClientRect(tracker),
-      );
-      if (!projectRect || !groupRect) continue;
-      const geometry = connectorPathData(projectRect, groupRect, !desktopChair());
-      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", geometry.d);
-      path.setAttribute("vector-effect", "non-scaling-stroke");
-      path.dataset.layout = geometry.layout;
-      path.dataset.project = String(group.dataset.project || "");
-      path.dataset.folder = String(group.dataset.folder || "");
-      paths.append(path);
-      count += 1;
-    }
-    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    svg.setAttribute("width", String(width));
-    svg.setAttribute("height", String(height));
-    svg.replaceChildren(paths);
-    if (count === 0) svg.setAttribute("hidden", "");
-    else svg.removeAttribute("hidden");
-  };
-  const scheduleSessionConnectors = () => {
-    if (sessionConnectorFrame) return;
-    sessionConnectorFrame = requestAnimationFrame(paintSessionConnectors);
-  };
-  const observeSessionConnectorGeometry = () => {
-    sessionConnectorObserver?.disconnect();
-    if (typeof ResizeObserver !== "function") return;
-    if (!sessionConnectorObserver) sessionConnectorObserver = new ResizeObserver(scheduleSessionConnectors);
-    const tracker = document.querySelector(".live-tracker");
-    if (!(tracker instanceof HTMLElement)) return;
-    for (const node of [document.querySelector(".active-projects"), tracker, ...activeProjectItems(), ...liveTrackerGroups(tracker)]) {
-      if (node instanceof Element) sessionConnectorObserver.observe(node);
-    }
-  };
   const preserveOverviewCreateState = (tracker) => {
     const create = tracker.querySelector("form.new-session");
     if (!(create instanceof HTMLFormElement)) return;
@@ -1985,8 +1878,6 @@
     markGroupCurrent(".active-project-item[href]", "active-project-current", null);
     markGroupCurrent(".projects-choice[href]", "projects-choice-current", null);
     if (remember) liveTrackerProjectFilter = LIVE_TRACKER_OVERVIEW;
-    observeSessionConnectorGeometry();
-    scheduleSessionConnectors();
     return true;
   };
   const showLiveTrackerProject = (group, { remember = true, item = null } = {}) => {
@@ -2020,8 +1911,6 @@
     if (remember || !liveTrackerProjectFilter) {
       liveTrackerProjectFilter = projectIdentity({ project, folder });
     }
-    observeSessionConnectorGeometry();
-    scheduleSessionConnectors();
     return true;
   };
   const filterLiveTrackerProject = (item) => {
@@ -2322,8 +2211,6 @@
   const paintChairMode = (nav, persist = true) => {
     if (nav) document.body.classList.add("nav-mode");
     else document.body.classList.remove("nav-mode");
-    observeSessionConnectorGeometry();
-    scheduleSessionConnectors();
     if (nav) {
       overlaySessionId = "";
       pendingCanonical = "";
@@ -3527,17 +3414,12 @@
   });
   document.addEventListener("scroll", (event) => {
     if (event.target?.id === "transcript") onTranscriptUserScroll(event.target);
-    scheduleSessionConnectors();
   }, true);
-  window.addEventListener("resize", scheduleSessionConnectors, { passive: true });
-  window.addEventListener("orientationchange", scheduleSessionConnectors, { passive: true });
   const visualViewport = window.visualViewport;
   if (visualViewport && typeof visualViewport.addEventListener === "function") {
     visualViewport.addEventListener("resize", () => {
       if (transcriptView.follow) showLatest();
-      scheduleSessionConnectors();
     });
-    visualViewport.addEventListener("scroll", scheduleSessionConnectors, { passive: true });
   }
   // Jitter buffer for visible text: hold the start of a burst, then leak
   // characters at a steady rate so a 0ms slab does not read as fast→stall→fast.
