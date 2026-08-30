@@ -18,57 +18,130 @@ are enough during development.
 
 qq-ui includes a local browser study for comparing interaction-to-visual-ready
 latency while working on the UI. Collection starts automatically during
-ordinary qq-ui use unless the current tab has explicitly opted out. This is not
-production telemetry: no study data is transmitted or durably stored.
+ordinary qq-ui use unless the current tab has explicitly opted out. This is
+local operational instrumentation, not external telemetry: the browser sends
+bounded deltas only to the qq page's same-origin server, and the server writes
+only a bounded local state log.
 
-### Run, report, export, clear, and stop
+### Passive collection and privacy
 
-1. Open any qq-ui page normally; an enable query parameter is not required.
-   Open browser developer tools and run `qqLatency.clear()` before the prompt,
-   HTMX, SSE, drawer, dialog, input, focus, scroll, navigation, or streaming
-   interaction being studied.
-2. Run `qqLatency.report()` for a per-request console table. Each row contains
-   the retained visual sample count and first, p50, p95, and last latency from
-   the trusted interaction that originated that request. Percentiles use linear
-   interpolation.
-3. Inspect all raw timelines with `qqLatency.snapshot()`. To export a JSON copy
-   from browsers whose developer tools provide `copy`, run:
+Each page gets a random run ID and monotonic sequence numbers for interaction,
+stage, and visual records. New records share a 12-second upload timer rather
+than causing per-frame requests. A matching server acknowledgement advances the
+per-kind cursors. Network failures, 5xx, 408, and 429 retain the byte-identical
+batch for retry. Other deterministic 4xx responses quarantine exactly that
+batch, advance past its entries, and increment visible dropped/quarantined
+counters so later records cannot be pinned. `pagehide` queues a best-effort
+`sendBeacon` (or keepalive fetch). `qqLatency.stop()` stops both measurement and
+new uploads, while `qqLatency.start()` resumes both.
 
-   ```js
-   copy(JSON.stringify(qqLatency.snapshot(), null, 2))
-   ```
+The browser endpoint is passed explicitly as `data-latency-endpoint` and must
+resolve to the current origin. The server endpoint is `POST
+<basePath>/ui-latency` (normally `/qq/ui-latency`). It rejects cross-origin,
+wrong-method, encoded, non-JSON, oversized, and malformed batches. Its request
+body cap is 256 KiB, and every array, string, ID, sequence, and numeric field is
+independently bounded and copied through a fixed schema. Prompt/input values,
+mutation text, query strings, request/response bodies, and cookies are not
+stored. Recognized route and UI labels are retained, with UUID/session-shaped
+route identifiers redacted to `:id` where practical. There is no external
+network telemetry.
 
-   Otherwise evaluate `JSON.stringify(qqLatency.snapshot(), null, 2)` and save
-   the returned string manually. Keep exports local: labels intentionally omit
-   input values and text, but include UI tag/id/class, route action, viewport,
-   and user-agent metadata.
-4. Run `qqLatency.clear()` to discard captured records without disabling
-   collection. Run `qqLatency.stop()` to stop collection, retain the current
-   records for inspection, and persist an opt-out for this tab. Loading a qq-ui
-   URL with `?qq-latency=0` also stops collection and persists the tab opt-out.
-5. Run `qqLatency.start()` or load a URL with `?qq-latency=1` to re-enable
-   collection and persist that preference for the tab. An explicit query value
-   overrides the stored preference, so remove a conflicting query parameter
-   from the URL when relying on `start()` or `stop()` across reloads.
+Browser memory remains bounded to the newest 500 interaction origins, 1,000
+request/stage records, and 2,000 visual records. Upload batches are independently
+bounded to 128 origins, 128 stages, and 12 visuals; each visual accepts the same
+22 recognized collector sources. The constructed maximum legal body remains at
+least 15% below the 256 KiB HTTP cap. `snapshot().dropped` reports overwritten
+browser records; `snapshot().upload` exposes the run ID, pending and advanced
+cursors, scheduling/retry state, attempts, successes, failures, quarantined
+batches, best-effort beacons, unsent drops, and the last upload error/times.
+Rendering, HTMX requests, stream painting, and unload never wait for an upload.
+
+### Durable log, report, rotation, and clear
+
+Accepted sanitized batches are NDJSON at:
+
+```text
+${XDG_STATE_HOME}/qq/ui-latency.ndjson
+```
+
+If `XDG_STATE_HOME` is unset or not absolute, the exact default is
+`~/.local/state/qq/ui-latency.ndjson`. The qq state directory is mode `0700` and
+the files are mode `0600`. The current file and
+`ui-latency.ndjson.1` are retained across browser and server reloads. By
+default each file is at most 8 MiB, so the two-file rolling set is hard-bounded
+to 16 MiB total. Rotation replaces the older `.1`; it does not grow a sequence
+of archives.
+
+From this checkout, report the default log with:
+
+```sh
+npm run latency:report
+```
+
+Pass a configured path after `--`, or request machine-readable output:
+
+```sh
+npm run latency:report -- /path/to/ui-latency.ndjson
+npm run latency:report -- --json /path/to/ui-latency.ndjson
+```
+
+The dependency-free reporter reads `.1` before the current file, deduplicates
+retries by run ID plus entry kind/sequence, and prints aggregate run, batch,
+origin, stage, visual, sample, duplicate, and malformed-line counts. Its rows
+show count and first/p50/p95/last request-origin latency grouped by request
+action and coalesced visual source. Percentiles use linear interpolation.
+
+To clear durable history, preferably stop the qq process first so it cannot
+append concurrently, then run:
+
+```sh
+npm run latency:report -- --clear
+# configured path:
+npm run latency:report -- --clear /path/to/ui-latency.ndjson
+```
+
+This removes both the current and `.1` file; the user-only directory and files
+are recreated on the next accepted batch.
+
+### Inspect, clear, stop, and resume in the browser
 
 `window.qqLatency` provides `start()`, `stop()`, `clear()`, `snapshot()`,
-`summary()`, and `report()`. Only the enable/disable preference is kept in
-`sessionStorage`, so it is scoped to the browser tab. Raw measurements live only
-in JavaScript memory for the life of the page and intentionally reset on every
-full page reload, even though the tab preference survives. Nothing is
-transmitted by the study, and there is no HUD or other self-observing UI.
+`summary()`, and `report()`. `qqLatency.report()` displays the current page's
+per-request table. `qqLatency.snapshot()` returns JSON-safe raw in-memory
+records and upload status. For a local manual copy where browser developer
+tools provide `copy`, run:
 
-In-memory buffers are bounded to the newest 500 interaction origins, 1,000
-request/stage records, and 2,000 visual records; `snapshot().dropped` reports
-overwritten records. A busy page is expected to use only low single-digit MB.
-Creating a snapshot temporarily duplicates this bounded data while the snapshot
-exists.
+```js
+copy(JSON.stringify(qqLatency.snapshot(), null, 2))
+```
 
-When enabled, the instrumentation adds event hooks, one `MutationObserver`, and
-coalesced per-presentation processing. This is limited overhead, but the
-observer effect can modestly perturb the smallest latency measurements. After
-`qqLatency.stop()`, disabled mode has no study observer, animation-frame work,
-or event listeners.
+`qqLatency.clear()` discards current-page records and any unsent deltas but does
+**not** erase already acknowledged durable history; use the clear command above
+for that. `qqLatency.stop()` retains current browser records for inspection,
+cancels passive upload scheduling, and stores a tab-scoped opt-out in
+`sessionStorage`. Loading with `?qq-latency=0` does the same. Run
+`qqLatency.start()` or load with `?qq-latency=1` to re-enable collection and
+upload. An explicit query value overrides the stored preference.
+
+Raw browser measurements reset on full reload, while acknowledged data remains
+in the rolling log. There is no HUD or self-observing UI. Instrumentation adds
+event hooks, one `MutationObserver`, and coalesced per-presentation work; this
+limited observer effect can still perturb the smallest measurements. Stopped
+mode has no study observer, animation-frame work, upload timer, or study event
+listeners.
+
+### Persistence configuration
+
+`createConsoleHandler` options and qq-ui plugin config accept the same keys:
+
+- `latencyPersistence: false` disables the endpoint and passive upload/storage
+  without disabling in-browser measurement. It defaults to `true`.
+- `latencyLogPath` overrides the XDG/default NDJSON path.
+- `latencyLogMaxBytes` sets the hard total byte budget shared equally by the
+  current and `.1` files; it defaults to 16 MiB.
+
+To opt out of measurement as well, use `qqLatency.stop()` or
+`?qq-latency=0` in that tab.
 
 ### What the numbers mean
 

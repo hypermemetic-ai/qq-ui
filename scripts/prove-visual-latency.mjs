@@ -1,6 +1,16 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createConsoleHandler } from "../src/http-app.mjs";
+import {
+  LATENCY_BATCH_LIMITS,
+  LATENCY_VISUAL_SOURCE_LABELS,
+  sanitizeLatencyBatch,
+} from "../src/latency-store.mjs";
 
 const browserSource = readFileSync(new URL("../assets/browser-v9.js", import.meta.url), "utf8");
 const factoryStart = "/* qq-latency-factory:start */";
@@ -84,7 +94,9 @@ class FakeDocument extends FakeEventTarget {
   }
 }
 
-function fixture({ search = "", stored = null, limits } = {}) {
+const deterministicRunUuid = "110ec58a-a0f2-4ac4-8393-c866d813b8d1";
+
+function fixture({ search = "", stored = null, limits, endpoint = "", fetchPlan = [], beaconResult = true } = {}) {
   let now = 0;
   const storage = new Map();
   if (stored !== null) storage.set("qq:latency", stored);
@@ -94,12 +106,20 @@ function fixture({ search = "", stored = null, limits } = {}) {
     removeItem: (key) => storage.delete(key),
   };
   const script = new FakeElement("script");
-  script.dataset = { uiGeneration: "generation-proof", uiRevision: "revision-proof" };
+  script.dataset = {
+    uiGeneration: "generation-proof",
+    uiRevision: "revision-proof",
+    ...(endpoint ? { latencyEndpoint: endpoint } : {}),
+  };
   const document = new FakeDocument(script);
   const viewport = new FakeEventTarget();
   Object.assign(viewport, { width: 700, height: 500, scale: 1 });
   let nextFrame = 1;
   const frames = new Map();
+  let nextTimer = 1;
+  const timers = new Map();
+  const uploads = [];
+  const beacons = [];
   const observers = [];
   class FakeMutationObserver {
     constructor(callback) {
@@ -120,6 +140,7 @@ function fixture({ search = "", stored = null, limits } = {}) {
     location: { href: `https://qq.invalid/session/one${search}`, search },
     sessionStorage,
     performance: { now: () => now, timeOrigin: 1_700_000_000_000 },
+    crypto: { randomUUID: () => deterministicRunUuid },
     MutationObserver: FakeMutationObserver,
     requestAnimationFrame(callback) {
       const id = nextFrame++;
@@ -127,8 +148,48 @@ function fixture({ search = "", stored = null, limits } = {}) {
       return id;
     },
     cancelAnimationFrame(id) { frames.delete(id); },
+    setTimeout(callback, delay) {
+      const id = nextTimer++;
+      timers.set(id, { callback, delay });
+      return id;
+    },
+    clearTimeout(id) { timers.delete(id); },
+    async fetch(url, options) {
+      uploads.push({ url, options });
+      const payload = JSON.parse(options.body);
+      const planned = fetchPlan.shift();
+      if (planned === "network") throw new Error("proof network failure");
+      const plannedStatus = planned === "failure" ? 503 : planned;
+      if (Number.isInteger(plannedStatus)) {
+        return { ok: plannedStatus >= 200 && plannedStatus < 300, status: plannedStatus, json: async () => ({}) };
+      }
+      if (typeof planned === "function") return planned(payload, options);
+      const maximum = (entries) => entries.reduce((value, entry) => Math.max(value, entry.sequence), 0);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          schema: "qq.visual-latency-ack/v1",
+          accepted: true,
+          runId: payload.runId,
+          batchId: payload.batchId,
+          cursors: {
+            origins: maximum(payload.origins),
+            stages: maximum(payload.stages),
+            visuals: maximum(payload.visuals),
+          },
+        }),
+      };
+    },
     visualViewport: viewport,
-    navigator: { userAgent: "qq-proof-browser" },
+    navigator: {
+      userAgent: "qq-proof-browser",
+      sendBeacon(url, body) {
+        beacons.push({ url, body });
+        return beaconResult;
+      },
+    },
+    Blob,
     innerWidth: 800,
     innerHeight: 600,
     devicePixelRatio: 2,
@@ -136,7 +197,10 @@ function fixture({ search = "", stored = null, limits } = {}) {
     URL,
     URLSearchParams,
   });
-  const api = createQQLatencyStudy(host, limits ? { limits } : {});
+  const api = createQQLatencyStudy(host, {
+    ...(limits ? { limits } : {}),
+    uploadDebounceMs: 12_000,
+  });
   return {
     api,
     host,
@@ -152,6 +216,18 @@ function fixture({ search = "", stored = null, limits } = {}) {
       for (const callback of pending) callback(value);
     },
     frameCount: () => frames.size,
+    timerCount: () => timers.size,
+    uploads,
+    beacons,
+    async fireTimer() {
+      const next = timers.entries().next().value;
+      if (!next) return false;
+      const [id, timer] = next;
+      timers.delete(id);
+      timer.callback();
+      for (let index = 0; index < 8; index += 1) await Promise.resolve();
+      return true;
+    },
   };
 }
 
@@ -377,6 +453,236 @@ assert.ok(boundedSnapshot.dropped.stages > 0);
 assert.ok(boundedSnapshot.dropped.visuals > 0);
 assert.equal(boundedSnapshot.dropped.total,
   boundedSnapshot.dropped.origins + boundedSnapshot.dropped.stages + boundedSnapshot.dropped.visuals);
+
+const sourceSessionId = "session-1a111111-1111-4111-8111-111111111111";
+const sourceBackend = {
+  defaultSessionId: sourceSessionId,
+  read: async () => ({
+    id: sourceSessionId,
+    project: "source-proof",
+    events: [],
+    sessions: [{ id: sourceSessionId, project: "source-proof" }],
+    conversation: { nodes: [], pending: [] },
+    children: [],
+    agentStatus: "idle",
+  }),
+  list: async () => [{ id: sourceSessionId, project: "source-proof" }],
+  create: async () => ({ id: sourceSessionId, project: "source-proof", events: [] }),
+  prompt: async () => ({ id: sourceSessionId, project: "source-proof", events: [] }),
+  interrupt: async () => ({ id: sourceSessionId, project: "source-proof", events: [] }),
+  close: async () => ({ id: null }),
+};
+const sourceTemporary = await mkdtemp(join(tmpdir(), "qq-ui-latency-sources-"));
+const sourceLogPath = join(sourceTemporary, "ui-latency.ndjson");
+const sourceServer = createServer(createConsoleHandler(sourceBackend, {
+  basePath: "/source-proof",
+  latencyLogPath: sourceLogPath,
+}));
+await new Promise((resolve, reject) => {
+  sourceServer.once("error", reject);
+  sourceServer.listen(0, "127.0.0.1", resolve);
+});
+try {
+  const sourceEndpoint = `http://127.0.0.1:${sourceServer.address().port}/source-proof/ui-latency`;
+  let browserSanitized = null;
+  const allSources = fixture({
+    endpoint: "/qq/ui-latency",
+    fetchPlan: [async (payload, options) => {
+      browserSanitized = sanitizeLatencyBatch(payload);
+      return fetch(sourceEndpoint, {
+        method: options.method,
+        headers: options.headers,
+        body: options.body,
+      });
+    }],
+  });
+  const sourceTarget = new FakeElement("div", { id: "all-visual-sources" });
+  for (const type of ["beforeinput", "input", "change", "toggle", "focusin", "focusout", "scroll", "selectionchange", "invalid"]) {
+    allSources.document.dispatch(type, { target: sourceTarget });
+  }
+  for (const type of ["resize", "scroll", "orientationchange", "pageshow", "popstate", "hashchange"]) {
+    allSources.host.dispatch(type, { target: sourceTarget });
+  }
+  for (const type of ["resize", "scroll"]) allSources.viewport.dispatch(type, { target: sourceTarget });
+  allSources.observers[0].emit([
+    { type: "childList", target: sourceTarget },
+    { type: "characterData", target: sourceTarget },
+    { type: "attributes", target: sourceTarget },
+    { type: "proof-other", target: sourceTarget },
+  ]);
+  allSources.api.markStreamPaint(sourceTarget);
+  const coalesced = allSources.api.snapshot().visuals;
+  assert.equal(coalesced.length, 1, "all recognized visual signals coalesce into one browser record");
+  assert.deepEqual(coalesced[0].sources, [...LATENCY_VISUAL_SOURCE_LABELS].sort());
+  assert.equal(coalesced[0].sources.length, 22);
+  await allSources.fireTimer();
+  for (let spin = 0; spin < 100 && allSources.api.snapshot().upload.inFlight; spin += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.ok(browserSanitized, "the actual browser batch passes sanitizeLatencyBatch");
+  assert.deepEqual(browserSanitized.visuals[0].sources, [...LATENCY_VISUAL_SOURCE_LABELS].sort());
+  assert.equal(allSources.api.snapshot().upload.successes, 1, "the production HTTP route acknowledges all sources");
+  const [persistedSourceLine] = (await readFile(sourceLogPath, "utf8")).trim().split("\n");
+  const persistedSourceBatch = JSON.parse(persistedSourceLine);
+  assert.deepEqual(persistedSourceBatch.visuals[0].sources, [...LATENCY_VISUAL_SOURCE_LABELS].sort(),
+    "HTTP ingestion persists every recognized source label");
+  allSources.api.stop();
+} finally {
+  await new Promise((resolve) => sourceServer.close(resolve));
+}
+
+const uploading = fixture({ endpoint: "/qq/ui-latency", fetchPlan: ["failure"] });
+const uploadForm = new FakeElement("form", {
+  id: "upload-form",
+  attributes: { action: "/qq/session/session-12345678-1234-4123-8123-123456789abc/prompt", method: "post" },
+});
+const uploadButton = new FakeElement("button", { id: "upload-button", parent: uploadForm });
+uploadButton.form = uploadForm;
+const uploadPrompt = new FakeElement("textarea", { id: "upload-prompt", parent: uploadForm });
+uploadPrompt.form = uploadForm;
+uploadPrompt.value = "WIRE SECRET PROMPT";
+uploading.document.dispatch("pointerdown", { isTrusted: true, button: 0, target: uploadButton });
+uploading.document.dispatch("input", { isTrusted: true, target: uploadPrompt, data: "WIRE SECRET PROMPT" });
+uploading.frame(16);
+let uploadSnapshot = uploading.api.snapshot();
+assert.equal(uploadSnapshot.origins[0].sequence, 1, "origins receive per-page monotonic upload sequences");
+assert.equal(uploadSnapshot.visuals[0].sequence, 1, "visuals receive independent monotonic upload sequences");
+assert.equal(uploadSnapshot.upload.enabled, true);
+assert.equal(uploadSnapshot.upload.runId, `page-${deterministicRunUuid}`,
+  "the deterministic proof exercises the production randomUUID run-id path");
+assert.equal(uploadSnapshot.upload.pending.origins, 1);
+assert.equal(uploading.timerCount(), 1, "new samples share one modest upload debounce");
+await uploading.fireTimer();
+assert.equal(uploading.uploads.length, 1);
+assert.equal(uploading.uploads[0].options.keepalive, false);
+assert.equal(uploading.api.snapshot().upload.failures, 1);
+assert.equal(uploading.api.snapshot().upload.retrying, true, "failed batches retain their identity for retry");
+const failedBody = uploading.uploads[0].options.body;
+assert.equal(JSON.parse(failedBody).batchId, `page-${deterministicRunUuid}-1`);
+assert.doesNotMatch(failedBody, /WIRE SECRET PROMPT/, "wire deltas retain no prompt or input text");
+
+uploading.setNow(20);
+uploading.document.dispatch("pointerdown", { isTrusted: true, button: 0, target: uploadButton });
+uploading.document.dispatch("input", { isTrusted: true, target: uploadPrompt, data: "ANOTHER WIRE SECRET" });
+uploading.frame(32);
+await uploading.fireTimer();
+assert.equal(uploading.uploads.length, 2);
+assert.equal(uploading.uploads[1].options.body, failedBody, "retry is byte-for-byte the same batch and identity");
+uploadSnapshot = uploading.api.snapshot();
+assert.deepEqual(uploadSnapshot.upload.acknowledged, { origins: 1, stages: 0, visuals: 1 });
+assert.deepEqual(uploadSnapshot.upload.pending, { origins: 1, stages: 0, visuals: 1 },
+  "acknowledging the retried batch leaves newer records pending");
+await uploading.fireTimer();
+const delta = JSON.parse(uploading.uploads[2].options.body);
+assert.deepEqual(delta.origins.map((entry) => entry.sequence), [2], "post-ack upload includes only the origin delta");
+assert.deepEqual(delta.visuals.map((entry) => entry.sequence), [2], "post-ack upload includes only the visual delta");
+assert.notEqual(delta.batchId, JSON.parse(failedBody).batchId);
+assert.deepEqual(uploading.api.snapshot().upload.pending, { origins: 0, stages: 0, visuals: 0 });
+assert.equal(uploading.api.snapshot().upload.successes, 2);
+
+uploading.api.clear();
+uploading.document.dispatch("pointerdown", { isTrusted: true, button: 0, target: uploadButton });
+assert.equal(uploading.api.snapshot().origins[0].sequence, 3, "clear does not reuse a page sequence");
+assert.equal(uploading.timerCount(), 1);
+uploading.api.stop();
+assert.equal(uploading.timerCount(), 0, "stop cancels passive upload scheduling");
+const stoppedUploadCount = uploading.uploads.length;
+uploading.host.dispatch("pagehide");
+assert.equal(uploading.beacons.length, 0, "stopped mode does not flush on pagehide");
+assert.equal(uploading.uploads.length, stoppedUploadCount);
+uploading.api.start();
+assert.equal(uploading.timerCount(), 1, "collection restart resumes upload of retained deltas");
+uploading.api.stop();
+
+const quarantined = fixture({ endpoint: "/qq/ui-latency", fetchPlan: [413] });
+const rejectedFirst = new FakeElement("button", { id: "rejected-first" });
+quarantined.document.dispatch("pointerdown", { isTrusted: true, button: 0, target: rejectedFirst });
+await quarantined.fireTimer();
+let quarantineSnapshot = quarantined.api.snapshot().upload;
+assert.equal(quarantineSnapshot.retrying, false, "413 is quarantined instead of pinning retryBatch");
+assert.equal(quarantineSnapshot.quarantinedBatches, 1);
+assert.equal(quarantineSnapshot.failures, 1);
+assert.deepEqual(quarantineSnapshot.acknowledged, { origins: 1, stages: 0, visuals: 0 });
+assert.deepEqual(quarantineSnapshot.dropped, { origins: 1, stages: 0, visuals: 0, total: 1 });
+assert.deepEqual(quarantineSnapshot.pending, { origins: 0, stages: 0, visuals: 0 });
+quarantined.setNow(1000);
+const acceptedSecond = new FakeElement("button", { id: "accepted-second" });
+quarantined.document.dispatch("pointerdown", { isTrusted: true, button: 0, target: acceptedSecond });
+await quarantined.fireTimer();
+assert.deepEqual(JSON.parse(quarantined.uploads[1].options.body).origins.map((entry) => entry.sequence), [2],
+  "the batch after a quarantined 413 starts strictly after the rejected cursor");
+quarantineSnapshot = quarantined.api.snapshot().upload;
+assert.equal(quarantineSnapshot.successes, 1);
+assert.deepEqual(quarantineSnapshot.acknowledged, { origins: 2, stages: 0, visuals: 0 });
+assert.deepEqual(quarantineSnapshot.dropped, { origins: 1, stages: 0, visuals: 0, total: 1 },
+  "accepting a later batch does not over-count the rejected batch");
+quarantined.api.stop();
+
+for (const status of [400, 422]) {
+  const rejected = fixture({ endpoint: "/qq/ui-latency", fetchPlan: [status] });
+  rejected.document.dispatch("pointerdown", {
+    isTrusted: true,
+    button: 0,
+    target: new FakeElement("button", { id: `rejected-${status}` }),
+  });
+  await rejected.fireTimer();
+  const state = rejected.api.snapshot().upload;
+  assert.equal(state.quarantinedBatches, 1, `${status} is deterministically quarantined`);
+  assert.equal(state.retrying, false);
+  assert.equal(state.dropped.origins, 1);
+  rejected.api.stop();
+}
+
+for (const transient of ["network", 408, 429, 503]) {
+  const retrying = fixture({ endpoint: "/qq/ui-latency", fetchPlan: [transient] });
+  retrying.document.dispatch("pointerdown", {
+    isTrusted: true,
+    button: 0,
+    target: new FakeElement("button", { id: `retry-${transient}` }),
+  });
+  await retrying.fireTimer();
+  const retryBody = retrying.uploads[0].options.body;
+  let state = retrying.api.snapshot().upload;
+  assert.equal(state.retrying, true, `${transient} remains retryable`);
+  assert.equal(state.quarantinedBatches, 0);
+  assert.equal(state.dropped.total, 0);
+  await retrying.fireTimer();
+  assert.equal(retrying.uploads[1].options.body, retryBody, `${transient} retries byte-identically`);
+  state = retrying.api.snapshot().upload;
+  assert.equal(state.retrying, false);
+  assert.equal(state.successes, 1);
+  retrying.api.stop();
+}
+
+const splitVisuals = fixture({ endpoint: "/qq/ui-latency" });
+for (let index = 0; index < 20; index += 1) {
+  splitVisuals.setNow(index + 1);
+  splitVisuals.api.markStreamPaint(new FakeElement("div", { id: `visual-${index}` }));
+}
+assert.equal(splitVisuals.api.snapshot().visuals.length, 20, "upload bounds do not lower in-memory retention");
+await splitVisuals.fireTimer();
+assert.equal(JSON.parse(splitVisuals.uploads[0].options.body).visuals.length, LATENCY_BATCH_LIMITS.visuals);
+assert.equal(splitVisuals.api.snapshot().upload.pending.visuals, 20 - LATENCY_BATCH_LIMITS.visuals);
+await splitVisuals.fireTimer();
+assert.equal(JSON.parse(splitVisuals.uploads[1].options.body).visuals.length, 20 - LATENCY_BATCH_LIMITS.visuals);
+assert.equal(splitVisuals.api.snapshot().upload.pending.visuals, 0);
+splitVisuals.api.stop();
+
+const unloading = fixture({ endpoint: "/qq/ui-latency" });
+const unloadButton = new FakeElement("button", { id: "unload" });
+unloading.document.dispatch("pointerdown", { isTrusted: true, button: 0, target: unloadButton });
+assert.equal(unloading.timerCount(), 1);
+unloading.host.dispatch("pagehide");
+assert.equal(unloading.beacons.length, 1, "pagehide queues one best-effort beacon");
+assert.equal(unloading.beacons[0].url, "/qq/ui-latency");
+assert.equal(unloading.beacons[0].body.type, "application/json");
+assert.equal(unloading.api.snapshot().upload.beaconsQueued, 1);
+assert.equal(JSON.parse(await unloading.beacons[0].body.text()).origins[0].sequence, 1);
+unloading.api.stop();
+
+const externalEndpoint = fixture({ endpoint: "https://telemetry.invalid/collect" });
+assert.equal(externalEndpoint.api.snapshot().upload.enabled, false, "a non-same-origin data endpoint is ignored");
+externalEndpoint.api.stop();
 
 const listenerCount = study.document.listenerCount() + study.host.listenerCount() + study.viewport.listenerCount();
 assert.ok(listenerCount > 0);
