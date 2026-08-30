@@ -31,6 +31,9 @@ export function apply(ctx, config) {
     basePath,
     ssePollMs: config?.ssePollMs,
     liveAssets: config?.liveAssets === true,
+    latencyPersistence: config?.latencyPersistence !== false,
+    latencyLogPath: config?.latencyLogPath,
+    latencyLogMaxBytes: config?.latencyLogMaxBytes,
     approvalFor: (sessionId) => answerer.pendingFor(sessionId),
     dashboardFor: () => dashboardOf()?.snapshot?.(),
     decideApproval: (sessionId, form) => answerer.decide(

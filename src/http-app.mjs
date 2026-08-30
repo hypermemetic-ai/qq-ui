@@ -2,6 +2,11 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  createLatencyStore,
+  MAX_LATENCY_BODY_BYTES,
+  sanitizeLatencyBatch,
+} from "./latency-store.mjs";
+import {
   codeDispatchNodes as bundledCodeDispatchNodes,
   renderDocumentViewerProofPage as bundledRenderDocumentViewerProofPage,
   renderFilePage as bundledRenderFilePage,
@@ -447,6 +452,53 @@ function json(res, status, value, head = false) {
   write(res, status, { "Content-Type": "application/json; charset=utf-8" }, `${JSON.stringify(value)}\n`, head);
 }
 
+async function readJsonBody(req, maximum = MAX_LATENCY_BODY_BYTES) {
+  const contentType = String(req.headers["content-type"] ?? "").split(";", 1)[0].trim().toLowerCase();
+  if (contentType !== "application/json") {
+    const error = new Error("Expected an application/json latency batch");
+    error.status = 415;
+    throw error;
+  }
+  const encoding = String(req.headers["content-encoding"] ?? "identity").trim().toLowerCase();
+  if (encoding && encoding !== "identity") {
+    const error = new Error("Encoded latency batches are not accepted");
+    error.status = 415;
+    throw error;
+  }
+  const declared = String(req.headers["content-length"] ?? "");
+  if (declared) {
+    const bytes = Number(declared);
+    if (!Number.isSafeInteger(bytes) || bytes < 0) {
+      const error = new Error("Invalid Content-Length");
+      error.status = 400;
+      throw error;
+    }
+    if (bytes > maximum) {
+      const error = new Error("Latency batch is too large");
+      error.status = 413;
+      throw error;
+    }
+  }
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of req) {
+    bytes += chunk.length;
+    if (bytes > maximum) {
+      const error = new Error("Latency batch is too large");
+      error.status = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    const error = new Error("Malformed latency JSON");
+    error.status = 400;
+    throw error;
+  }
+}
+
 async function readForm(req) {
   const contentType = String(req.headers["content-type"] ?? "").split(";", 1)[0];
   if (contentType !== "application/x-www-form-urlencoded") {
@@ -745,6 +797,11 @@ export function createConsoleHandler(backend, options = {}) {
   const basePath = normalizeBasePath(options.basePath);
   const ssePollMs = positiveInteger(options.ssePollMs, DEFAULT_SSE_POLL_MS, "ssePollMs");
   const liveAssets = options.liveAssets === true;
+  const latencyPersistence = options.latencyPersistence !== false;
+  const latencyPath = `${basePath}/ui-latency`;
+  const latencyStore = latencyPersistence
+    ? createLatencyStore({ path: options.latencyLogPath, maxBytes: options.latencyLogMaxBytes })
+    : null;
   const assetsPrefix = `${basePath}/assets/`;
   const sessionsPath = `${basePath}/sessions`;
   const switchSessionPath = `${sessionsPath}/open`;
@@ -757,6 +814,7 @@ export function createConsoleHandler(backend, options = {}) {
     icon512: `${assetsPrefix}icon-v2-512.png`,
     manifest: `${assetsPrefix}manifest-v3.webmanifest`,
     serviceWorker: `${basePath}/sw.js`,
+    latencyEndpoint: latencyPersistence ? latencyPath : "",
   });
   const pageAssetPaths = () => Object.freeze({
     ...assetPaths,
@@ -1227,6 +1285,41 @@ export function createConsoleHandler(backend, options = {}) {
       url = new URL(req.url ?? basePath, "http://qq-ui.invalid");
     } catch {
       text(res, 400, "Malformed request URL", head);
+      return;
+    }
+
+    if (url.pathname === latencyPath) {
+      if (!latencyPersistence) {
+        text(res, 404, "Passive latency persistence is disabled", head);
+        return;
+      }
+      if (req.method !== "POST") {
+        write(res, 405, { Allow: "POST", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
+        return;
+      }
+      if (!sameOrigin(req)) {
+        text(res, 403, "Cross-origin latency ingestion refused");
+        return;
+      }
+      try {
+        const batch = sanitizeLatencyBatch(await readJsonBody(req));
+        const stored = await latencyStore.append(batch);
+        const maximum = (entries) => entries.reduce((result, entry) => Math.max(result, entry.sequence), 0);
+        json(res, 200, {
+          schema: "qq.visual-latency-ack/v1",
+          accepted: true,
+          duplicate: stored.duplicate,
+          runId: batch.runId,
+          batchId: batch.batchId,
+          cursors: {
+            origins: maximum(batch.origins),
+            stages: maximum(batch.stages),
+            visuals: maximum(batch.visuals),
+          },
+        });
+      } catch (error) {
+        text(res, errorStatus(error), errorMessage(error));
+      }
       return;
     }
 

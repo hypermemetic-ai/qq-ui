@@ -26,6 +26,38 @@
     const safeToken = (value, maximum = 48) => String(value ?? "")
       .replace(/[^a-zA-Z0-9_:.@/-]+/g, "_")
       .slice(0, maximum);
+    const script = options.script ?? document?.currentScript
+      ?? document?.querySelector?.("script[data-latency-endpoint]");
+    const normalizeEndpoint = (value) => {
+      if (!value) return "";
+      try {
+        const URLConstructor = host.URL ?? URL;
+        const base = new URLConstructor(host.location?.href ?? "http://qq.invalid/");
+        const parsed = new URLConstructor(String(value), base);
+        return parsed.origin === base.origin ? `${parsed.pathname}${parsed.search}` : "";
+      } catch { return ""; }
+    };
+    const uploadEndpoint = normalizeEndpoint(options.endpoint ?? script?.dataset?.latencyEndpoint ?? "");
+    const uploadDebounceMs = Number.isInteger(options.uploadDebounceMs) && options.uploadDebounceMs >= 0
+      ? options.uploadDebounceMs
+      : 12_000;
+    // Mirrors LATENCY_BATCH_LIMITS/MAX_LATENCY_VISUAL_SOURCES in latency-store.mjs.
+    // The in-memory visual limit remains independently bounded at 2,000 above.
+    const batchLimits = Object.freeze({ origins: 128, stages: 128, visuals: 12 });
+    const maximumVisualSources = 22;
+    const makeRunId = () => {
+      try {
+        const uuid = host.crypto?.randomUUID?.();
+        if (uuid) return `page-${safeToken(uuid, 96)}`;
+      } catch {}
+      try {
+        const values = new Uint32Array(4);
+        host.crypto?.getRandomValues?.(values);
+        if (values.some((value) => value !== 0)) return `page-${[...values].map((value) => value.toString(16)).join("-")}`;
+      } catch {}
+      return `page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+    };
+    const runId = safeToken(options.runId ?? makeRunId(), 128) || makeRunId();
     const elementFor = (node) => {
       if (node?.nodeType === 3) return node.parentElement ?? null;
       return node?.nodeType === 1 || typeof node?.tagName === "string" ? node : null;
@@ -104,6 +136,24 @@
     let stages = [];
     let visuals = [];
     let dropped = { origins: 0, stages: 0, visuals: 0 };
+    const entrySequences = { origins: 0, stages: 0, visuals: 0 };
+    const acknowledged = { origins: 0, stages: 0, visuals: 0 };
+    const uploadDropped = { origins: 0, stages: 0, visuals: 0 };
+    const uploadCounters = {
+      attempts: 0,
+      successes: 0,
+      failures: 0,
+      quarantinedBatches: 0,
+      unloadAttempts: 0,
+      beaconsQueued: 0,
+    };
+    let uploadTimer = 0;
+    let uploadInFlight = false;
+    let retryBatch = null;
+    let batchSequence = 0;
+    let lastUploadAttemptAt = null;
+    let lastUploadSuccessAt = null;
+    let lastUploadError = null;
     let originSequence = 0;
     let requestSequence = 0;
     let latestInteraction = null;
@@ -121,11 +171,15 @@
 
     const appendBounded = (kind, entry) => {
       const list = kind === "origins" ? origins : kind === "stages" ? stages : visuals;
+      entry.sequence = ++entrySequences[kind];
       if (list.length >= limits[kind]) {
-        list.shift();
+        const evicted = list.shift();
         dropped[kind] += 1;
+        const retainedForRetry = retryBatch?.payload?.[kind]?.some((candidate) => candidate.sequence === evicted.sequence);
+        if (evicted.sequence > acknowledged[kind] && !retainedForRetry) uploadDropped[kind] += 1;
       }
       list.push(entry);
+      scheduleUpload();
       return entry;
     };
     const addTarget = (target) => {
@@ -138,7 +192,9 @@
     };
     const addSignal = (source, target, mutationCount = 0) => {
       ensurePending();
-      pendingVisual.sources.add(source);
+      if (pendingVisual.sources.has(source) || pendingVisual.sources.size < maximumVisualSources) {
+        pendingVisual.sources.add(source);
+      }
       pendingVisual.mutationCount += mutationCount;
       addTarget(target);
     };
@@ -342,6 +398,7 @@
       for (const type of ["resize", "scroll"]) {
         listen(host.visualViewport, type, (event) => signalVisual(`visualViewport:${type}`, event.target), { passive: true });
       }
+      listen(host, "pagehide", flushUploadOnHide, true);
       listen(document, "htmx:beforeRequest", onBeforeRequest, true);
       listen(document, "htmx:beforeSend", onBeforeSend, true);
       for (const [eventName, kind] of [
@@ -376,6 +433,7 @@
       }
       setStored("1");
       install();
+      scheduleUpload();
       return api;
     };
     const stop = () => {
@@ -389,17 +447,24 @@
         pendingVisual = null;
         lastExplicitKey = null;
         lastExplicitSample = null;
+        if (uploadTimer) host.clearTimeout?.(uploadTimer);
+        uploadTimer = 0;
       }
       setStored("0");
       return api;
     };
     const clear = () => {
+      for (const [kind, list] of [["origins", origins], ["stages", stages], ["visuals", visuals]]) {
+        uploadDropped[kind] += list.filter((entry) => entry.sequence > acknowledged[kind]).length;
+        acknowledged[kind] = entrySequences[kind];
+      }
+      retryBatch = null;
+      if (uploadTimer) host.clearTimeout?.(uploadTimer);
+      uploadTimer = 0;
       origins = [];
       stages = [];
       visuals = [];
       dropped = { origins: 0, stages: 0, visuals: 0 };
-      originSequence = 0;
-      requestSequence = 0;
       latestInteraction = null;
       recentGesture = null;
       activeRequest = null;
@@ -417,8 +482,6 @@
       return api;
     };
     const uiMetadata = () => {
-      const script = options.script ?? document?.currentScript
-        ?? document?.querySelector?.("script[data-ui-generation], script[data-ui-revision]");
       const marker = document?.querySelector?.("#ui-generation");
       return {
         generation: safeToken(script?.dataset?.uiGeneration ?? "", 120) || null,
@@ -438,12 +501,188 @@
         } : null,
       };
     };
+    const pendingUploadCounts = () => ({
+      origins: origins.filter((entry) => entry.sequence > acknowledged.origins).length,
+      stages: stages.filter((entry) => entry.sequence > acknowledged.stages).length,
+      visuals: visuals.filter((entry) => entry.sequence > acknowledged.visuals).length,
+    });
+    const hasPendingUploads = () => {
+      const pending = pendingUploadCounts();
+      return pending.origins + pending.stages + pending.visuals > 0;
+    };
+    const pageMetadata = () => ({
+      timeOrigin,
+      startedAt: startedAt === null ? null : round(startedAt),
+      startedAtISO,
+      ui: uiMetadata(),
+      viewport: viewportMetadata(),
+      userAgent: String(host.navigator?.userAgent ?? "").slice(0, 512),
+    });
+    const createUploadBatch = () => {
+      const payload = {
+        schema: "qq.visual-latency-batch/v1",
+        runId,
+        batchId: `${runId}-${++batchSequence}`,
+        page: pageMetadata(),
+        origins: origins.filter((entry) => entry.sequence > acknowledged.origins).slice(0, batchLimits.origins),
+        stages: stages.filter((entry) => entry.sequence > acknowledged.stages).slice(0, batchLimits.stages),
+        visuals: visuals.filter((entry) => entry.sequence > acknowledged.visuals).slice(0, batchLimits.visuals),
+      };
+      if (payload.origins.length + payload.stages.length + payload.visuals.length === 0) return null;
+      const frozenPayload = JSON.parse(JSON.stringify(payload));
+      return {
+        payload: frozenPayload,
+        body: JSON.stringify(frozenPayload),
+        maxima: {
+          origins: frozenPayload.origins.reduce((value, entry) => Math.max(value, entry.sequence), 0),
+          stages: frozenPayload.stages.reduce((value, entry) => Math.max(value, entry.sequence), 0),
+          visuals: frozenPayload.visuals.reduce((value, entry) => Math.max(value, entry.sequence), 0),
+        },
+      };
+    };
+    const acceptAcknowledgement = (body, batch) => {
+      if (body?.schema !== "qq.visual-latency-ack/v1" || body.accepted !== true
+        || body.runId !== runId || body.batchId !== batch.payload.batchId) {
+        throw new Error("invalid latency acknowledgement");
+      }
+      for (const kind of ["origins", "stages", "visuals"]) {
+        const cursor = Number(body.cursors?.[kind]);
+        if (!Number.isSafeInteger(cursor) || cursor < 0 || cursor > batch.maxima[kind]) {
+          throw new Error("invalid latency acknowledgement cursor");
+        }
+        acknowledged[kind] = Math.max(acknowledged[kind], cursor);
+      }
+      uploadCounters.successes += 1;
+      lastUploadSuccessAt = round(now());
+      lastUploadError = null;
+      if (retryBatch?.payload.batchId === batch.payload.batchId) retryBatch = null;
+      if (!hasPendingUploads() && uploadTimer) {
+        host.clearTimeout?.(uploadTimer);
+        uploadTimer = 0;
+      }
+    };
+    const recordUploadFailure = (error) => {
+      uploadCounters.failures += 1;
+      lastUploadError = String(error?.message ?? error ?? "upload failed").slice(0, 160);
+    };
+    const nonRetryableClientStatus = (status) => Number.isInteger(status)
+      && status >= 400 && status < 500 && status !== 408 && status !== 429;
+    const quarantineRejectedBatch = (batch, status) => {
+      recordUploadFailure(new Error(`latency endpoint rejected batch with ${status}`));
+      for (const kind of ["origins", "stages", "visuals"]) {
+        uploadDropped[kind] += batch.payload[kind]
+          .filter((entry) => entry.sequence > acknowledged[kind] && entry.sequence <= batch.maxima[kind]).length;
+        acknowledged[kind] = Math.max(acknowledged[kind], batch.maxima[kind]);
+      }
+      uploadCounters.quarantinedBatches += 1;
+      if (retryBatch?.payload.batchId === batch.payload.batchId) retryBatch = null;
+    };
+    const handleUploadResponse = async (response, batch) => {
+      if (!response?.ok) {
+        const status = Number(response?.status);
+        if (nonRetryableClientStatus(status)) {
+          quarantineRejectedBatch(batch, status);
+          return false;
+        }
+        throw new Error(`latency endpoint returned ${response?.status ?? "no response"}`);
+      }
+      acceptAcknowledgement(await response.json(), batch);
+      return true;
+    };
+    const attemptUpload = async ({ keepalive = false } = {}) => {
+      if (!active || !uploadEndpoint || uploadInFlight || typeof host.fetch !== "function") return false;
+      if (uploadTimer) host.clearTimeout?.(uploadTimer);
+      uploadTimer = 0;
+      const batch = retryBatch ?? createUploadBatch();
+      if (!batch) return false;
+      retryBatch = batch;
+      uploadInFlight = true;
+      uploadCounters.attempts += 1;
+      if (keepalive) uploadCounters.unloadAttempts += 1;
+      lastUploadAttemptAt = round(now());
+      try {
+        const response = await host.fetch(uploadEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: batch.body,
+          credentials: "omit",
+          keepalive,
+        });
+        return await handleUploadResponse(response, batch);
+      } catch (error) {
+        recordUploadFailure(error);
+        return false;
+      } finally {
+        uploadInFlight = false;
+        if (active && hasPendingUploads()) scheduleUpload();
+      }
+    };
+    const scheduleUpload = () => {
+      if (!active || !uploadEndpoint || uploadTimer || typeof host.setTimeout !== "function" || !hasPendingUploads()) return;
+      uploadTimer = host.setTimeout(() => {
+        uploadTimer = 0;
+        void attemptUpload();
+      }, uploadDebounceMs);
+    };
+    const flushUploadOnHide = () => {
+      if (!active || !uploadEndpoint) return;
+      if (uploadTimer) host.clearTimeout?.(uploadTimer);
+      uploadTimer = 0;
+      const batch = retryBatch ?? createUploadBatch();
+      if (!batch) return;
+      retryBatch = batch;
+      const sendBeacon = host.navigator?.sendBeacon;
+      const BlobConstructor = host.Blob ?? (typeof Blob === "function" ? Blob : null);
+      if (typeof sendBeacon === "function" && BlobConstructor) {
+        uploadCounters.attempts += 1;
+        uploadCounters.unloadAttempts += 1;
+        lastUploadAttemptAt = round(now());
+        try {
+          if (sendBeacon.call(host.navigator, uploadEndpoint, new BlobConstructor([batch.body], { type: "application/json" }))) {
+            uploadCounters.beaconsQueued += 1;
+            scheduleUpload();
+            return;
+          }
+        } catch {}
+      }
+      if (!uploadInFlight) {
+        void attemptUpload({ keepalive: true });
+        return;
+      }
+      uploadCounters.attempts += 1;
+      uploadCounters.unloadAttempts += 1;
+      lastUploadAttemptAt = round(now());
+      host.fetch?.(uploadEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: batch.body,
+        credentials: "omit",
+        keepalive: true,
+      }).then((response) => handleUploadResponse(response, batch)).catch(recordUploadFailure);
+    };
+
     const snapshot = () => {
       const result = {
         schema: "qq.visual-latency/v1",
         measurement: "visual-ready/presentation-opportunity",
         precision: "normally plus or minus one frame; not exact compositor pixel timing",
         active,
+        upload: {
+          enabled: Boolean(uploadEndpoint),
+          endpoint: uploadEndpoint || null,
+          runId,
+          debounceMs: uploadDebounceMs,
+          scheduled: Boolean(uploadTimer),
+          inFlight: uploadInFlight,
+          retrying: Boolean(retryBatch),
+          acknowledged: { ...acknowledged },
+          pending: pendingUploadCounts(),
+          dropped: { ...uploadDropped, total: uploadDropped.origins + uploadDropped.stages + uploadDropped.visuals },
+          ...uploadCounters,
+          lastAttemptAt: lastUploadAttemptAt,
+          lastSuccessAt: lastUploadSuccessAt,
+          lastError: lastUploadError,
+        },
         startedAt: startedAt === null ? null : round(startedAt),
         startedAtISO,
         capturedAt: round(now()),
