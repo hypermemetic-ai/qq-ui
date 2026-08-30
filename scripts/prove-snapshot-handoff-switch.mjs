@@ -316,10 +316,10 @@ async function instrumentedHttpApp() {
       return bundledRenderSessionRegion(...args);
     },
 `);
-  const watchNeedle = "      }, { initialSnapshot: snapshot });\n";
+  const watchNeedle = "      }, { initialSnapshot: snapshot, deferSheets: bootstrapSession });\n";
   assert.ok(source.includes(watchNeedle), "proof seam finds the watch baseline");
   source = source.replace(watchNeedle,
-    "      }, { initialSnapshot: (globalThis.__qqProofWatchInitialSnapshot = snapshot) });\n");
+    "      }, { initialSnapshot: (globalThis.__qqProofWatchInitialSnapshot = snapshot), deferSheets: bootstrapSession });\n");
   const temporaryUrl = new URL(`../src/.prove-http-c1-${process.pid}.mjs`, import.meta.url);
   await writeFile(temporaryUrl, source);
   try {
@@ -466,7 +466,7 @@ async function proveSwitchOrder() {
     "the critical ready frame is the flush boundary");
   const secondFlush = protocol.findIndex((entry, index) => index > firstFlush && entry.type === "flush");
   assert.deepEqual(protocol.slice(firstFlush + 1, secondFlush).map((entry) => entry.event), [
-    "usage", "children", "case", "ui",
+    "usage", "children", "case", "composer-case", "ui",
   ], "every secondary region follows ready in exact order");
   const laterEvents = protocol.slice(secondFlush + 1).filter((entry) => entry.type === "event").map((entry) => entry.event);
   assert.ok(laterEvents.some((event) => event === "live-append" || event === "live"),

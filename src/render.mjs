@@ -1239,7 +1239,7 @@ function composer(paths, snapshot) {
           </svg>
         </button>
         ${regionShell("composer-turn-controls", "composer-turn-controls", "composer", composerControls(running, findWork), true)}
-        ${composerCaseButton(snapshot)}
+        ${regionShell("composer-case-region", "composer-turn-controls", "composer-case", composerCaseButton(snapshot), true)}
         <button id="composer-submit" type="submit" aria-label="Send"><svg class="composer-enter" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19 6v5H7.83l2.58-2.59L9 7 4 12l5 5 1.41-1.41L7.83 13H21V6h-2z"/></svg></button>
       </div>
       <span id="working" class="htmx-indicator" aria-live="polite">Admitting message…</span>
@@ -1274,7 +1274,7 @@ export function renderSessionChildren(snapshot, paths) {
   return rows ? `<nav class="session-child-list" aria-label="Child sessions"><ol>${rows}</ol></nav>` : "";
 }
 
-export const SSE_REGION_NAMES = Object.freeze(["chrome", "usage", "transcript", "live", "queue", "children", "composer", "popups", "case"]);
+export const SSE_REGION_NAMES = Object.freeze(["chrome", "usage", "transcript", "live", "queue", "children", "composer", "popups", "case", "composer-case"]);
 export const LIVE_SSE_EVENTS = Object.freeze(["live"]);
 export const MUTATION_REGION_NAMES = Object.freeze(["chrome", "children", "queue", "composer", "popups"]);
 /** Prompt/interrupt: SSE owns the queue. POST OOB of pending races claim and sticks a duplicate. */
@@ -1289,6 +1289,7 @@ export const SSE_REGION_IDS = Object.freeze({
   composer: "composer-turn-controls",
   popups: "session-popups",
   case: "session-case",
+  "composer-case": "composer-case-region",
 });
 
 function transcriptNodeIsOpen(node) {
@@ -2108,6 +2109,8 @@ export function renderSessionRegion(name, snapshot, paths, notice = "") {
       return renderPopups(snapshot, paths, notice);
     case "case":
       return renderCaseRegion(snapshot);
+    case "composer-case":
+      return composerCaseButton(snapshot);
     default:
       return "";
   }
@@ -2202,12 +2205,16 @@ export function regionFingerprints(snapshot) {
       snapshot?.origin,
       status.key === "running",
       sessionFindWork(snapshot),
-      Boolean(snapshot?.caseFile),
     ]),
     case: JSON.stringify([
       snapshot?.id,
       snapshot?.caseFile?.title ?? "",
       snapshot?.caseFile?.text ?? "",
+    ]),
+    "composer-case": JSON.stringify([
+      snapshot?.id,
+      snapshot?.origin,
+      Boolean(snapshot?.caseFile),
     ]),
     popups: JSON.stringify([
       offer?.id ?? "",
