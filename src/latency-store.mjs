@@ -14,9 +14,10 @@ export const LATENCY_BATCH_SCHEMA = "qq.visual-latency-batch/v1";
 export const LATENCY_LOG_SCHEMA = "qq.ui-latency-log/v1";
 export const MAX_LATENCY_BODY_BYTES = 256 * 1024;
 export const DEFAULT_LATENCY_LOG_MAX_BYTES = 16 * 1024 * 1024;
-// These are protocol limits, not the larger in-memory collector limits. Twelve
-// worst-case visuals keep a fully legal batch at least 15% below the HTTP cap.
-export const LATENCY_BATCH_LIMITS = Object.freeze({ origins: 128, stages: 128, visuals: 12 });
+// Per-array protocol candidate limits. The aggregate HTTP body cap remains the
+// final bound; the browser byte-packs prefixes of these candidates below its
+// lower wire budget rather than assuming every worst-case combination fits.
+export const LATENCY_BATCH_LIMITS = Object.freeze({ origins: 128, stages: 128, visuals: 128 });
 export const LATENCY_VISUAL_SOURCE_LABELS = Object.freeze([
   "stream-paint", "beforeinput", "input", "change", "toggle", "focusin", "focusout", "scroll",
   "selectionchange", "invalid", "mutation:childList", "mutation:characterData", "mutation:attributes",
@@ -231,6 +232,43 @@ function sanitizePage(candidate) {
   };
 }
 
+
+function healthCounters(candidate, label) {
+  const value = plainObject(candidate, label, new Set(["origins", "stages", "visuals"]));
+  return {
+    origins: number(value.origins, `${label}.origins`, { integer: true, minimum: 0, maximum: MAX_SEQUENCE }),
+    stages: number(value.stages, `${label}.stages`, { integer: true, minimum: 0, maximum: MAX_SEQUENCE }),
+    visuals: number(value.visuals, `${label}.visuals`, { integer: true, minimum: 0, maximum: MAX_SEQUENCE }),
+  };
+}
+
+function sanitizeHealth(candidate) {
+  const value = plainObject(candidate, "health", new Set([
+    "generated", "acknowledged", "ringBufferDrops", "uploadDrops", "quarantineCount",
+  ]));
+  const generated = healthCounters(value.generated, "health.generated");
+  const acknowledged = healthCounters(value.acknowledged, "health.acknowledged");
+  const ringBufferDrops = healthCounters(value.ringBufferDrops, "health.ringBufferDrops");
+  const uploadDrops = healthCounters(value.uploadDrops, "health.uploadDrops");
+  const quarantineCount = number(value.quarantineCount, "health.quarantineCount", {
+    integer: true,
+    minimum: 0,
+    maximum: MAX_SEQUENCE,
+  });
+  for (const kind of ["origins", "stages", "visuals"]) {
+    if (acknowledged[kind] > generated[kind]) {
+      throw schemaError(`health.acknowledged.${kind} exceeds generated sequences`);
+    }
+    if (ringBufferDrops[kind] > generated[kind]) {
+      throw schemaError(`health.ringBufferDrops.${kind} exceeds generated sequences`);
+    }
+    if (uploadDrops[kind] > generated[kind]) {
+      throw schemaError(`health.uploadDrops.${kind} exceeds generated sequences`);
+    }
+  }
+  return { generated, acknowledged, ringBufferDrops, uploadDrops, quarantineCount };
+}
+
 function sanitizeEntries(value, kind, sanitizer) {
   if (!Array.isArray(value) || value.length > LATENCY_BATCH_LIMITS[kind]) {
     throw schemaError(`${kind} exceeds its batch limit`);
@@ -247,18 +285,30 @@ function sanitizeEntries(value, kind, sanitizer) {
 /** Validate and copy only fields that are safe to persist. */
 export function sanitizeLatencyBatch(candidate) {
   const value = plainObject(candidate, "batch", new Set([
-    "schema", "runId", "batchId", "page", "origins", "stages", "visuals",
+    "schema", "runId", "batchId", "page", "health", "origins", "stages", "visuals",
   ]));
   if (value.schema !== LATENCY_BATCH_SCHEMA) throw schemaError("schema is unsupported");
   const origins = sanitizeEntries(value.origins, "origins", sanitizeOrigin);
   const stages = sanitizeEntries(value.stages, "stages", sanitizeStage);
   const visuals = sanitizeEntries(value.visuals, "visuals", sanitizeVisual);
   if (origins.length + stages.length + visuals.length === 0) throw schemaError("batch has no entries");
+  // Optional for same-version collectors that were loaded before health was
+  // added. Newly emitted browser batches always include the strict object.
+  const health = value.health === undefined ? null : sanitizeHealth(value.health);
+  if (health) {
+    for (const [kind, entries] of [["origins", origins], ["stages", stages], ["visuals", visuals]]) {
+      const maximum = entries.reduce((result, entry) => Math.max(result, entry.sequence), 0);
+      if (maximum > health.generated[kind]) {
+        throw schemaError(`health.generated.${kind} is behind an emitted sequence`);
+      }
+    }
+  }
   return {
     schema: LATENCY_LOG_SCHEMA,
     runId: opaqueId(value.runId, "runId", 128),
     batchId: opaqueId(value.batchId, "batchId", 160),
     page: sanitizePage(value.page),
+    health,
     origins,
     stages,
     visuals,

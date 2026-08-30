@@ -1389,19 +1389,33 @@ export function createConsoleHandler(backend, options = {}) {
       }
       try {
         const batch = sanitizeLatencyBatch(await readJsonBody(req));
-        const stored = await latencyStore.append(batch);
         const maximum = (entries) => entries.reduce((result, entry) => Math.max(result, entry.sequence), 0);
+        const cursors = {
+          origins: maximum(batch.origins),
+          stages: maximum(batch.stages),
+          visuals: maximum(batch.visuals),
+        };
+        // Browser metadata is frozen before this request is acknowledged. The
+        // persisted log can safely record the final accepted cursors so the
+        // latest health line is not one successful batch behind.
+        const storedBatch = batch.health ? {
+          ...batch,
+          health: {
+            ...batch.health,
+            acknowledged: Object.fromEntries(["origins", "stages", "visuals"].map((kind) => [
+              kind,
+              Math.max(batch.health.acknowledged[kind], cursors[kind]),
+            ])),
+          },
+        } : batch;
+        const stored = await latencyStore.append(storedBatch);
         json(res, 200, {
           schema: "qq.visual-latency-ack/v1",
           accepted: true,
           duplicate: stored.duplicate,
           runId: batch.runId,
           batchId: batch.batchId,
-          cursors: {
-            origins: maximum(batch.origins),
-            stages: maximum(batch.stages),
-            visuals: maximum(batch.visuals),
-          },
+          cursors,
         });
       } catch (error) {
         text(res, errorStatus(error), errorMessage(error));
