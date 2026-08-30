@@ -17,8 +17,13 @@ assert.ok(start >= 0 && end > start, "browser asset exposes the prompt-echo cont
 const factoryBody = browserSource.slice(start + factoryStart.length, end);
 assert.doesNotMatch(factoryBody, /innerHTML/, "the prompt-echo implementation never uses innerHTML");
 assert.match(factoryBody, /parameters\.get\("prompt"\)/, "the echo reads HTMX's already-captured parameters");
-assert.match(factoryBody, /parameters\.set\("clientMessageId", clientMessageId\)/,
-  "beforeRequest adds correlation to HTMX's already-captured parameters");
+assert.match(factoryBody, /const configRequest = [\s\S]*writeClientMessageId\(request\.requestConfig\.parameters, clientMessageId\)/,
+  "configRequest adds correlation before HTMX captures transport FormData");
+assert.match(factoryBody, /configuredClientMessageIds\.get\(request\.requestConfig\)/,
+  "beforeRequest reads the identity configured for that exact request object");
+assert.match(browserSource,
+  /addEventListener\("htmx:configRequest"[\s\S]{0,160}promptEchoes\.configRequest[\s\S]{0,160}addEventListener\("htmx:beforeRequest"/,
+  "production registers correlation configuration before provisional creation");
 assert.match(factoryBody, /host\.crypto\?\.randomUUID/, "correlation identity is born from browser cryptographic randomness");
 assert.match(factoryBody, /new WeakMap\(\)/, "concrete XHR identity owns each prompt echo");
 assert.match(browserSource, /admissionCandidates\.findIndex\(\(candidate\) => candidate\.messageId === messageId\)/,
@@ -44,7 +49,7 @@ const cssRule = (selector) => {
 const statusCss = cssRule(".prompt-echo-status");
 assert.match(statusCss, /position:\s*absolute/, "the accessible status is out of flow");
 assert.match(statusCss, /clip(?:-path)?:/, "the status is visually hidden without consuming a row");
-for (const state of ["pending", "accepted", "accepted-legacy"]) {
+for (const state of ["pending", "accepted"]) {
   const rule = cssRule(`.queue-item[data-prompt-echo-state="${state}"]`);
   assert.ok(rule, `${state} has a non-geometric state decoration`);
   assert.doesNotMatch(rule,
@@ -276,15 +281,27 @@ function browserFixture({ maximumEchoes = 32 } = {}) {
   const submit = (prompt, xhr = new FakeXhr(), { textareaValue = prompt } = {}) => {
     input.value = textareaValue;
     const parameters = new Map([["prompt", prompt]]);
+    const requestConfig = { elt: form, parameters };
+    const configEvent = { detail: requestConfig };
+    assert.equal(controller.configRequest(configEvent), true);
+    // This is HTMX 2.0's copy point: anything first written in beforeRequest
+    // cannot enter this already-captured transport body.
+    const transportParameters = new Map(parameters);
     const event = {
       detail: {
         elt: form,
         xhr,
-        requestConfig: { parameters },
+        requestConfig,
       },
     };
     assert.equal(controller.beforeRequest(event), true);
-    return { xhr, event, clientMessageId: parameters.get("clientMessageId") };
+    return {
+      xhr,
+      event,
+      configEvent,
+      clientMessageId: parameters.get("clientMessageId"),
+      wireClientMessageId: transportParameters.get("clientMessageId"),
+    };
   };
   const complete = ({ xhr, event }, successful = true) => controller.afterRequest({
     ...event,
@@ -336,8 +353,10 @@ const first = browser.submit(dangerous, new FakeXhr("message-safe_1:part.2"), {
   textareaValue: "stale textarea value must not be echoed",
 });
 assert.match(first.clientMessageId, /^00000000-0000-4000-8000-\d{12}$/);
-assert.equal(first.event.detail.requestConfig.parameters.get("clientMessageId"), first.clientMessageId,
-  "the request and provisional share identity from birth");
+assert.equal(first.configEvent.detail.parameters.get("clientMessageId"), first.clientMessageId,
+  "configRequest and the provisional share identity from birth");
+assert.equal(first.wireClientMessageId, first.clientMessageId,
+  "the exact UUID is present at HTMX's pre-beforeRequest transport copy point");
 assert.equal(browser.echoes.children.length, 1);
 let echo = browser.echoes.children[0];
 const [mark, content, control, status] = echo.children;
@@ -554,19 +573,18 @@ assert.equal(cleanupBrowser.echoes.replaceChildrenCalls, 0);
 for (const fixture of [browser, queueFirst, liveInsert, resetInsert, unmatched, ordered, oldCore, cleanupBrowser]) {
   fixture.controller.dispose();
 }
-const legacy = browserFixture({ maximumEchoes: 2 });
-for (const text of ["legacy one", "legacy two", "legacy three"]) {
-  const request = legacy.submit(text, new FakeXhr());
-  legacy.complete(request);
-}
-assert.equal(legacy.echoes.children.length, 2, "missing durable/projection identity remains explicitly bounded");
-assert.ok(legacy.echoes.children.every((node) => node.getAttribute("data-prompt-echo-state") === "accepted-legacy"));
-assert.ok(legacy.echoes.children.every((node) => node.children[3].textContent === "Message accepted; awaiting authoritative identity"));
-const unrelatedLegacyNode = legacy.authoritative("some-external-id");
-legacy.liveNodes.append(unrelatedLegacyNode);
-legacy.controller.reconcile(unrelatedLegacyNode);
-assert.equal(legacy.echoes.children.length, 2, "legacy provisionals never use unsafe FIFO reconciliation");
-legacy.controller.dispose();
+const nonAdmitting = browserFixture();
+const noIdSuccess = nonAdmitting.submit("/find resolved without admission", new FakeXhr("", 200, "accepted"));
+assert.equal(nonAdmitting.echoes.children.length, 1);
+nonAdmitting.complete(noIdSuccess);
+assert.equal(nonAdmitting.echoes.children.length, 0,
+  "a successful prompt route with no authoritative message ID removes its provisional");
+const unrelatedNoIdNode = nonAdmitting.authoritative("some-external-id");
+nonAdmitting.liveNodes.append(unrelatedNoIdNode);
+nonAdmitting.controller.reconcile(unrelatedNoIdNode);
+assert.equal(nonAdmitting.echoes.children.length, 0,
+  "no-ID completion leaves no accepted ghost and never consumes unrelated authority");
+nonAdmitting.controller.dispose();
 assert.equal(innerHtmlWrites, 0);
 
 const sessionId = "session-1a111111-1111-4111-8111-111111111111";

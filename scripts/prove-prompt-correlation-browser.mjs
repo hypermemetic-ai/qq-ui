@@ -116,83 +116,159 @@ const form = document.querySelector("#composer");
 const queue = document.querySelector("#session-queue");
 const echoes = document.querySelector("#prompt-echoes");
 const durableMessageId = "durable-message-1";
+const eventLog = [];
+const direct = { clientMessageId: "", beforeClientMessageId: "", frames: [] };
+const noId = { clientMessageId: "", beforeClientMessageId: "" };
+let phase = "direct";
+let sampling = false;
+let finished = false;
+let resolveResult;
+window.qqPromptCorrelationFixtureReady = false;
+window.qqPromptCorrelationResult = new Promise((resolve) => { resolveResult = resolve; });
+const finish = (value) => {
+  if (finished) return;
+  finished = true;
+  clearTimeout(fixtureTimeout);
+  resolveResult(value);
+};
+const fixtureTimeout = setTimeout(() => finish({
+  timeout: true,
+  eventLog,
+  phase,
+  readyState: document.readyState,
+  hasHtmx: typeof window.htmx === "object",
+  fixtureReady: window.qqPromptCorrelationFixtureReady,
+  direct,
+  noId,
+}), 10_000);
+window.addEventListener("error", (event) => eventLog.push("error:" + String(event.message || event.error)));
+window.addEventListener("unhandledrejection", (event) => eventLog.push("rejection:" + String(event.reason)));
+
 const controller = createQQPromptEchoController(window, {
   currentSessionId: () => "session-a",
   composer: () => input,
 });
 controller.commission("session-a");
-let startedAt = 0;
-let queueAt = 0;
-let clientMessageId = "";
-const frames = [];
-let sampling = false;
-const count = () => ({
-  at: performance.now() - startedAt,
-  echoes: echoes.querySelectorAll("[data-prompt-echo-state]").length,
-  authority: queue.querySelectorAll(".queue-item").length,
+const totalEchoes = () => echoes.querySelectorAll("[data-prompt-echo-state]").length;
+const countIdentity = (clientMessageId) => ({
+  at: performance.now() - direct.startedAt,
+  echoes: [...echoes.querySelectorAll("[data-prompt-echo-state]")]
+    .filter((node) => node.getAttribute("data-client-message-id") === clientMessageId).length,
+  authority: [...queue.querySelectorAll(".queue-item")]
+    .filter((node) => node.getAttribute("data-client-message-id") === clientMessageId).length,
 });
 const sampleFrame = () => {
   if (!sampling) return;
-  frames.push(count());
+  direct.frames.push(countIdentity(direct.clientMessageId));
   requestAnimationFrame(sampleFrame);
 };
-let resolveResult;
-const eventLog = [];
-window.qqPromptCorrelationResult = new Promise((resolve) => { resolveResult = resolve; });
-setTimeout(() => resolveResult({
-  timeout: true,
-  eventLog,
-  href: location.href,
-  readyState: document.readyState,
-  hasHtmx: typeof window.htmx === "object",
-  echoes: echoes.children.length,
-}), 5_000);
-document.addEventListener("htmx:beforeRequest", (event) => {
-  eventLog.push("beforeRequest");
-  controller.beforeRequest(event);
+
+document.addEventListener("htmx:configRequest", (event) => {
   if (event.detail?.elt !== form) return;
-  startedAt = performance.now();
-  clientMessageId = event.detail.requestConfig.parameters.get("clientMessageId");
-  sampling = true;
-  requestAnimationFrame(sampleFrame);
-  setTimeout(() => {
-    const row = document.createElement("li");
-    row.className = "queue-item message-queued";
-    row.setAttribute("data-message-id", durableMessageId);
-    row.setAttribute("data-client-message-id", clientMessageId);
-    row.textContent = "identical prompt text";
-    queue.append(row);
-    queueAt = performance.now();
-    queueMicrotask(() => { window.qqAfterQueueMicrotask = count(); });
-  }, 100);
+  eventLog.push("configRequest:" + phase);
+  if (!controller.configRequest(event)) {
+    finish({ controllerConfigFailed: true, eventLog, phase });
+    return;
+  }
+  const current = phase === "direct" ? direct : noId;
+  current.clientMessageId = event.detail.parameters.get("clientMessageId");
 });
-document.addEventListener("htmx:afterRequest", (event) => {
-  eventLog.push("afterRequest");
-  controller.afterRequest(event);
+document.addEventListener("htmx:beforeRequest", (event) => {
   if (event.detail?.elt !== form) return;
-  const completedAt = performance.now();
-  requestAnimationFrame(async () => {
+  eventLog.push("beforeRequest:" + phase);
+  controller.beforeRequest(event);
+  const current = phase === "direct" ? direct : noId;
+  current.beforeClientMessageId = event.detail.requestConfig.parameters.get("clientMessageId");
+  current.echoesBeforeCompletion = totalEchoes();
+  if (phase === "direct") {
+    direct.startedAt = performance.now();
+    sampling = true;
+    requestAnimationFrame(sampleFrame);
+  }
+});
+
+const authoritySource = new EventSource("/events");
+authoritySource.addEventListener("queue", (event) => {
+  eventLog.push("queueSse");
+  const authority = JSON.parse(event.data);
+  const row = document.createElement("li");
+  row.className = "queue-item message-queued";
+  row.setAttribute("data-message-id", authority.messageId);
+  row.setAttribute("data-client-message-id", authority.clientMessageId);
+  row.textContent = authority.text;
+  queue.append(row);
+  direct.queueAt = performance.now();
+  queueMicrotask(() => { direct.afterQueueMicrotask = countIdentity(direct.clientMessageId); });
+});
+
+document.addEventListener("htmx:afterRequest", (event) => {
+  if (event.detail?.elt !== form) return;
+  eventLog.push("afterRequest:" + phase);
+  controller.afterRequest(event);
+  if (phase === "direct") {
     sampling = false;
-    const wireBody = await (await fetch("/wire")).text();
-    resolveResult({
-      clientMessageId,
-      wireClientMessageId: new URLSearchParams(wireBody).get("clientMessageId"),
-      responseLagMs: completedAt - queueAt,
-      afterQueueMicrotask: window.qqAfterQueueMicrotask,
-      duplicateFrames: frames.filter((frame) => frame.echoes > 0 && frame.authority > 0),
-      final: count(),
+    direct.completedAt = performance.now();
+    direct.responseLagMs = direct.completedAt - direct.queueAt;
+    direct.final = countIdentity(direct.clientMessageId);
+    phase = "no-id";
+    requestAnimationFrame(() => {
+      input.value = "/find resolved without admission";
+      form.requestSubmit();
     });
+    return;
+  }
+  noId.echoesAfterCompletion = totalEchoes();
+  noId.authority = [...queue.querySelectorAll("[data-client-message-id]")]
+    .filter((node) => node.getAttribute("data-client-message-id") === noId.clientMessageId).length;
+  requestAnimationFrame(() => {
+    noId.echoesAfterPaint = totalEchoes();
+    const result = {
+      eventLog,
+      direct,
+      noId,
+      finalEchoes: totalEchoes(),
+      finalAuthority: queue.querySelectorAll(".queue-item").length,
+    };
+    authoritySource.close();
     controller.dispose();
+    finish(result);
   });
 });
-document.addEventListener("htmx:load", () => {
-  eventLog.push("load");
+
+let htmxReady = false;
+let sseReady = false;
+let submitted = false;
+const maybeSubmit = () => {
+  if (submitted || !htmxReady || !sseReady) return;
+  submitted = true;
+  window.qqPromptCorrelationFixtureReady = true;
+  eventLog.push("fixtureReady");
   form.requestSubmit();
+};
+document.addEventListener("htmx:load", () => {
+  eventLog.push("htmxLoad");
+  htmxReady = true;
+  maybeSubmit();
+}, { once: true });
+authoritySource.addEventListener("open", () => {
+  eventLog.push("sseOpen");
+  sseReady = true;
+  maybeSubmit();
 }, { once: true });
 </script></body></html>`;
 
-let receivedWireBody = "";
+const receivedWireRequests = [];
 const serverRequests = [];
+const sseClients = new Set();
+const sendQueueAuthority = (body) => {
+  const clientMessageId = new URLSearchParams(body).get("clientMessageId") || "";
+  const event = JSON.stringify({
+    clientMessageId,
+    messageId: "durable-message-1",
+    text: "identical prompt text",
+  });
+  for (const client of sseClients) client.write(`event: queue\ndata: ${event}\n\n`);
+};
 const server = createServer(async (req, res) => {
   serverRequests.push(`${req.method} ${req.url}`);
   if (req.url === "/htmx.js") {
@@ -200,23 +276,42 @@ const server = createServer(async (req, res) => {
     res.end(htmxSource);
     return;
   }
+  if (req.url === "/events") {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-store",
+      Connection: "keep-alive",
+    });
+    res.write(": connected\n\n");
+    sseClients.add(res);
+    req.once("close", () => sseClients.delete(res));
+    return;
+  }
   if (req.url === "/prompt" && req.method === "POST") {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
-    receivedWireBody = Buffer.concat(chunks).toString("utf8");
-    setTimeout(() => {
-      res.writeHead(200, {
-        "Content-Type": "text/html; charset=utf-8",
-        "X-QQ-Message-Id": "durable-message-1",
-        "X-QQ-Prompt-Outcome": "accepted",
-      });
-      res.end("");
-    }, 1_300);
-    return;
-  }
-  if (req.url === "/wire") {
-    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
-    res.end(receivedWireBody);
+    const body = Buffer.concat(chunks).toString("utf8");
+    const prompt = new URLSearchParams(body).get("prompt") || "";
+    receivedWireRequests.push({ url: req.url, body, prompt });
+    if (!prompt.startsWith("/find ")) {
+      setTimeout(() => sendQueueAuthority(body), 100);
+      setTimeout(() => {
+        res.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "X-QQ-Message-Id": "durable-message-1",
+          "X-QQ-Prompt-Outcome": "accepted",
+        });
+        res.end("");
+      }, 1_400);
+    } else {
+      setTimeout(() => {
+        res.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "X-QQ-Prompt-Outcome": "accepted",
+        });
+        res.end("");
+      }, 150);
+    }
     return;
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
@@ -240,24 +335,78 @@ let cdp;
 try {
   cdp = await connectChrome(debugPort, url);
   await cdp.send("Runtime.enable");
-  const result = await cdp.evaluate("window.qqPromptCorrelationResult");
-  assert.equal(result.timeout, undefined, `real HTMX fixture timed out: ${JSON.stringify(result)}; requests=${serverRequests.join(",")}`);
-  assert.match(result.clientMessageId ?? "", /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-    "beforeRequest creates and captures a cryptographically random correlation UUID");
-  assert.equal(result.wireClientMessageId, result.clientMessageId,
-    "real HTMX transport sends the exact correlation bound to provisional and authority");
-  assert.ok(result.responseLagMs > 1_000, "controlled durable completion trails queue authority by over one second");
-  assert.deepEqual(result.afterQueueMicrotask, { at: result.afterQueueMicrotask.at, echoes: 0, authority: 1 },
-    "the authoritative queue mutation microtask leaves exactly one representation");
-  assert.equal(result.duplicateFrames.length, 0,
-    "no rendered animation frame contains both optimistic and authoritative representations");
-  assert.equal(result.final.echoes, 0);
-  assert.equal(result.final.authority, 1);
+  const result = await cdp.evaluate(`(async () => {
+    const deadline = Date.now() + 12_000;
+    while ((!window.qqPromptCorrelationFixtureReady || !window.qqPromptCorrelationResult) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    if (!window.qqPromptCorrelationFixtureReady || !window.qqPromptCorrelationResult) {
+      return {
+        readinessTimeout: true,
+        readyState: document.readyState,
+        fixtureReady: window.qqPromptCorrelationFixtureReady,
+        hasResult: Boolean(window.qqPromptCorrelationResult),
+        hasHtmx: typeof window.htmx === "object",
+      };
+    }
+    return await window.qqPromptCorrelationResult;
+  })()`);
+  assert.equal(result.readinessTimeout, undefined,
+    `real HTMX fixture readiness timed out: ${JSON.stringify(result)}; requests=${serverRequests.join(",")}`);
+  assert.equal(result.timeout, undefined,
+    `real HTMX fixture timed out: ${JSON.stringify(result)}; requests=${serverRequests.join(",")}`);
+  assert.equal(result.controllerConfigFailed, undefined, `production configRequest rejected fixture: ${JSON.stringify(result)}`);
+
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  assert.match(result.direct.clientMessageId ?? "", uuidPattern,
+    "configRequest creates a cryptographically random correlation UUID");
+  assert.match(result.noId.clientMessageId ?? "", uuidPattern,
+    "each prompt gets a fresh browser correlation UUID");
+  assert.notEqual(result.direct.clientMessageId, result.noId.clientMessageId);
+  assert.equal(result.direct.beforeClientMessageId, result.direct.clientMessageId,
+    "beforeRequest binds the exact UUID configured for the direct prompt");
+  assert.equal(result.noId.beforeClientMessageId, result.noId.clientMessageId,
+    "beforeRequest binds the exact UUID configured for the no-ID prompt");
+  assert.deepEqual(result.eventLog.filter((entry) => /(?:configRequest|beforeRequest)/.test(entry)), [
+    "configRequest:direct", "beforeRequest:direct", "configRequest:no-id", "beforeRequest:no-id",
+  ], "real HTMX dispatches configRequest before provisional creation for each request");
+
+  assert.equal(receivedWireRequests.length, 2,
+    `server received both controlled prompt requests: ${JSON.stringify(receivedWireRequests)}`);
+  const directWire = receivedWireRequests.find((entry) => entry.prompt === "identical prompt text");
+  const noIdWire = receivedWireRequests.find((entry) => entry.prompt === "/find resolved without admission");
+  assert.equal(new URLSearchParams(directWire?.body).get("clientMessageId"), result.direct.clientMessageId,
+    "the server received the exact direct-prompt UUID injected during configRequest");
+  assert.equal(new URLSearchParams(noIdWire?.body).get("clientMessageId"), result.noId.clientMessageId,
+    `the server received the exact no-ID-route UUID injected during configRequest; wire=${JSON.stringify(receivedWireRequests)} events=${JSON.stringify(result.eventLog)}`);
+
+  assert.ok(result.direct.responseLagMs > 1_000,
+    "controlled durable completion trails authoritative queue SSE by over one second");
+  assert.deepEqual(result.direct.afterQueueMicrotask, {
+    at: result.direct.afterQueueMicrotask.at,
+    echoes: 0,
+    authority: 1,
+  }, "the authoritative queue SSE mutation microtask leaves exactly one representation");
+  assert.equal(result.direct.frames.filter((frame) => frame.echoes > 0 && frame.authority > 0).length, 0,
+    "no rendered animation frame contains both provisional and authoritative representations");
+  assert.equal(result.direct.final.echoes, 0);
+  assert.equal(result.direct.final.authority, 1);
+
+  assert.equal(result.noId.echoesBeforeCompletion, 1,
+    "the non-admitting route still presents an immediate provisional row while pending");
+  assert.equal(result.noId.echoesAfterCompletion, 0,
+    "successful completion without X-QQ-Message-Id removes the provisional immediately");
+  assert.equal(result.noId.echoesAfterPaint, 0,
+    "the no-ID route never leaves an accepted ghost into the next paint");
+  assert.equal(result.noId.authority, 0);
+  assert.equal(result.finalEchoes, 0);
+  assert.equal(result.finalAuthority, 1);
   console.log("prompt correlation browser proof passed");
 } catch (error) {
   if (chromeErrors) error.message += `\nChromium: ${chromeErrors.slice(-1600)}`;
   throw error;
 } finally {
+  for (const client of sseClients) client.end();
   if (cdp) {
     try { await cdp.send("Browser.close"); } catch { child.kill("SIGKILL"); }
     cdp.close();

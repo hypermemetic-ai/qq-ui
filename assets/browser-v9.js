@@ -1383,6 +1383,10 @@
     const maximumAuthoritativeIds = 4096;
     const records = new Set();
     const recordsByXhr = new WeakMap();
+    // htmx:configRequest's detail object is the same requestConfig object later
+    // exposed by htmx:beforeRequest. Keep the generated identity on that exact
+    // in-memory object so rapid/identical submissions cannot cross-bind.
+    const configuredClientMessageIds = new WeakMap();
     const recordsByClientMessageId = new Map();
     const recordsByMessageId = new Map();
     const authoritativeClientMessageIds = new Set();
@@ -1526,13 +1530,26 @@
     const createClientMessageId = () => {
       try { return safeClientMessageId(host.crypto?.randomUUID?.()); } catch { return ""; }
     };
-    const captureClientMessageId = (event, clientMessageId) => {
+    const parameterValue = (parameters, name) => {
+      try {
+        if (parameters && typeof parameters.get === "function") {
+          const value = parameters.get(name);
+          return typeof value === "string" ? value : "";
+        }
+      } catch {}
+      if (parameters && typeof parameters === "object") {
+        const value = parameters[name];
+        if (typeof value === "string") return value;
+        if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+      }
+      return "";
+    };
+    const writeClientMessageId = (parameters, clientMessageId) => {
       if (!clientMessageId) return false;
-      const parameters = event?.detail?.requestConfig?.parameters;
       try {
         if (parameters && typeof parameters.set === "function") {
           parameters.set("clientMessageId", clientMessageId);
-          return true;
+          return parameterValue(parameters, "clientMessageId") === clientMessageId;
         }
         if (parameters && typeof parameters === "object") {
           parameters.clientMessageId = clientMessageId;
@@ -1548,17 +1565,22 @@
       } catch {}
       return options.composer?.() ?? null;
     };
-    const genuineComposerRequest = (event) => {
-      const form = event?.detail?.elt;
+    const genuineComposerConfiguration = (event) => {
+      const requestConfig = event?.detail;
+      const form = requestConfig?.elt;
       if (!form || String(form.tagName ?? "").toUpperCase() !== "FORM" || form.id !== "composer") return null;
-      const xhr = event?.detail?.xhr;
-      if (!isObjectKey(xhr)) return null;
       const sessionId = String(form.dataset?.sessionId ?? "");
       if (!sessionId || sessionId !== commissionedSessionId || sessionId !== currentSessionId()) return null;
       const container = activeContainer(sessionId);
       const input = composerInput(form);
       if (!container || !input || String(input.tagName ?? "").toUpperCase() !== "TEXTAREA") return null;
-      return { form, xhr, sessionId, container, input };
+      return { requestConfig, form, sessionId, container, input };
+    };
+    const genuineComposerRequest = (event) => {
+      const configuration = genuineComposerConfiguration({ detail: event?.detail?.requestConfig });
+      const xhr = event?.detail?.xhr;
+      if (!configuration || !isObjectKey(xhr)) return null;
+      return { ...configuration, xhr };
     };
     const createEcho = (prompt, request, clientMessageId) => {
       // A direct prompt first appears authoritatively in pending/queue. Use that
@@ -1624,16 +1646,34 @@
       else reconcile(document);
       return record;
     };
+    const configRequest = (event) => {
+      if (disposed) return false;
+      const request = genuineComposerConfiguration(event);
+      if (!request || !isObjectKey(request.requestConfig)) return false;
+      const clientMessageId = createClientMessageId();
+      // HTMX 2.0 copies requestConfig.parameters into the transport FormData
+      // immediately after this event. Correlation must therefore be written here,
+      // never in beforeRequest, to put identity on the wire from birth.
+      if (!writeClientMessageId(request.requestConfig.parameters, clientMessageId)) return false;
+      configuredClientMessageIds.set(request.requestConfig, clientMessageId);
+      return true;
+    };
     const beforeRequest = (event) => {
       if (disposed) return false;
       const request = genuineComposerRequest(event);
       if (!request || recordsByXhr.has(request.xhr)) return false;
       const prompt = capturedPrompt(event, request.input);
-      // HTMX has already captured form parameters but has not dispatched. Bind
-      // one cryptographically random correlation UUID to those exact bytes and
-      // to the provisional object before exposing the object in the transcript.
-      const clientMessageId = createClientMessageId();
-      captureClientMessageId(event, clientMessageId);
+      const configuredClientMessageId = configuredClientMessageIds.get(request.requestConfig) ?? "";
+      configuredClientMessageIds.delete(request.requestConfig);
+      const transportedClientMessageId = safeClientMessageId(
+        parameterValue(request.requestConfig.parameters, "clientMessageId"),
+      );
+      // Only bind identity generated for this exact request configuration. If a
+      // legacy HTMX integration omits configRequest (or parameters were altered),
+      // retain the durable message-ID fallback without trusting foreign metadata.
+      const clientMessageId = configuredClientMessageId === transportedClientMessageId
+        ? configuredClientMessageId
+        : "";
       createEcho(prompt, request, clientMessageId);
       // HTMX has already captured request parameters. Clearing now cannot alter
       // the admitted bytes and leaves the composer ready for the next draft.
@@ -1678,8 +1718,10 @@
         else reconcile(document);
         return;
       }
-      // Legacy acceptance is deliberately not matched by position or content.
-      setState(record, "accepted-legacy", "Message accepted; awaiting authoritative identity");
+      // Successful slash/find/navigation-style prompt routes can intentionally
+      // admit no core message. Without authoritative identity there is nothing
+      // safe to reconcile, so completion is terminal for the provisional.
+      removeRecord(record);
     };
     const afterRequest = (event) => {
       if (disposed) return false;
@@ -1747,7 +1789,7 @@
       });
     }
     host.addEventListener?.("pagehide", reset, true);
-    return Object.freeze({ beforeRequest, afterRequest, commission, reset, reconcile, dispose });
+    return Object.freeze({ configRequest, beforeRequest, afterRequest, commission, reset, reconcile, dispose });
   };
   /* qq-prompt-echo-factory:end */
 
@@ -4718,6 +4760,9 @@
     if (key === "h" || key === "H") event.preventDefault();
   });
 
+  document.addEventListener("htmx:configRequest", (event) => {
+    promptEchoes.configRequest(event);
+  });
   document.addEventListener("htmx:beforeRequest", (event) => {
     promptEchoes.beforeRequest(event);
   });
