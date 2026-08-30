@@ -42,8 +42,12 @@
       ? options.uploadDebounceMs
       : 12_000;
     // Mirrors LATENCY_BATCH_LIMITS/MAX_LATENCY_VISUAL_SOURCES in latency-store.mjs.
-    // The in-memory visual limit remains independently bounded at 2,000 above.
-    const batchLimits = Object.freeze({ origins: 128, stages: 128, visuals: 12 });
+    // The aggregate body is independently packed below the server's 256 KiB cap.
+    const batchLimits = Object.freeze({ origins: 128, stages: 128, visuals: 128 });
+    const browserWireBudgetBytes = 220 * 1024;
+    // sendBeacon and keepalive fetch share an approximately 64 KiB in-flight
+    // quota in major browsers. Leave headroom for other page teardown traffic.
+    const unloadWireBudgetBytes = 60 * 1024;
     const maximumVisualSources = 22;
     const makeRunId = () => {
       try {
@@ -136,6 +140,7 @@
     let stages = [];
     let visuals = [];
     let dropped = { origins: 0, stages: 0, visuals: 0 };
+    const cumulativeRingBufferDrops = { origins: 0, stages: 0, visuals: 0 };
     const entrySequences = { origins: 0, stages: 0, visuals: 0 };
     const acknowledged = { origins: 0, stages: 0, visuals: 0 };
     const uploadDropped = { origins: 0, stages: 0, visuals: 0 };
@@ -175,6 +180,7 @@
       if (list.length >= limits[kind]) {
         const evicted = list.shift();
         dropped[kind] += 1;
+        cumulativeRingBufferDrops[kind] += 1;
         const retainedForRetry = retryBatch?.payload?.[kind]?.some((candidate) => candidate.sequence === evicted.sequence);
         if (evicted.sequence > acknowledged[kind] && !retainedForRetry) uploadDropped[kind] += 1;
       }
@@ -186,26 +192,49 @@
       const label = safeTargetLabel(target);
       if (label && pendingVisual.targets.size < 12) pendingVisual.targets.add(label);
     };
+    const requestContextFor = (request) => request ? {
+      id: request.id,
+      originId: request.origin?.id ?? null,
+      originAt: request.origin?.at ?? null,
+      dispatchAt: request.dispatchAt,
+    } : null;
+    const captureRequestContext = () => requestContextFor(activeRequest);
     const ensurePending = () => {
-      if (!pendingVisual) pendingVisual = { sources: new Set(), mutationCount: 0, targets: new Set() };
+      if (!pendingVisual) pendingVisual = {
+        sources: new Set(),
+        mutationCount: 0,
+        targets: new Set(),
+        // Capture this when the DOM signal occurs. afterRequest may clear the
+        // global request before the pending aggregate reaches its rAF flush.
+        requestContext: captureRequestContext(),
+        requestPrimed: false,
+      };
       return pendingVisual;
     };
     const addSignal = (source, target, mutationCount = 0) => {
       ensurePending();
+      // A pre-dispatch input signal can share a frame with a post-dispatch
+      // response mutation. Upgrade null/older context when request evidence is
+      // present, but never let a later null signal erase captured evidence.
+      if (activeRequest && !pendingVisual.requestPrimed) pendingVisual.requestContext = captureRequestContext();
       if (pendingVisual.sources.has(source) || pendingVisual.sources.size < maximumVisualSources) {
         pendingVisual.sources.add(source);
       }
       pendingVisual.mutationCount += mutationCount;
       addTarget(target);
     };
-    const correlationAt = (at) => ({
+    const latestInteractionAt = (at) => ({
       latestInteractionId: latestInteraction?.id ?? null,
       latestInteractionLatencyMs: latestInteraction ? round(at - latestInteraction.at) : null,
-      activeRequestId: activeRequest?.id ?? null,
-      activeRequestOriginId: activeRequest?.origin?.id ?? null,
-      activeRequestLatencyMs: activeRequest?.origin ? round(at - activeRequest.origin.at) : null,
-      networkDispatchLatencyMs: activeRequest?.dispatchAt !== null && activeRequest?.dispatchAt !== undefined
-        ? round(at - activeRequest.dispatchAt)
+    });
+    const requestCorrelationAt = (at, request = null) => ({
+      activeRequestId: request?.id ?? null,
+      activeRequestOriginId: request?.originId ?? null,
+      activeRequestLatencyMs: request?.originAt !== null && request?.originAt !== undefined
+        ? round(at - request.originAt)
+        : null,
+      networkDispatchLatencyMs: request?.dispatchAt !== null && request?.dispatchAt !== undefined
+        ? round(at - request.dispatchAt)
         : null,
     });
     const makeVisual = (at) => ({
@@ -213,14 +242,18 @@
       sources: [...pendingVisual.sources].sort(),
       mutationCount: pendingVisual.mutationCount,
       targets: [...pendingVisual.targets].sort(),
-      ...correlationAt(at),
+      ...latestInteractionAt(at),
+      ...requestCorrelationAt(at, pendingVisual.requestContext),
     });
     const mergePendingInto = (sample, at) => {
       sample.at = round(at);
       sample.sources = [...new Set([...sample.sources, ...pendingVisual.sources])].sort();
       sample.mutationCount += pendingVisual.mutationCount;
       sample.targets = [...new Set([...sample.targets, ...pendingVisual.targets])].sort().slice(0, 12);
-      Object.assign(sample, correlationAt(at));
+      Object.assign(sample, latestInteractionAt(at));
+      // Never erase an initial response association merely because a later
+      // same-opportunity signal arrived after request completion.
+      if (!sample.activeRequestId) Object.assign(sample, requestCorrelationAt(at, pendingVisual.requestContext));
     };
     const flushVisual = () => {
       frameRequest = 0;
@@ -377,8 +410,25 @@
       appendStage("htmx:beforeSend", "network-dispatch", event, request);
     };
     const onRequestStage = (eventName, kind) => (event) => {
-      const request = requestFor(event) ?? (eventName.startsWith("htmx:sse") ? activeRequest : null);
+      // SSE events only inherit a request when their own XHR identifies one;
+      // a completed prompt is not evidence that a later stream update is its.
+      const request = requestFor(event);
       appendStage(eventName, kind, event, request);
+      if (eventName === "htmx:afterSwap" && request) {
+        const pending = ensurePending();
+        pending.requestContext = requestContextFor(request);
+        pending.requestPrimed = true;
+      }
+      if (eventName === "htmx:afterRequest" && activeRequest === request) {
+        activeRequest = null;
+        const primed = pendingVisual;
+        if (primed && primed.sources.size === 0) {
+          const enqueue = host.queueMicrotask ?? (typeof queueMicrotask === "function" ? queueMicrotask : null);
+          enqueue?.(() => {
+            if (pendingVisual === primed && pendingVisual.sources.size === 0) pendingVisual = null;
+          });
+        }
+      }
     };
     const listen = (target, type, listener, options) => {
       if (!target?.addEventListener) return;
@@ -518,25 +568,104 @@
       viewport: viewportMetadata(),
       userAgent: String(host.navigator?.userAgent ?? "").slice(0, 512),
     });
-    const createUploadBatch = () => {
+    const healthMetadata = () => ({
+      generated: { ...entrySequences },
+      acknowledged: { ...acknowledged },
+      ringBufferDrops: { ...cumulativeRingBufferDrops },
+      uploadDrops: { ...uploadDropped },
+      quarantineCount: uploadCounters.quarantinedBatches,
+    });
+    const utf8Bytes = (body) => {
+      const Encoder = host.TextEncoder ?? (typeof TextEncoder === "function" ? TextEncoder : null);
+      if (Encoder) {
+        try { return new Encoder().encode(body).byteLength; } catch {}
+      }
+      const BlobConstructor = host.Blob ?? (typeof Blob === "function" ? Blob : null);
+      if (BlobConstructor) {
+        try { return new BlobConstructor([body]).size; } catch {}
+      }
+      // Conservative dependency-free UTF-8 fallback. Unpaired surrogates use
+      // the replacement character's three bytes; valid pairs use four.
+      let bytes = 0;
+      for (let index = 0; index < body.length; index += 1) {
+        const code = body.charCodeAt(index);
+        if (code <= 0x7f) bytes += 1;
+        else if (code <= 0x7ff) bytes += 2;
+        else if (code >= 0xd800 && code <= 0xdbff
+          && index + 1 < body.length
+          && body.charCodeAt(index + 1) >= 0xdc00 && body.charCodeAt(index + 1) <= 0xdfff) {
+          bytes += 4;
+          index += 1;
+        } else bytes += 3;
+      }
+      return bytes;
+    };
+    const encodePayload = (payload) => {
+      const frozenPayload = JSON.parse(JSON.stringify(payload));
+      const body = JSON.stringify(frozenPayload);
+      return { payload: frozenPayload, body, bytes: utf8Bytes(body) };
+    };
+    const createUploadBatch = (wireBudgetBytes = browserWireBudgetBytes, preferredPayload = null) => {
+      const availableEntries = { origins, stages, visuals };
+      const candidates = {};
+      for (const kind of ["origins", "stages", "visuals"]) {
+        // A transient retry can outlive entries evicted from the live ring. Seed
+        // unload packing from its frozen payload, then fill with newer entries.
+        const entriesBySequence = new Map();
+        for (const entry of preferredPayload?.[kind] ?? []) {
+          if (entry.sequence > acknowledged[kind]) entriesBySequence.set(entry.sequence, entry);
+        }
+        for (const entry of availableEntries[kind]) {
+          if (entry.sequence > acknowledged[kind] && !entriesBySequence.has(entry.sequence)) {
+            entriesBySequence.set(entry.sequence, entry);
+          }
+        }
+        candidates[kind] = [...entriesBySequence.values()]
+          .sort((left, right) => left.sequence - right.sequence)
+          .slice(0, batchLimits[kind]);
+      }
+      if (candidates.origins.length + candidates.stages.length + candidates.visuals.length === 0) return null;
       const payload = {
         schema: "qq.visual-latency-batch/v1",
         runId,
-        batchId: `${runId}-${++batchSequence}`,
+        batchId: `${runId}-${batchSequence + 1}`,
         page: pageMetadata(),
-        origins: origins.filter((entry) => entry.sequence > acknowledged.origins).slice(0, batchLimits.origins),
-        stages: stages.filter((entry) => entry.sequence > acknowledged.stages).slice(0, batchLimits.stages),
-        visuals: visuals.filter((entry) => entry.sequence > acknowledged.visuals).slice(0, batchLimits.visuals),
+        health: healthMetadata(),
+        origins: candidates.origins,
+        stages: candidates.stages,
+        visuals: candidates.visuals,
       };
-      if (payload.origins.length + payload.stages.length + payload.visuals.length === 0) return null;
-      const frozenPayload = JSON.parse(JSON.stringify(payload));
+      let encoded = encodePayload(payload);
+      // Visuals are normally the volume source. If removing all of them is not
+      // enough, apply the same monotonic prefix search to stages and origins.
+      for (const kind of ["visuals", "stages", "origins"]) {
+        if (encoded.bytes <= wireBudgetBytes) break;
+        let lower = 0;
+        let upper = payload[kind].length;
+        let fitting = -1;
+        while (lower <= upper) {
+          const middle = Math.floor((lower + upper) / 2);
+          const trial = { ...payload, [kind]: candidates[kind].slice(0, middle) };
+          const trialEncoded = encodePayload(trial);
+          if (trialEncoded.bytes <= wireBudgetBytes) {
+            fitting = middle;
+            lower = middle + 1;
+          } else {
+            upper = middle - 1;
+          }
+        }
+        payload[kind] = candidates[kind].slice(0, Math.max(0, fitting));
+        encoded = encodePayload(payload);
+      }
+      const entryCount = encoded.payload.origins.length + encoded.payload.stages.length + encoded.payload.visuals.length;
+      if (entryCount === 0 || encoded.bytes > wireBudgetBytes) return null;
+      batchSequence += 1;
       return {
-        payload: frozenPayload,
-        body: JSON.stringify(frozenPayload),
+        ...encoded,
         maxima: {
-          origins: frozenPayload.origins.reduce((value, entry) => Math.max(value, entry.sequence), 0),
-          stages: frozenPayload.stages.reduce((value, entry) => Math.max(value, entry.sequence), 0),
-          visuals: frozenPayload.visuals.reduce((value, entry) => Math.max(value, entry.sequence), 0),
+          origins: encoded.payload.origins.reduce((value, entry) => Math.max(value, entry.sequence), 0),
+          stages: encoded.payload.stages.reduce((value, entry) => Math.max(value, entry.sequence), 0),
+          visuals: encoded.payload.visuals.reduce((value, entry) => Math.max(value, entry.sequence), 0),
         },
       };
     };
@@ -582,24 +711,26 @@
         const status = Number(response?.status);
         if (nonRetryableClientStatus(status)) {
           quarantineRejectedBatch(batch, status);
-          return false;
+          return "quarantined";
         }
         throw new Error(`latency endpoint returned ${response?.status ?? "no response"}`);
       }
       acceptAcknowledgement(await response.json(), batch);
-      return true;
+      return "acknowledged";
     };
-    const attemptUpload = async ({ keepalive = false } = {}) => {
+    const attemptUpload = async ({ keepalive = false, preparedBatch = null } = {}) => {
       if (!active || !uploadEndpoint || uploadInFlight || typeof host.fetch !== "function") return false;
       if (uploadTimer) host.clearTimeout?.(uploadTimer);
       uploadTimer = 0;
-      const batch = retryBatch ?? createUploadBatch();
+      const batch = preparedBatch ?? retryBatch ?? createUploadBatch();
       if (!batch) return false;
-      retryBatch = batch;
+      // An explicit unload prefix must not replace a larger byte-identical retry.
+      if (!retryBatch) retryBatch = batch;
       uploadInFlight = true;
       uploadCounters.attempts += 1;
       if (keepalive) uploadCounters.unloadAttempts += 1;
       lastUploadAttemptAt = round(now());
+      let outcome = "transient-failure";
       try {
         const response = await host.fetch(uploadEndpoint, {
           method: "POST",
@@ -608,29 +739,44 @@
           credentials: "omit",
           keepalive,
         });
-        return await handleUploadResponse(response, batch);
+        outcome = await handleUploadResponse(response, batch);
+        return outcome === "acknowledged";
       } catch (error) {
         recordUploadFailure(error);
         return false;
       } finally {
         uploadInFlight = false;
-        if (active && hasPendingUploads()) scheduleUpload();
+        if (!keepalive && active && hasPendingUploads()) {
+          scheduleUpload(outcome === "acknowledged" || outcome === "quarantined" ? 0 : uploadDebounceMs, {
+            replace: outcome === "acknowledged" || outcome === "quarantined",
+          });
+        }
       }
     };
-    const scheduleUpload = () => {
-      if (!active || !uploadEndpoint || uploadTimer || typeof host.setTimeout !== "function" || !hasPendingUploads()) return;
+    const scheduleUpload = (delay = uploadDebounceMs, { replace = false } = {}) => {
+      if (!active || !uploadEndpoint || typeof host.setTimeout !== "function" || !hasPendingUploads()) return;
+      if (uploadTimer) {
+        if (!replace) return;
+        host.clearTimeout?.(uploadTimer);
+        uploadTimer = 0;
+      }
       uploadTimer = host.setTimeout(() => {
         uploadTimer = 0;
         void attemptUpload();
-      }, uploadDebounceMs);
+      }, delay);
     };
     const flushUploadOnHide = () => {
-      if (!active || !uploadEndpoint) return;
+      // An in-flight fetch is already the page's bounded best effort; do not
+      // duplicate it with a beacon during teardown.
+      if (!active || !uploadEndpoint || uploadInFlight) return;
       if (uploadTimer) host.clearTimeout?.(uploadTimer);
       uploadTimer = 0;
-      const batch = retryBatch ?? createUploadBatch();
+      const retainedRetry = retryBatch;
+      const batch = createUploadBatch(unloadWireBudgetBytes, retainedRetry?.payload);
       if (!batch) return;
-      retryBatch = batch;
+      // Keep a normal retry byte-identical. If there was none, retain this
+      // unload-sized batch so a page restored from bfcache can retry it safely.
+      if (!retryBatch) retryBatch = batch;
       const sendBeacon = host.navigator?.sendBeacon;
       const BlobConstructor = host.Blob ?? (typeof Blob === "function" ? Blob : null);
       if (typeof sendBeacon === "function" && BlobConstructor) {
@@ -640,25 +786,11 @@
         try {
           if (sendBeacon.call(host.navigator, uploadEndpoint, new BlobConstructor([batch.body], { type: "application/json" }))) {
             uploadCounters.beaconsQueued += 1;
-            scheduleUpload();
             return;
           }
         } catch {}
       }
-      if (!uploadInFlight) {
-        void attemptUpload({ keepalive: true });
-        return;
-      }
-      uploadCounters.attempts += 1;
-      uploadCounters.unloadAttempts += 1;
-      lastUploadAttemptAt = round(now());
-      host.fetch?.(uploadEndpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: batch.body,
-        credentials: "omit",
-        keepalive: true,
-      }).then((response) => handleUploadResponse(response, batch)).catch(recordUploadFailure);
+      if (!uploadInFlight) void attemptUpload({ keepalive: true, preparedBatch: batch });
     };
 
     const snapshot = () => {
@@ -672,6 +804,8 @@
           endpoint: uploadEndpoint || null,
           runId,
           debounceMs: uploadDebounceMs,
+          wireBudgetBytes: browserWireBudgetBytes,
+          unloadWireBudgetBytes,
           scheduled: Boolean(uploadTimer),
           inFlight: uploadInFlight,
           retrying: Boolean(retryBatch),
@@ -707,38 +841,35 @@
       };
       return JSON.parse(JSON.stringify(result));
     };
-    const percentile = (sorted, portion) => {
-      if (!sorted.length) return null;
-      const position = (sorted.length - 1) * portion;
-      const lower = Math.floor(position);
-      const upper = Math.ceil(position);
-      if (lower === upper) return round(sorted[lower]);
-      return round(sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower));
-    };
     const summary = () => {
-      const rows = new Map();
-      for (const visual of visuals) {
-        if (!visual.activeRequestId) continue;
-        let row = rows.get(visual.activeRequestId);
-        if (!row) {
-          row = { requestId: visual.activeRequestId, originId: visual.activeRequestOriginId, values: [], count: 0 };
-          rows.set(visual.activeRequestId, row);
-        }
-        row.count += 1;
-        if (visual.activeRequestLatencyMs !== null) row.values.push(visual.activeRequestLatencyMs);
+      const firstStages = new Map();
+      for (const stage of stages) {
+        if (!stage.requestId) continue;
+        const key = `${stage.requestId}\u0000${stage.kind}`;
+        if (!firstStages.has(key)) firstStages.set(key, stage);
       }
-      return [...rows.values()].map((row) => {
-        const sorted = [...row.values].sort((left, right) => left - right);
-        return {
-          requestId: row.requestId,
-          originId: row.originId,
-          count: row.count,
-          firstLatencyMs: row.values.length ? round(row.values[0]) : null,
-          p50LatencyMs: percentile(sorted, 0.5),
-          p95LatencyMs: percentile(sorted, 0.95),
-          lastLatencyMs: row.values.length ? round(row.values[row.values.length - 1]) : null,
-        };
-      });
+      const seenRequests = new Set();
+      const rows = [];
+      for (const visual of visuals) {
+        if (!visual.activeRequestId || seenRequests.has(visual.activeRequestId)) continue;
+        seenRequests.add(visual.activeRequestId);
+        const stage = (kind) => firstStages.get(`${visual.activeRequestId}\u0000${kind}`) ?? null;
+        const dispatch = stage("network-dispatch");
+        rows.push({
+          requestId: visual.activeRequestId,
+          originId: visual.activeRequestOriginId,
+          action: dispatch?.action ?? "",
+          firstPresentationSamples: 1,
+          interactionToDispatchMs: dispatch?.originLatencyMs ?? null,
+          dispatchToInitialResponseMs: stage("response-before-swap")?.dispatchLatencyMs ?? null,
+          dispatchToSwapMs: stage("response-after-swap")?.dispatchLatencyMs ?? null,
+          dispatchToSettleMs: stage("response-after-settle")?.dispatchLatencyMs ?? null,
+          interactionToFirstPresentationMs: visual.activeRequestLatencyMs,
+          dispatchToFirstPresentationMs: visual.networkDispatchLatencyMs,
+          firstPresentationSources: [...visual.sources],
+        });
+      }
+      return rows;
     };
     const report = () => {
       const rows = summary();

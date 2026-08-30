@@ -56,7 +56,8 @@ per-kind cursors. Network failures, 5xx, 408, and 429 retain the byte-identical
 batch for retry. Other deterministic 4xx responses quarantine exactly that
 batch, advance past its entries, and increment visible dropped/quarantined
 counters so later records cannot be pinned. `pagehide` queues a best-effort
-`sendBeacon` (or keepalive fetch). `qqLatency.stop()` stops both measurement and
+`sendBeacon` (or keepalive fetch) repacked below a separate 60 KiB unload budget.
+`qqLatency.stop()` stops both measurement and
 new uploads, while `qqLatency.start()` resumes both.
 
 The browser endpoint is passed explicitly as `data-latency-endpoint` and must
@@ -71,14 +72,27 @@ route identifiers redacted to `:id` where practical. There is no external
 network telemetry.
 
 Browser memory remains bounded to the newest 500 interaction origins, 1,000
-request/stage records, and 2,000 visual records. Upload batches are independently
-bounded to 128 origins, 128 stages, and 12 visuals; each visual accepts the same
-22 recognized collector sources. The constructed maximum legal body remains at
-least 15% below the 256 KiB HTTP cap. `snapshot().dropped` reports overwritten
-browser records; `snapshot().upload` exposes the run ID, pending and advanced
-cursors, scheduling/retry state, attempts, successes, failures, quarantined
-batches, best-effort beacons, unsent drops, and the last upload error/times.
-Rendering, HTMX requests, stream painting, and unload never wait for an upload.
+request/stage records, and 2,000 visual records. Upload candidate arrays are
+independently bounded to 128 origins, 128 stages, and 128 visuals; each visual
+accepts the same 22 recognized collector sources and up to 12 targets. The
+browser serializes and UTF-8 measures each candidate, then binary-searches safe
+entry prefixes below a 220 KiB normal wire budget. The HTTP endpoint retains
+its strict 256 KiB aggregate cap. Unload transport is independently repacked
+below 60 KiB so it does not reuse a normal or retry body that exceeds browser
+`sendBeacon`/keepalive quotas. Entries are never split and empty/oversized
+batches are not sent.
+
+The first upload retains a 12-second debounce. After an acknowledgement or
+deterministic client-error quarantine, remaining backlog drains immediately in
+sequential non-overlapping batches. Network, 5xx, 408, and 429 failures retain
+the byte-identical batch and retry on the normal debounce. `pagehide` attempts
+one best-effort batch under its separate 60 KiB budget. `snapshot().dropped`
+reports overwritten browser records; `snapshot().upload` exposes the run ID,
+normal and unload wire budgets, pending and
+advanced cursors, scheduling/retry state, attempts, successes, failures,
+quarantined batches, best-effort beacons, cumulative unsent drops, and the last
+upload error/times. Rendering, HTMX requests, stream painting, and unload never
+wait for an upload.
 
 ### Durable log, report, rotation, and clear
 
@@ -110,10 +124,16 @@ npm run latency:report -- --json /path/to/ui-latency.ndjson
 ```
 
 The dependency-free reporter reads `.1` before the current file, deduplicates
-retries by run ID plus entry kind/sequence, and prints aggregate run, batch,
-origin, stage, visual, sample, duplicate, and malformed-line counts. Its rows
-show count and first/p50/p95/last request-origin latency grouped by request
-action and coalesced visual source. Percentiles use linear interpolation.
+retries by run ID plus entry kind/sequence, and prominently prints sample counts,
+per-kind sequence gaps and retention, and the latest cumulative collector health
+for each run (generated sequences, accepted cursors, ring/upload drops, and
+quarantines). Old lines without health metadata remain readable.
+
+Request rows use only the first correlated visual per request. They report
+interaction-to-dispatch separately from dispatch-to-initial-response,
+dispatch-to-swap/settle, and dispatch-to-first-presentation. Progressive stream
+age is excluded. A separate table reports event-local SSE handler and swap
+timing. Percentiles use linear interpolation.
 
 To clear durable history, preferably stop the qq process first so it cannot
 append concurrently, then run:
@@ -173,9 +193,11 @@ The canonical zero point is the earliest capture-phase receipt of a trusted
 pointer, keyboard, form, or control interaction. A pointerdown/click/submit
 chain is one origin. HTMX `beforeSend` is retained as a **network dispatch**
 stage; it is not described as exact server receipt. Latest-interaction and
-active-request correlations are separate, so a local drawer click does not
-replace a still-active prompt-to-stream request timeline. A request remains the
-active correlation until a newer HTMX request supersedes it.
+request correlations remain separate. Request context is captured when an
+initial DOM/swap signal occurs (and survives its pending rAF), then the global
+active request is cleared by that request's `htmx:afterRequest`. Later
+progressive or unrelated SSE visuals retain their event/target measurement but
+do not inherit the completed prompt ID without request-local evidence.
 
 A visual record represents one coalesced browser presentation opportunity, not
 one DOM mutation. DOM child, text, and attribute mutations and native input,
@@ -188,7 +210,8 @@ to about plus or minus one frame; they are not exact compositor pixel timings.
 The snapshot is JSON-safe and includes monotonic start/capture times,
 `performance.timeOrigin`, UI generation/revision when available, viewport,
 user agent, sanitized origins/stages, visual correlations, limits, and dropped
-counts. Prompt/input values, mutation text, and request query strings are never
+counts. Persisted batches also include bounded numeric cumulative collector
+health. Prompt/input values, mutation text, and request query strings are never
 captured.
 
 ### Limits

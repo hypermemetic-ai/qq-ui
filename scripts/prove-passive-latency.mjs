@@ -62,6 +62,13 @@ function batch(batchId = `${defaultRunId}-1`, sequence = 1, runId = defaultRunId
       },
       userAgent: "proof-browser",
     },
+    health: {
+      generated: { origins: sequence, stages: sequence, visuals: sequence },
+      acknowledged: { origins: 0, stages: 0, visuals: 0 },
+      ringBufferDrops: { origins: 0, stages: 0, visuals: 0 },
+      uploadDrops: { origins: 0, stages: 0, visuals: 0 },
+      quarantineCount: 0,
+    },
     origins: [{
       sequence,
       id: `interaction-${sequence}`,
@@ -173,10 +180,31 @@ const maximumBatch = maximumLegalBatch();
 const sanitizedMaximum = sanitizeLatencyBatch(maximumBatch);
 assert.deepEqual(sanitizedMaximum.visuals[0].sources, LATENCY_VISUAL_SOURCE_LABELS,
   "sanitizeVisual accepts every recognized browser source in one visual");
-const maximumBodyBytes = Buffer.byteLength(JSON.stringify(maximumBatch));
-assert.ok(maximumBodyBytes < MAX_LATENCY_BODY_BYTES, "the maximum legal serialized batch fits the HTTP endpoint");
-assert.ok(maximumBodyBytes <= Math.floor(MAX_LATENCY_BODY_BYTES * 0.85),
-  `the maximum legal batch retains at least 15% headroom (${maximumBodyBytes}/${MAX_LATENCY_BODY_BYTES} bytes)`);
+assert.equal(LATENCY_BATCH_LIMITS.visuals, 128, "the server accepts the browser's larger visual candidate ceiling");
+assert.ok(Buffer.byteLength(JSON.stringify(maximumBatch)) > MAX_LATENCY_BODY_BYTES,
+  "the HTTP aggregate cap, rather than worst-case array multiplication, remains the final wire bound");
+
+const validHealth = batch().health;
+assert.deepEqual(sanitizeLatencyBatch(batch()).health, validHealth);
+const healthMutation = (mutate) => {
+  const candidate = JSON.parse(JSON.stringify(batch()));
+  mutate(candidate.health);
+  return candidate;
+};
+for (const [label, candidate] of [
+  ["unknown", healthMutation((health) => { health.note = "arbitrary text"; })],
+  ["text", healthMutation((health) => { health.generated.visuals = "1"; })],
+  ["negative", healthMutation((health) => { health.uploadDrops.visuals = -1; })],
+  ["unsafe", healthMutation((health) => { health.quarantineCount = Number.MAX_SAFE_INTEGER + 1; })],
+  ["inconsistent", healthMutation((health) => { health.acknowledged.visuals = 2; })],
+  ["trailing generated cursor", healthMutation((health) => { health.generated.visuals = 0; })],
+]) {
+  assert.throws(() => sanitizeLatencyBatch(candidate), (error) => error?.status === 422,
+    `health schema rejects ${label} fields/values`);
+}
+const oldBatch = batch();
+delete oldBatch.health;
+assert.equal(sanitizeLatencyBatch(oldBatch).health, null, "same-version old collectors remain ingestible without metadata");
 
 const temporary = await mkdtemp(join(tmpdir(), "qq-ui-latency-proof-"));
 const logPath = join(temporary, "state", "qq", "ui-latency.ndjson");
@@ -285,6 +313,8 @@ try {
     "opaque run identities are persisted without privacy-label rewriting");
   assert.equal(firstPersisted.batchId, `${defaultRunId}-1`,
     "opaque batch identities are persisted without privacy-label rewriting");
+  assert.deepEqual(firstPersisted.health.acknowledged, { origins: 1, stages: 1, visuals: 1 },
+    "persisted health includes this batch's final accepted cursors rather than lagging one batch");
   assert.equal(persisted.trim().split("\n").length, 1);
 
   const secondBody = JSON.stringify(batch(`${secondRunId}-1`, 1, secondRunId));
@@ -365,45 +395,189 @@ const reportStage = {
   runId: "page-report",
   batchId: "report-stage",
   origins: [],
-  stages: [{ sequence: 1, requestId: "request-1", action: "POST /qq/session/:id/prompt" }],
+  stages: [
+    { sequence: 1, at: 4, kind: "network-dispatch", requestId: "request-1", action: "POST /qq/session/:id/prompt", originLatencyMs: 4 },
+    { sequence: 2, at: 12, kind: "response-before-swap", requestId: "request-1", action: "POST /qq/session/:id/prompt", dispatchLatencyMs: 8 },
+    { sequence: 3, at: 14, kind: "response-after-swap", requestId: "request-1", action: "POST /qq/session/:id/prompt", dispatchLatencyMs: 10 },
+    { sequence: 4, at: 16, kind: "response-after-settle", requestId: "request-1", action: "POST /qq/session/:id/prompt", dispatchLatencyMs: 12 },
+    { sequence: 5, at: 100, kind: "sse-message-before", requestId: null, target: "div#transcript", action: "" },
+    { sequence: 6, at: 104, kind: "response-after-swap", requestId: null, target: "div#transcript", action: "" },
+    { sequence: 7, at: 106, kind: "sse-message-after", requestId: null, target: "div#transcript", action: "" },
+  ],
   visuals: [],
 };
-const reportVisuals = (batchId, entries) => ({
+const reportVisuals = (batchId, visualEntries, health = undefined) => ({
   schema: "qq.ui-latency-log/v1",
   runId: "page-report",
   batchId,
+  ...(health ? { health } : {}),
   origins: [],
   stages: [],
-  visuals: entries.map(([sequence, latency]) => ({
+  visuals: visualEntries.map(([sequence, interactionLatency, dispatchLatency]) => ({
     sequence,
+    at: interactionLatency,
     activeRequestId: "request-1",
-    activeRequestLatencyMs: latency,
+    activeRequestLatencyMs: interactionLatency,
+    networkDispatchLatencyMs: dispatchLatency,
     sources: ["stream-paint"],
   })),
 });
-await writeFile(`${reporterPath}.1`, `${JSON.stringify(reportStage)}\n${JSON.stringify(reportVisuals("report-a", [[1, 10], [2, 20], [3, 30]]))}\n`, "utf8");
-await writeFile(reporterPath, `${JSON.stringify(reportVisuals("report-b", [[3, 999], [4, 40], [5, 50]]))}\n{malformed\n`, "utf8");
+const reportHealth = {
+  generated: { origins: 0, stages: 7, visuals: 8 },
+  acknowledged: { origins: 0, stages: 7, visuals: 6 },
+  ringBufferDrops: { origins: 0, stages: 0, visuals: 2 },
+  uploadDrops: { origins: 0, stages: 0, visuals: 3 },
+  quarantineCount: 1,
+};
+await writeFile(`${reporterPath}.1`, `${JSON.stringify(reportStage)}
+${JSON.stringify(reportVisuals("report-a", [[1, 10, 6], [2, 20, 16], [3, 30, 26]]))}
+`, "utf8");
+await writeFile(reporterPath, `${JSON.stringify(reportVisuals("report-b", [[3, 999, 995], [5, 40, 36], [6, 50, 46]], reportHealth))}
+{malformed
+`, "utf8");
 const report = await reportLatency(reporterPath);
 assert.equal(report.malformedLines, 1);
 assert.equal(report.runs, 1);
-assert.equal(report.entries.stages, 1);
+assert.equal(report.entries.stages, 7);
 assert.equal(report.entries.visuals, 5);
 assert.equal(report.duplicates, 1, "reporter deduplicates retry overlap by run, kind, and sequence");
-assert.deepEqual(report.rows, [{
-  action: "POST /qq/session/:id/prompt",
-  source: "stream-paint",
-  count: 5,
-  firstLatencyMs: 10,
-  p50LatencyMs: 30,
-  p95LatencyMs: 48,
-  lastLatencyMs: 50,
-}], "reporter preserves first/last order and uses interpolated percentiles");
+assert.equal(report.latencySamples, 1, "progressive visuals contribute only the first correlated presentation per request");
+assert.deepEqual(report.sampleCounts, {
+  firstPresentations: 1,
+  interactionToDispatch: 1,
+  dispatchToInitialResponse: 1,
+  dispatchToSwap: 1,
+  dispatchToSettle: 1,
+  interactionToFirstPresentation: 1,
+  dispatchToFirstPresentation: 1,
+  sseHandlers: 1,
+  sseSwaps: 1,
+});
+const [requestRow] = report.requestRows;
+assert.equal(requestRow.requests, 1);
+assert.equal(requestRow.interactionToDispatchP50Ms, 4);
+assert.equal(requestRow.dispatchToInitialResponseP50Ms, 8);
+assert.equal(requestRow.dispatchToSwapP50Ms, 10);
+assert.equal(requestRow.dispatchToSettleP50Ms, 12);
+assert.equal(requestRow.interactionToFirstPresentationP50Ms, 10);
+assert.equal(requestRow.dispatchToFirstPresentationP50Ms, 6);
+assert.equal("streamAgeMs" in requestRow, false, "default request rows do not conflate progressive stream age with latency");
+assert.deepEqual(report.sequenceGaps, { origins: 0, stages: 0, visuals: 1 },
+  "sequence gaps count holes between retained entries, independently of an evicted/trailing prefix");
+assert.deepEqual(report.retention.visuals, { retained: 5, generated: 8, percent: 62.5 });
+assert.deepEqual(report.runHealth[0].health, reportHealth, "reporter exposes the latest cumulative health per run");
+assert.equal(report.runHealth[0].retentionPercent.visuals, 62.5);
+assert.deepEqual(report.sseRows, [{
+  target: "div#transcript",
+  action: "(no request action)",
+  messages: 1,
+  handlerSamples: 1,
+  handlerP50Ms: 6,
+  handlerP95Ms: 6,
+  swapSamples: 1,
+  swapP50Ms: 4,
+  swapP95Ms: 4,
+}], "SSE handler/swap timing is event-local and separate from request latency");
+
+const sseReport = (runId, stages) => analyzeLatencyRecords([{
+  schema: "qq.ui-latency-log/v1",
+  runId,
+  batchId: `${runId}-batch`,
+  origins: [],
+  stages,
+  visuals: [],
+}]);
+const sseStage = (sequence, at, kind, target, action = "", requestId = null) => ({
+  sequence,
+  at,
+  kind,
+  target,
+  action,
+  requestId,
+});
+
+const staleSse = sseReport("page-stale-sse", [
+  sseStage(1, 0, "sse-message-before", "div#stale"),
+  sseStage(2, 30_000, "response-after-swap", "form#unrelated", "POST /qq/prompt", "request-later"),
+  sseStage(3, 30_001, "sse-message-after", "div#unrelated"),
+]);
+assert.deepEqual(staleSse.sseRows, [],
+  "an unmatched SSE before expires before a much later unrelated swap/message can consume it");
+assert.equal(staleSse.sampleCounts.sseHandlers, 0);
+assert.equal(staleSse.sampleCounts.sseSwaps, 0);
+
+const replacedSse = sseReport("page-replaced-sse", [
+  sseStage(1, 0, "sse-message-before", "div#old", "GET /qq/old"),
+  sseStage(2, 100, "sse-message-before", "div#new", "GET /qq/new"),
+  sseStage(3, 104, "response-after-swap", "div#new", "GET /qq/new"),
+  sseStage(4, 106, "sse-message-after", "div#new", "GET /qq/new"),
+]);
+assert.deepEqual(replacedSse.sseRows, [{
+  target: "div#new",
+  action: "GET /qq/new",
+  messages: 1,
+  handlerSamples: 1,
+  handlerP50Ms: 6,
+  handlerP95Ms: 6,
+  swapSamples: 1,
+  swapP50Ms: 4,
+  swapP95Ms: 4,
+}], "a newer SSE before replaces an older pending record and pairs within the bounded window");
+
+const groupedSse = sseReport("page-grouped-sse", [
+  sseStage(1, 200, "sse-message-before", "div#transcript", "GET /qq/transcript"),
+  sseStage(2, 202, "response-after-swap", "form#prompt", "POST /qq/prompt", "request-prompt"),
+  sseStage(3, 204, "response-after-swap", "div#transcript.htmx-settling", "GET /qq/transcript"),
+  sseStage(4, 206, "sse-message-after", "div#transcript.htmx-settling", "GET /qq/transcript"),
+  sseStage(5, 300, "sse-message-before", "div#queue", "GET /qq/queue"),
+  sseStage(6, 303, "response-after-swap", "div#queue", "GET /qq/queue"),
+  sseStage(7, 305, "sse-message-after", "div#queue", "GET /qq/queue"),
+]);
+assert.deepEqual(groupedSse.sseRows, [{
+  target: "div#queue",
+  action: "GET /qq/queue",
+  messages: 1,
+  handlerSamples: 1,
+  handlerP50Ms: 5,
+  handlerP95Ms: 5,
+  swapSamples: 1,
+  swapP50Ms: 3,
+  swapP95Ms: 3,
+}, {
+  target: "div#transcript",
+  action: "GET /qq/transcript",
+  messages: 1,
+  handlerSamples: 1,
+  handlerP50Ms: 6,
+  handlerP95Ms: 6,
+  swapSamples: 1,
+  swapP50Ms: 4,
+  swapP95Ms: 4,
+}], "complete SSE pairs keep target/action grouping, tolerate HTMX's transient class, and reject an interleaved prompt swap");
+
+const gappedOldSse = sseReport("page-gapped-old-sse", [
+  sseStage(20, 400, "sse-message-before", "div#transcript"),
+  sseStage(22, 404, "response-after-swap", "div#transcript"),
+  sseStage(23, 406, "sse-message-after", "div#transcript"),
+]);
+assert.equal(gappedOldSse.runHealth[0].health, null, "the gapped fixture retains old-log compatibility");
+assert.equal(gappedOldSse.sequenceGaps.stages, 1);
+assert.deepEqual(gappedOldSse.sseRows, [],
+  "a stage sequence gap invalidates pending SSE correlation instead of fabricating timing");
+assert.equal(gappedOldSse.sampleCounts.sseHandlers, 0);
+assert.equal(gappedOldSse.sampleCounts.sseSwaps, 0);
+
+const oldOnly = analyzeLatencyRecords([{
+  schema: "qq.ui-latency-log/v1", runId: "page-old", batchId: "old", origins: [], stages: [], visuals: [],
+}]);
+assert.equal(oldOnly.runHealth[0].health, null, "old log lines without health remain readable");
 assert.deepEqual(analyzeLatencyRecords([]).rows, []);
 const cli = JSON.parse(execFileSync(process.execPath, [
   new URL("./report-ui-latency.mjs", import.meta.url).pathname,
   reporterPath,
   "--json",
 ], { encoding: "utf8" }));
-assert.equal(cli.rows[0].p95LatencyMs, 48, "the dependency-free report command reads both rolling files");
+assert.equal(cli.rows[0].dispatchToFirstPresentationP50Ms, 6,
+  "the dependency-free report command reads both rolling files with corrected semantics");
 
 console.log("passive latency ingestion, retention, and reporter proof passed");
