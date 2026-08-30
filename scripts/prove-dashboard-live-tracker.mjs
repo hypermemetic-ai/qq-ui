@@ -183,10 +183,19 @@ assert.ok(architectPosition >= 0 && childPosition > architectPosition,
 const childStrip = alphaGroup.match(new RegExp(`<li class="live-tracker-row live-tracker-depth-1 live-tracker-child-strip"><a class="live-tracker-session"[^>]*data-session-id="${childId}"[\\s\\S]*?<\\/a><\\/li>`))?.[0] ?? "";
 assert.match(childStrip, new RegExp(`^<li[\\s\\S]*?<a[^>]*href="/qq/sessions/open\\?session=${encodeURIComponent(childId)}"[\\s\\S]*?<\\/a><\\/li>$`),
   "the whole compact strip remains one focusable session link");
-assert.match(alphaGroup, /data-activity="working"[^>]*>working</, "activity is visible");
-assert.match(alphaGroup, /data-phase="planning"[^>]*>planning</, "workflow phase is visible");
-assert.match(alphaGroup, new RegExp(`<time class="live-tracker-elapsed" data-phase-started-at="${phaseStartedAt}"></time>`),
-  "valid absolute phase start is emitted for browser elapsed ticking");
+const architectStrip = alphaGroup.match(new RegExp(`<li class="live-tracker-row live-tracker-depth-0"><a class="live-tracker-session[^\"]*"[^>]*data-session-id="${rootId}"[\\s\\S]*?<\\/a><\\/li>`))?.[0] ?? "";
+assert.match(architectStrip, /data-activity="working"[^>]*>working</,
+  "the architect strip exposes its own current activity");
+assert.doesNotMatch(architectStrip, /class="live-tracker-(?:workflow|phase)"/,
+  "the architect strip does not duplicate workflow or delegated phase state");
+assert.match(childStrip, /class="live-tracker-phase" data-phase="implementation">implementation</,
+  "the child strip uses status space for its authoritative workflow role");
+assert.doesNotMatch(childStrip, /data-activity="working"[^>]*>working</,
+  "the child role replaces redundant generic working text");
+assert.match(architectStrip, new RegExp(`<time class="live-tracker-elapsed" data-phase-started-at="${phaseStartedAt}" hidden></time>`),
+  "a working architect emits its own absolute active-time source");
+assert.match(childStrip, new RegExp(`<time class="live-tracker-elapsed" data-phase-started-at="${phaseStartedAt + 1_000}" hidden></time>`),
+  "a concurrently working child emits its distinct active-time source");
 for (const trackerAnchor of html.matchAll(/<a class="live-tracker-session[^"]*"[^>]*>/g)) {
   assert.doesNotMatch(trackerAnchor[0], /\btitle=/, "tracker rows never add title text");
 }
@@ -283,9 +292,11 @@ const browser = readFileSync(new URL("../assets/browser-v9.js", import.meta.url)
 assert.match(browser, /LIVE_SESSION_PICKER\s*=\s*[^;]*\.live-tracker-session\[data-session-id\]/,
   "tracker links have an explicit live-switch picker selector");
 assert.match(browser, /const syncLiveTrackerElapsed = \(\) => \{[\s\S]*?Date\.now\(\)[\s\S]*?data(?:set)?[.\[]phaseStartedAt/,
-  "browser elapsed display derives from the absolute phase start");
-assert.match(browser, /setInterval\(syncLiveTrackerElapsed,\s*1000\)/,
-  "browser ticks tracker elapsed once per second without server rerenders");
+  "browser elapsed display derives from each row's absolute active-time source");
+assert.match(browser, /setTimeout\(syncLiveTrackerElapsed, nextUpdate\)/,
+  "browser schedules the next visible unit threshold without server rerenders");
+assert.doesNotMatch(browser, /setInterval\(syncLiveTrackerElapsed,\s*1000\)/,
+  "tracker elapsed metadata avoids needless one-second polling");
 assert.match(browser, /if \(event\.defaultPrevented \|\| modifiedClick\(event\)\) return;[\s\S]*?chairGo\(url\.href, link\)/,
   "normal tracker clicks use chairGo while modified clicks retain native href behavior");
 assert.match(browser, /if \(!nav \|\| nav\.classList\.contains\("live-tracker"\)\) return;/,
@@ -301,11 +312,15 @@ assert.match(overviewSource, /tracker\.dataset\.overview = "true"[\s\S]*?All pro
 assert.match(overviewSource, /preserveOverviewCreateState\(tracker\)/,
   "overview does not expose a create action without a filtered project");
 const chooserBehaviorSource = browser.match(/  const CHOOSER_INTERACTIVE = [\s\S]*?(?=  const sessionEventsUrl)/)?.[0] ?? "";
+const chooserClickSource = browser.match(/  const modifiedClick = [\s\S]*?(?=  const applyChairMode)/)?.[0] ?? "";
 assert.notEqual(chooserBehaviorSource, "", "empty-space behavior remains independently provable");
-assert.match(chooserBehaviorSource, /closest\?\.\("#project-rail, \.active-projects"\)/,
-  "empty-space clearing includes the full left rail and its project-nav padding");
+assert.notEqual(chooserClickSource, "", "chooser click consumption remains independently provable");
+assert.match(chooserBehaviorSource, /closest\?\.\("#project-rail, \.active-projects, \.session-traversal"\)/,
+  "empty-space clearing is limited to the guarded Projects and Sessions chooser surfaces");
 assert.match(chooserBehaviorSource, /closest\?\.\("#inactive-project-tree"\)[\s\S]*?return null/,
   "the whole inactive file-tree region is excluded before rail-surface classification");
+assert.match(chooserBehaviorSource, /\.active-projects li, \.session-traversal li/,
+  "non-actionable padding inside project and session rows remains row-owned");
 assert.match(chooserBehaviorSource, /projectChooserAction\(target, surface\)/,
   "empty-space clearing classifies actionable descendants before changing views");
 const chooserBehavior = runInNewContext(`(() => {
@@ -317,12 +332,12 @@ class Element {
   }
   closest(selector) {
     for (let node = this; node; node = node.parent) {
-      if (selector === "#project-rail, .active-projects") {
-        if (node.kind === "rail" || node.kind === "nav") return node;
+      if (selector === "#project-rail, .active-projects, .session-traversal") {
+        if (node.kind === "rail" || node.kind === "nav" || node.kind === "sessions") return node;
       } else if (selector === "#inactive-project-tree") {
         if (node.kind === "file-tree") return node;
-      } else if (selector === ".active-projects li") {
-        if (node.kind === "project-row") return node;
+      } else if (selector === ".active-projects li, .session-traversal li") {
+        if (node.kind === "project-row" || node.kind === "session-row") return node;
       } else if (node.actionable) {
         return node;
       }
@@ -331,21 +346,32 @@ class Element {
   }
 }
 let overviewCount = 0;
-const desktopChair = () => true;
-const navMode = () => false;
+let desktop = true;
+let navOpen = false;
+const desktopChair = () => desktop;
+const navMode = () => navOpen;
 const showLiveTrackerOverview = () => { overviewCount += 1; return true; };
 ${chooserBehaviorSource}
+${chooserClickSource}
 const rail = new Element("rail");
 const nav = new Element("nav", rail, true);
-const navPadding = new Element("padding", nav);
+const navPadding = new Element("project-padding", nav);
 const projectRow = new Element("project-row", nav);
 const projectRowGutter = new Element("project-row-gutter", projectRow);
 const projectLink = new Element("project-link", projectRow, true);
 const projectLabel = new Element("project-label", projectLink);
+const projectForm = new Element("project-form", rail, true);
+const projectInput = new Element("project-input", projectForm, true);
 const closeButton = new Element("close", rail, true);
 const closeMark = new Element("close-mark", closeButton);
-const rightSession = new Element("session", null, true);
-const sessionLabel = new Element("session-label", rightSession);
+const sessions = new Element("sessions");
+const sessionPadding = new Element("session-padding", sessions);
+const sessionRow = new Element("session-row", sessions);
+const sessionRowGutter = new Element("session-row-gutter", sessionRow);
+const sessionLink = new Element("session-link", sessionRow, true);
+const sessionLabel = new Element("session-label", sessionLink);
+const sessionForm = new Element("session-form", sessions, true);
+const sessionButton = new Element("session-button", sessionForm, true);
 const menu = new Element("menu", rail, true);
 const menuPadding = new Element("menu-padding", menu);
 const fileTree = new Element("file-tree", rail);
@@ -356,6 +382,7 @@ const treeEmptyColumn = new Element("tree-empty-column", treeColumns);
 const keyEvent = (target, key, extras = {}) => ({
   target,
   key,
+  button: 0,
   defaultPrevented: false,
   altKey: false,
   ctrlKey: false,
@@ -365,18 +392,41 @@ const keyEvent = (target, key, extras = {}) => ({
   ...extras,
 });
 const result = {
-  railPadding: clearProjectFilterFromEmptySpace(rail),
-  navPadding: clearProjectFilterFromEmptySpace(navPadding),
+  desktopProjectRail: clearProjectFilterFromEmptySpace(rail),
+  desktopProjectPadding: clearProjectFilterFromEmptySpace(navPadding),
+  desktopSessionPadding: clearProjectFilterFromEmptySpace(sessionPadding),
   projectRow: clearProjectFilterFromEmptySpace(projectRowGutter),
   projectLink: clearProjectFilterFromEmptySpace(projectLabel),
+  projectFormInput: clearProjectFilterFromEmptySpace(projectInput),
   closeControl: clearProjectFilterFromEmptySpace(closeMark),
-  sessionStrip: clearProjectFilterFromEmptySpace(sessionLabel),
+  sessionRow: clearProjectFilterFromEmptySpace(sessionRowGutter),
+  sessionLink: clearProjectFilterFromEmptySpace(sessionLabel),
+  sessionFormButton: clearProjectFilterFromEmptySpace(sessionButton),
   menuControl: clearProjectFilterFromEmptySpace(menuPadding),
   fileTreeSurface: clearProjectFilterFromEmptySpace(fileTree),
   fileTreePadding: clearProjectFilterFromEmptySpace(treePadding),
   fileTreeLoading: clearProjectFilterFromEmptySpace(treeLoading),
   fileTreeEmpty: clearProjectFilterFromEmptySpace(treeEmptyColumn),
 };
+desktop = false;
+navOpen = true;
+result.mobileProjectPadding = clearProjectFilterFromEmptySpace(navPadding);
+result.mobileSessionPadding = clearProjectFilterFromEmptySpace(sessionPadding);
+result.mobileSessionRow = clearProjectFilterFromEmptySpace(sessionRowGutter);
+const modifiedSessionClick = keyEvent(sessionPadding, "", { ctrlKey: true });
+result.modifiedSessionConsumed = activateOverviewFromChooserClick(modifiedSessionClick, sessionPadding);
+result.modifiedSessionPrevented = modifiedSessionClick.defaultPrevented;
+const preconsumedSessionClick = keyEvent(sessionPadding, "", { defaultPrevented: true });
+result.preconsumedSessionConsumed = activateOverviewFromChooserClick(preconsumedSessionClick, sessionPadding);
+const mobileSessionClick = keyEvent(sessionPadding, "");
+result.mobileSessionConsumed = activateOverviewFromChooserClick(mobileSessionClick, sessionPadding);
+result.mobileSessionPrevented = mobileSessionClick.defaultPrevented;
+let overlayCloseCount = 0;
+if (!result.mobileSessionConsumed && navMode()) overlayCloseCount += 1;
+result.overlayCloseCount = overlayCloseCount;
+navOpen = false;
+result.mobileClosedSessionPadding = clearProjectFilterFromEmptySpace(sessionPadding);
+desktop = true;
 const keyboard = keyEvent(nav, "Enter");
 result.keyboard = clearProjectFilterFromChooserKey(keyboard);
 result.keyboardPrevented = keyboard.defaultPrevented;
@@ -393,20 +443,34 @@ return result;
 })()`);
 assert.match(browser, /if \(drawerIsOpen\(\)\) \{[\s\S]*?return;\n    \}\n    if \(clearProjectFilterFromChooserKey\(event\)\) return;/,
   "modal and drawer keyboard guards run before chooser-background activation");
-assert.match(browser, /!event\.defaultPrevented && !modifiedClick\(event\) && clearProjectFilterFromEmptySpace\(target\)/,
-  "ordinary pointer and synthesized touch clicks reach the guarded empty-surface action");
+assert.match(browser, /if \(activateOverviewFromChooserClick\(event, target\)\) return;[\s\S]*?if \(navMode\(\)/,
+  "chooser overview activation is consumed before the mobile overlay close handler");
 assert.deepEqual({ ...chooserBehavior }, {
-  railPadding: true,
-  navPadding: true,
+  desktopProjectRail: true,
+  desktopProjectPadding: true,
+  desktopSessionPadding: true,
   projectRow: false,
   projectLink: false,
+  projectFormInput: false,
   closeControl: false,
-  sessionStrip: false,
+  sessionRow: false,
+  sessionLink: false,
+  sessionFormButton: false,
   menuControl: false,
   fileTreeSurface: false,
   fileTreePadding: false,
   fileTreeLoading: false,
   fileTreeEmpty: false,
+  mobileProjectPadding: true,
+  mobileSessionPadding: true,
+  mobileSessionRow: false,
+  modifiedSessionConsumed: false,
+  modifiedSessionPrevented: false,
+  preconsumedSessionConsumed: false,
+  mobileSessionConsumed: true,
+  mobileSessionPrevented: true,
+  overlayCloseCount: 0,
+  mobileClosedSessionPadding: false,
   keyboard: true,
   keyboardPrevented: true,
   spaceKeyboard: true,
@@ -414,8 +478,8 @@ assert.deepEqual({ ...chooserBehavior }, {
   childKeyboard: false,
   childKeyboardPrevented: false,
   modifiedKeyboard: false,
-  overviewCount: 4,
-}, "only genuine left chooser space, or the focused chooser landmark, enters overview");
+  overviewCount: 8,
+}, "only genuine Projects/Sessions background or the focused chooser landmark enters overview across desktop and nav mode");
 const connectorSource = browser.match(/const paintSessionConnectors = \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
 assert.match(connectorSource, /for \(const group of liveTrackerGroups\(tracker\)\)[\s\S]*?createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "path"\)/,
   "connector geometry creates at most one path for each project group");
@@ -762,8 +826,12 @@ assert.match(childStripStyle, /min-height:\s*1\.65rem[\s\S]*?flex-direction:\s*r
   "direct children collapse to compact one-line execution strips");
 assert.match(css, /\.live-tracker-child-strip \.live-tracker-session::before \{[^}]*border-bottom:\s*\.625px solid[^}]*border-left:\s*\.625px solid/,
   "each direct child has one thin orthogonal relationship branch");
-assert.match(css, /\.live-tracker-child-strip \.live-tracker-workflow,[\s\S]*?\.live-tracker-child-strip \.live-tracker-elapsed \{ display:\s*none; \}/,
-  "child strips retain identity, role, and activity without gratuitous workflow timing metadata");
+assert.match(css, /\.live-tracker-child-strip \.live-tracker-state \{[^}]*max-width:\s*55%[^}]*flex:\s*none/,
+  "child role and active time stay compact without displacing identity");
+assert.doesNotMatch(css, /\.live-tracker-child-strip \.live-tracker-(?:phase|elapsed)[^}]*display:\s*none/,
+  "child workflow role and active-work time remain visible");
+assert.match(css, /\.live-tracker-elapsed\[hidden\] \{ display:\s*none; \}/,
+  "sub-minute elapsed metadata leaves no separator or reserved-width artifact");
 assert.doesNotMatch(childStripStyle, /background|gradient|box-shadow/i,
   "child hierarchy is expressed without cards or decorative surfaces");
 assert.match(css, /\.live-tracker-child-strip \.live-tracker-face \{[^}]*font-size:\s*\.68rem/,

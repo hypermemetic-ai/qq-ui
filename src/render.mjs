@@ -727,28 +727,39 @@ function trackerSessionFace(row) {
   return row?.alias || row?.label || "session";
 }
 
-function trackerPhaseStartedAt(row) {
-  return Number.isFinite(row?.phaseStartedAt) && Number.isInteger(row.phaseStartedAt) && row.phaseStartedAt >= 0
+function trackerActiveStartedAt(row) {
+  return row?.activity === "working"
+    && Number.isFinite(row?.phaseStartedAt)
+    && Number.isInteger(row.phaseStartedAt)
+    && row.phaseStartedAt >= 0
     ? row.phaseStartedAt
     : null;
+}
+
+function trackerChildPhase(row) {
+  const phase = typeof row?.phase === "string" ? row.phase.trim() : "";
+  if (phase && phase !== "none" && phase !== "unknown" && phase !== "work") return phase;
+  return typeof row?.workflow === "string" ? row.workflow.trim() : "";
 }
 
 function renderLiveTrackerRow(row, paths, selectedId) {
   const current = row.sessionId === selectedId;
   const face = trackerSessionFace(row);
-  const secondary = row.alias && row.label !== row.alias ? row.label : "";
+  const child = row.depth === 1;
+  const childPhase = child && row.activity === "working" ? trackerChildPhase(row) : "";
+  const secondary = row.alias && row.label !== row.alias && row.label !== childPhase ? row.label : "";
   const depthClass = ` live-tracker-depth-${Math.min(row.depth, 8)}`;
-  const childClass = row.depth === 1 ? " live-tracker-child-strip" : "";
-  const workflow = row.workflow
-    ? `<span class="live-tracker-workflow">${escapeHtml(row.workflow)}</span>`
-    : "";
-  const startedAt = trackerPhaseStartedAt(row);
+  const childClass = child ? " live-tracker-child-strip" : "";
+  const state = childPhase && childPhase !== face
+    ? `<span class="live-tracker-phase" data-phase="${escapeHtml(childPhase)}">${escapeHtml(childPhase)}</span>`
+    : childPhase ? "" : `<span class="live-tracker-activity" data-activity="${escapeHtml(row.activity)}">${escapeHtml(row.activity)}</span>`;
+  const startedAt = trackerActiveStartedAt(row);
   const elapsed = startedAt === null
     ? ""
-    : `<time class="live-tracker-elapsed" data-phase-started-at="${startedAt}"></time>`;
+    : `<time class="live-tracker-elapsed" data-phase-started-at="${startedAt}"${state ? "" : ' data-solo="true"'} hidden></time>`;
   return `<li class="live-tracker-row${depthClass}${childClass}"><a class="live-tracker-session${current ? " live-tracker-session-current" : ""}" href="${escapeHtml(sessionSwitchHref(paths, row.sessionId))}" data-session-id="${escapeHtml(row.sessionId)}" data-depth="${row.depth}"${current ? ' aria-current="page"' : ""}>
       <span class="live-tracker-identity"><span class="live-tracker-face">${escapeHtml(face)}</span>${secondary ? `<span class="live-tracker-label">${escapeHtml(secondary)}</span>` : ""}</span>
-      <span class="live-tracker-state"><span class="live-tracker-activity" data-activity="${escapeHtml(row.activity)}">${escapeHtml(row.activity)}</span>${workflow}<span class="live-tracker-phase" data-phase="${escapeHtml(row.phase)}">${escapeHtml(row.phase)}</span>${elapsed}</span>
+      <span class="live-tracker-state">${state}${elapsed}</span>
     </a></li>`;
 }
 

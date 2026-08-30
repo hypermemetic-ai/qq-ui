@@ -763,23 +763,37 @@
 
   const formatLiveTrackerElapsed = (milliseconds) => {
     const seconds = Math.max(0, Math.floor(milliseconds / 1000));
-    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 60) return "";
     const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ${minutes % 60}m`;
-    return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+    if (minutes < 60) return `${minutes}m`;
+    return `${Math.floor(minutes / 60)}h`;
   };
+  const nextLiveTrackerElapsedUpdate = (milliseconds) => {
+    const elapsed = Math.max(0, milliseconds);
+    const unit = elapsed < 3_600_000 ? 60_000 : 3_600_000;
+    const remainder = elapsed % unit;
+    return Math.max(1, Math.ceil(remainder === 0 ? unit : unit - remainder));
+  };
+  let liveTrackerElapsedTimer = 0;
   const syncLiveTrackerElapsed = () => {
+    if (liveTrackerElapsedTimer) clearTimeout(liveTrackerElapsedTimer);
+    liveTrackerElapsedTimer = 0;
     const now = Date.now();
+    let nextUpdate = null;
     for (const time of document.querySelectorAll(".live-tracker-elapsed[data-phase-started-at]")) {
       const startedAt = Number(time.dataset.phaseStartedAt);
-      time.textContent = Number.isFinite(startedAt) && startedAt >= 0
-        ? formatLiveTrackerElapsed(now - startedAt)
-        : "";
+      const valid = Number.isFinite(startedAt) && startedAt >= 0;
+      const milliseconds = valid ? Math.max(0, now - startedAt) : 0;
+      const formatted = valid ? formatLiveTrackerElapsed(milliseconds) : "";
+      time.textContent = formatted;
+      time.hidden = !formatted;
+      if (valid) {
+        const delay = nextLiveTrackerElapsedUpdate(milliseconds);
+        nextUpdate = nextUpdate === null ? delay : Math.min(nextUpdate, delay);
+      }
     }
+    if (nextUpdate !== null) liveTrackerElapsedTimer = setTimeout(syncLiveTrackerElapsed, nextUpdate);
   };
-  setInterval(syncLiveTrackerElapsed, 1000);
 
   const confirmingClose = () => document.querySelector(".session-item-current.close-confirming");
   const restoreCloseFocus = () => {
@@ -1812,10 +1826,10 @@
   const CHOOSER_INTERACTIVE = "a, button, input, select, textarea, summary, details, form, label, menu, [role='button'], [role='link'], [contenteditable], [tabindex]";
   const projectChooserSurface = (target) => {
     if (target?.closest?.("#inactive-project-tree")) return null;
-    return target?.closest?.("#project-rail, .active-projects") ?? null;
+    return target?.closest?.("#project-rail, .active-projects, .session-traversal") ?? null;
   };
   const projectChooserAction = (target, surface) => {
-    const row = target?.closest?.(".active-projects li") ?? null;
+    const row = target?.closest?.(".active-projects li, .session-traversal li") ?? null;
     if (row) return row;
     const action = target?.closest?.(CHOOSER_INTERACTIVE) ?? null;
     return action && action !== surface ? action : null;
@@ -2117,6 +2131,11 @@
     if (navMode()) paintChairMode(false);
   };
   const modifiedClick = (event) => event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+  const activateOverviewFromChooserClick = (event, target) => {
+    if (event.defaultPrevented || modifiedClick(event) || !clearProjectFilterFromEmptySpace(target)) return false;
+    event.preventDefault();
+    return true;
+  };
   const applyChairMode = (mode, persist = true) => {
     if (mode === "nav") {
       paintChairMode(true, persist);
@@ -2987,10 +3006,7 @@
       dismiss.closest(".workflows-popup")?.remove();
       return;
     }
-    if (!event.defaultPrevented && !modifiedClick(event) && clearProjectFilterFromEmptySpace(target)) {
-      event.preventDefault();
-      return;
-    }
+    if (activateOverviewFromChooserClick(event, target)) return;
     const traversalAction = target?.closest(".session-traversal a[href], .session-traversal button, .session-traversal input, .session-traversal select, .session-traversal textarea, .session-traversal [role=button], .session-traversal [role=link]");
     if (!desktopChair() && !traversalAction
       && target?.closest(".session-heading-start, .session-project, .session-mobile-id, .session-place")) {
