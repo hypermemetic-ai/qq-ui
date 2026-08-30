@@ -778,6 +778,7 @@ function renderLiveTracker(snapshot, paths, create) {
     return `<nav id="live-session-list" class="session-traversal live-tracker live-tracker-empty" aria-label="Live session tracker" aria-keyshortcuts="ArrowLeft ArrowRight"><span class="live-tracker-message">no live sessions</span>${create}</nav>`;
   }
   const selectedId = String(snapshot?.id ?? "");
+  const overview = snapshot?.scope === "projects";
   const selectedProject = projects.find((project) => (
     project.sessions.some((row) => row.sessionId === selectedId)
   )) ?? projects.find((project) => (
@@ -795,9 +796,12 @@ function renderLiveTracker(snapshot, paths, create) {
       ? " live-tracker-sessions-hierarchical"
       : "";
     const current = `${project.name}\n${String(project.folder ?? "")}` === selectedKey;
-    return `<section class="live-tracker-project" data-project="${escapeHtml(project.name)}" data-folder="${escapeHtml(project.folder ?? "")}" data-project-label="${escapeHtml(project.label)}" data-current="${current ? "true" : "false"}" aria-labelledby="live-tracker-project-${index}"${current ? "" : " hidden"}><h2 id="live-tracker-project-${index}" class="live-tracker-project-name">${escapeHtml(project.label)}${folder}</h2><ol class="live-tracker-sessions${hierarchyClass}">${rows}</ol></section>`;
+    return `<section class="live-tracker-project" data-project="${escapeHtml(project.name)}" data-folder="${escapeHtml(project.folder ?? "")}" data-project-label="${escapeHtml(project.label)}" data-current="${current && !overview ? "true" : "false"}" aria-labelledby="live-tracker-project-${index}"${current || overview ? "" : " hidden"}><h2 id="live-tracker-project-${index}" class="live-tracker-project-name">${escapeHtml(project.label)}${folder}</h2><ol class="live-tracker-sessions${hierarchyClass}">${rows}</ol></section>`;
   }).join("");
-  return `<nav id="live-session-list" class="session-traversal live-tracker" aria-label="${escapeHtml(selectedProject.label)} sessions" aria-keyshortcuts="ArrowLeft ArrowRight" data-filter-project="${escapeHtml(selectedProject.name)}" data-filter-folder="${escapeHtml(selectedProject.folder ?? "")}">${groups}<span class="live-tracker-filter-empty" hidden>no live sessions</span>${create}</nav>`;
+  const trackerState = overview
+    ? 'aria-label="All project sessions" aria-keyshortcuts="ArrowLeft ArrowRight" data-overview="true"'
+    : `aria-label="${escapeHtml(selectedProject.label)} sessions" aria-keyshortcuts="ArrowLeft ArrowRight" data-filter-project="${escapeHtml(selectedProject.name)}" data-filter-folder="${escapeHtml(selectedProject.folder ?? "")}"`;
+  return `<nav id="live-session-list" class="session-traversal live-tracker" ${trackerState}>${groups}<span class="live-tracker-filter-empty" hidden>no live sessions</span>${create}</nav>`;
 }
 
 function sessionNavigation(snapshot, paths) {

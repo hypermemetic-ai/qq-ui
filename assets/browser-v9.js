@@ -2814,6 +2814,7 @@
   const SESSION_CONNECTOR_LANE_EDGE_GAP = 2;
   const SESSION_CONNECTOR_LANE_GAP = 6;
   const SESSION_CONNECTOR_MIN_LANE_GAP = 1.25;
+  const SESSION_CONNECTOR_LANE_BUNDLE_RATIO = 0.34;
   const SESSION_CONNECTOR_NS = "http://www.w3.org/2000/svg";
   let sessionConnectorFrame = 0;
   let sessionConnectorResizeObserver = null;
@@ -3003,15 +3004,29 @@
     const channelWidth = channelEnd - channelStart;
     const usableWidth = channelWidth - (2 * SESSION_CONNECTOR_LANE_EDGE_GAP);
     const maximumLaneSpan = Math.max(0, usableWidth);
+    const minimumLaneSpan = SESSION_CONNECTOR_MIN_LANE_GAP * Math.max(0, routes.length - 1);
+    const laneSpan = routes.length > 1
+      ? Math.min(
+        maximumLaneSpan,
+        Math.max(
+          minimumLaneSpan,
+          Math.min(
+            SESSION_CONNECTOR_LANE_GAP * (routes.length - 1),
+            maximumLaneSpan * SESSION_CONNECTOR_LANE_BUNDLE_RATIO,
+          ),
+        ),
+      )
+      : 0;
     const laneGap = routes.length > 1
-      ? Math.min(SESSION_CONNECTOR_LANE_GAP, maximumLaneSpan / (routes.length - 1))
+      ? laneSpan / (routes.length - 1)
       : SESSION_CONNECTOR_LANE_GAP;
     if (channelWidth < 4 || (routes.length > 1 && laneGap < SESSION_CONNECTOR_MIN_LANE_GAP)) {
       removeSessionConnectors();
       observeSessionConnectorSurfaces(observe);
       return;
     }
-    const firstLane = channelStart + SESSION_CONNECTOR_LANE_EDGE_GAP;
+    const channelMidpoint = (channelStart + channelEnd) / 2;
+    const firstLane = channelMidpoint - (laneSpan / 2);
     const lastLane = firstLane + Math.max(laneGap, SESSION_CONNECTOR_MIN_LANE_GAP);
     const laneOrder = sessionConnectorLaneOrder(routes, firstLane, lastLane);
     if (!laneOrder) {
@@ -3060,17 +3075,25 @@
   const liveTrackerGroups = (tracker = document.querySelector(".live-tracker")) => tracker
     ? [...tracker.querySelectorAll(".live-tracker-project[data-project]")]
     : [];
-  const preserveOverviewCreateState = (tracker) => {
-    const create = tracker.querySelector("form.new-session");
-    if (!(create instanceof HTMLFormElement)) return;
-    if (!create.dataset.overviewHidden) create.dataset.overviewHidden = create.hidden ? "preserve" : "restore";
-    create.hidden = true;
+  const removeLiveTrackerCreate = (tracker) => {
+    for (const create of tracker.querySelectorAll("form.new-session")) create.remove();
   };
-  const restoreOverviewCreateState = (tracker) => {
-    const create = tracker.querySelector("form.new-session");
-    if (!(create instanceof HTMLFormElement) || !create.dataset.overviewHidden) return;
-    if (create.dataset.overviewHidden === "restore") create.hidden = false;
-    delete create.dataset.overviewHidden;
+  const ensureLiveTrackerCreate = (tracker, project, folder) => {
+    let create = tracker.querySelector("form.new-session");
+    if (!(create instanceof HTMLFormElement)) {
+      create = document.createElement("form");
+      create.className = "new-session";
+      create.method = "post";
+      const button = document.createElement("button");
+      button.type = "submit";
+      button.setAttribute("aria-label", "New session");
+      button.innerHTML = '<svg class="banner-mark" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
+      create.append(button);
+      tracker.append(create);
+    }
+    create.hidden = false;
+    create.action = `${consoleBasePath()}/project/${encodeURIComponent(project)}${folder ? `/${encodeURIComponent(folder)}` : ""}/sessions`;
+    return create;
   };
   const showLiveTrackerOverview = ({ remember = true } = {}) => {
     const tracker = document.querySelector(".live-tracker");
@@ -3085,7 +3108,7 @@
     tracker.setAttribute("aria-label", "All project sessions");
     const empty = tracker.querySelector(".live-tracker-filter-empty");
     if (empty instanceof HTMLElement) empty.hidden = true;
-    preserveOverviewCreateState(tracker);
+    removeLiveTrackerCreate(tracker);
     markGroupCurrent(".active-project-item[href]", "active-project-current", null);
     markGroupCurrent(".projects-choice[href]", "projects-choice-current", null);
     if (remember) liveTrackerProjectFilter = LIVE_TRACKER_OVERVIEW;
@@ -3116,11 +3139,7 @@
     tracker.setAttribute("aria-label", `${label || project} sessions`);
     const empty = tracker.querySelector(".live-tracker-filter-empty");
     if (empty instanceof HTMLElement) empty.hidden = Boolean(group);
-    const create = tracker.querySelector("form.new-session");
-    restoreOverviewCreateState(tracker);
-    if (create instanceof HTMLFormElement) {
-      create.action = `${consoleBasePath()}/project/${encodeURIComponent(project)}${folder ? `/${encodeURIComponent(folder)}` : ""}/sessions`;
-    }
+    ensureLiveTrackerCreate(tracker, project, folder);
     if (remember || !liveTrackerProjectFilter) {
       liveTrackerProjectFilter = projectIdentity({ project, folder });
     }
@@ -3144,8 +3163,10 @@
     const tracker = document.querySelector(".live-tracker");
     const groups = liveTrackerGroups(tracker);
     if (!(tracker instanceof HTMLElement)) return;
-    if (liveTrackerProjectFilter === LIVE_TRACKER_OVERVIEW) {
+    if (liveTrackerProjectFilter === LIVE_TRACKER_OVERVIEW
+      || (!liveTrackerProjectFilter && tracker.dataset.overview === "true")) {
       showLiveTrackerOverview({ remember: false });
+      liveTrackerProjectFilter = LIVE_TRACKER_OVERVIEW;
       return;
     }
     if (groups.length === 0) return;
