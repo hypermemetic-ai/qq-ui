@@ -2179,7 +2179,7 @@ function documentHead(assetPaths, title = "qq", options = {}) {
   <link rel="stylesheet" href="${escapeHtml(assetPaths.css)}">
   <script defer src="${escapeHtml(assetPaths.htmx)}"></script>
   <script defer src="${escapeHtml(assetPaths.sse)}"></script>
-  <script defer src="${escapeHtml(assetPaths.browser)}" data-service-worker="${escapeHtml(assetPaths.serviceWorker)}"${assetPaths.uiGeneration ? ` data-ui-generation="${escapeHtml(assetPaths.uiGeneration)}"` : ""}${assetPaths.uiRevision ? ` data-ui-revision="${escapeHtml(assetPaths.uiRevision)}"` : ""}></script>
+  <script defer src="${escapeHtml(assetPaths.browser)}" data-service-worker="${escapeHtml(assetPaths.serviceWorker)}"${assetPaths.latencyEndpoint ? ` data-latency-endpoint="${escapeHtml(assetPaths.latencyEndpoint)}"` : ""}${assetPaths.uiGeneration ? ` data-ui-generation="${escapeHtml(assetPaths.uiGeneration)}"` : ""}${assetPaths.uiRevision ? ` data-ui-revision="${escapeHtml(assetPaths.uiRevision)}"` : ""}></script>
   <script defer src="/qq/dictate/client.js"></script>
   <script defer src="/qq/cast/client.js"></script>
 </head>`;
