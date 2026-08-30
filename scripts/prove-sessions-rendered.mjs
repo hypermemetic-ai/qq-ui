@@ -157,6 +157,13 @@ const snapshotFor = (projects) => {
 };
 const smallProjects = dashboard.projects.slice(0, 4);
 const expectedSmall = smallProjects.map((project) => `${project.name}\n${project.folder}`);
+const overviewSnapshotFor = (projects) => ({
+  ...snapshotFor(projects),
+  scope: "projects",
+  project: "",
+  projectLabel: "Projects",
+  folder: "",
+});
 const paths = {
   canonical: `/qq/project/alpha/session/${architectB}`,
   projectsBase: "/qq/project",
@@ -179,6 +186,7 @@ const assetPaths = {
 };
 const pages = {
   "/small": renderPage(snapshotFor(smallProjects), paths, assetPaths),
+  "/small-overview": renderPage(overviewSnapshotFor(smallProjects), paths, assetPaths),
   "/many": renderPage(snapshotFor(dashboard.projects), paths, assetPaths),
 };
 const mime = (path) => path.endsWith(".css") ? "text/css; charset=utf-8"
@@ -331,6 +339,10 @@ async function screenshot(cdp, name) {
   const capture = await cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true });
   await writeFile(join(artifacts, `${name}.png`), Buffer.from(capture.data, "base64"));
 }
+async function accessibleNewSessionCount(cdp) {
+  const tree = await cdp.send("Accessibility.getFullAXTree");
+  return tree.nodes.filter((node) => !node.ignored && node.name?.value === "New session").length;
+}
 const openNavigation = (cdp) => cdp.evaluate(`document.querySelector('.session-heading-start').click()`);
 const openOverview = (cdp) => cdp.evaluate(`(() => {
   const nav = document.querySelector('.active-projects');
@@ -346,6 +358,10 @@ const inspectExpression = `(() => {
   const projectPort = document.querySelector('.active-projects');
   const groupPort = document.querySelector('.live-tracker');
   const composerShell = document.querySelector('#session-composer');
+  const rail = document.querySelector('#project-rail');
+  const railStyle = rail ? getComputedStyle(rail) : null;
+  const createForms = [...(groupPort?.querySelectorAll('form.new-session') ?? [])];
+  const createButtons = createForms.flatMap((form) => [...form.querySelectorAll('button[type="submit"]')]);
   const clientRect = (node) => {
     const box = node?.getBoundingClientRect();
     return box ? {
@@ -427,6 +443,14 @@ const inspectExpression = `(() => {
     const projectBox = project?.getBoundingClientRect();
     const groupBox = group?.getBoundingClientRect();
     const sessionsBox = group?.querySelector('.live-tracker-sessions')?.getBoundingClientRect();
+    const contentLeft = groupBox && sessionsBox ? Math.max(groupBox.left, sessionsBox.left) : NaN;
+    const openGap = contentLeft - start.x;
+    const channelMidpoint = start.x + (openGap / 2);
+    const projectGapArm = laneX - start.x;
+    const sessionGapArm = contentLeft - laneX;
+    const shorterGapArm = Math.min(projectGapArm, sessionGapArm);
+    const gapArmRatio = shorterGapArm > 0
+      ? Math.max(projectGapArm, sessionGapArm) / shorterGapArm : Infinity;
     const projectSlice = visibleSlice(project, projectVisibilityClip);
     const nextGroup = group ? groups[groups.indexOf(group) + 1] : null;
     const nextGroupBox = nextGroup?.getBoundingClientRect();
@@ -437,6 +461,10 @@ const inspectExpression = `(() => {
     ] : [];
     return {
       identity: identity(path), d, length: path.getTotalLength(), start, end, laneX, baselineY, segments,
+      contentLeft, openGap, channelMidpoint, projectGapArm, sessionGapArm, gapArmRatio,
+      centeredLane: Number.isFinite(channelMidpoint) && openGap > 0
+        && Math.abs(laneX - channelMidpoint) <= (openGap * .2) + .5,
+      balancedGapArms: Number.isFinite(gapArmRatio) && gapArmRatio <= 2.25,
       strokeWidth: Number.parseFloat(style.strokeWidth), stroke: style.stroke,
       opacity: Number.parseFloat(style.opacity), display: style.display, visibility: style.visibility,
       vectorEffect: style.vectorEffect, lineJoin: style.strokeLinejoin, lineCap: style.strokeLinecap,
@@ -509,6 +537,24 @@ const inspectExpression = `(() => {
     standalone: matchMedia('(display-mode: standalone)').matches,
     navMode: document.body.classList.contains('nav-mode'),
     overview: groupPort?.dataset.overview === 'true',
+    narrowNav,
+    horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
+      || document.body.scrollWidth > document.documentElement.clientWidth + 1,
+    railBorderRightWidth: Number.parseFloat(railStyle?.borderRightWidth || '0'),
+    railBorderRightStyle: railStyle?.borderRightStyle || '',
+    newSession: {
+      count: createForms.length,
+      visibleCount: createForms.filter((form) => {
+        const style = getComputedStyle(form);
+        const box = form.getBoundingClientRect();
+        return !form.hidden && style.display !== 'none' && style.visibility !== 'hidden'
+          && box.width > 0 && box.height > 0;
+      }).length,
+      tabbableCount: createButtons.filter((button) => !button.disabled && button.tabIndex >= 0).length,
+      labelledCount: createButtons.filter((button) => button.getAttribute('aria-label') === 'New session').length,
+      action: createForms[0] ? new URL(createForms[0].action, location.href).pathname : '',
+      method: createForms[0]?.method || '',
+    },
     connectorElements: document.querySelectorAll('#session-connectors').length,
     connectorLayerHidden: !layer || getComputedStyle(layer).display === 'none' || getComputedStyle(layer).visibility === 'hidden',
     connectorPointerEvents: layer ? getComputedStyle(layer).pointerEvents : '',
@@ -584,6 +630,15 @@ async function nativeProjectFocusSequence(cdp, count) {
   return sequence;
 }
 const ascending = (values) => values.every((value, index) => index === 0 || value >= values[index - 1]);
+const createActionFor = (identity) => {
+  const [project, folder = ""] = identity.split("\n");
+  return `/qq/project/${encodeURIComponent(project)}${folder ? `/${encodeURIComponent(folder)}` : ""}/sessions`;
+};
+function assertNoCenterDivider(state) {
+  if (!state.narrowNav) return;
+  assert.equal(state.railBorderRightWidth, 0,
+    "narrow installed-app project/session split has no full-height center divider");
+}
 function assertSelected(state, expected, selected = "alpha\n") {
   assert.equal(state.connectorPaths.length, 0, "selected mode has zero project connector paths");
   assert.ok(state.connectorElements === 0 || state.connectorLayerHidden,
@@ -592,9 +647,19 @@ function assertSelected(state, expected, selected = "alpha\n") {
   assert.deepEqual(state.projectSequence, expected, "left DOM/reading order is canonical");
   assert.deepEqual(state.groupSequence, expected, "right DOM/reading order matches the left exactly");
   assert.deepEqual(state.visibleGroups, [selected], "selected mode exposes only its authoritative project group");
+  assert.deepEqual(state.newSession, {
+    count: 1, visibleCount: 1, tabbableCount: 1, labelledCount: 1,
+    action: createActionFor(selected), method: "post",
+  }, "selected-project mode exposes one labelled, tabbable add-session form for the exact project/folder");
+  assertNoCenterDivider(state);
 }
 function assertOverview(state, expected) {
   assert.equal(state.overview, true, "overview mode is active");
+  assert.deepEqual(state.newSession, {
+    count: 0, visibleCount: 0, tabbableCount: 0, labelledCount: 0, action: "", method: "",
+  }, "all-project overview has no rendered, visible, interactive, or accessibility-exposed add-session control");
+  assertNoCenterDivider(state);
+  assert.equal(state.horizontalOverflow, false, "connector routing and its viewport SVG create no horizontal overflow");
   assert.equal(state.connectorElements, 1, "overview has one viewport connector layer");
   assert.equal(state.connectorPointerEvents, "none", "relationship routes never intercept full-row interaction");
   assert.deepEqual(state.connectorPathIdentities, state.visiblePairSequence,
@@ -616,6 +681,8 @@ function assertOverview(state, expected) {
     "every overview relationship has horizontal/vertical bends and no diagonal or curved segment");
   assert.ok(state.connectorPaths.every((route) => route.startAttached && route.laneInChannel),
     "each route starts at its matching project center and enters a gutter-only vertical lane");
+  assert.ok(state.connectorPaths.every((route) => route.centeredLane && route.balancedGapArms),
+    "each vertical lane stays near its real open-gap midpoint so the two gap arms remain intentionally comparable");
   if (diagnose) {
     const invalid = state.connectorPaths.filter((route) => !route.underlineAttached || !route.baselineClear)
       .map(({ identity, d, underlineAttached, baselineClear, start, laneX, baselineY, end }) => (
@@ -736,6 +803,34 @@ function assertUsageLayout(state, { narrow = false } = {}) {
 await mkdir(artifacts, { recursive: true });
 try {
   const report = {};
+
+  // A projects-scope document starts directly in overview with no destinationless
+  // add control, then gains/removes the exact control through client-side transitions.
+  const initialOverviewPwa = await launchChrome("/small-overview", { app: true });
+  await initialOverviewPwa.cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 390, height: 700, deviceScaleFactor: 3, mobile: true, screenWidth: 390, screenHeight: 700,
+  });
+  await waitForPaint(initialOverviewPwa.cdp);
+  report.pwaInitialOverviewClosed = await inspect(initialOverviewPwa.cdp, "pwa-initial-overview-closed", { capture: false });
+  assert.equal(report.pwaInitialOverviewClosed.overview, true, "initial projects-scope render remains in overview during client startup");
+  assert.equal(report.pwaInitialOverviewClosed.newSession.count, 0, "initial overview markup and startup expose no add control");
+  assert.equal(report.pwaInitialOverviewClosed.connectorPaths.length, 0, "closed initial narrow navigation has no routes");
+  await openNavigation(initialOverviewPwa.cdp);
+  report.pwaInitialOverview = await inspect(initialOverviewPwa.cdp, "pwa-initial-overview");
+  assertOverview(report.pwaInitialOverview, expectedSmall);
+  assert.equal(await accessibleNewSessionCount(initialOverviewPwa.cdp), 0,
+    "initial overview exposes no New session control in Chromium's accessibility tree");
+  await initialOverviewPwa.cdp.evaluate(`document.querySelector('.active-project-item[data-project="beta"][data-folder=""]')?.click()`);
+  report.pwaInitialSelected = await inspect(initialOverviewPwa.cdp, "pwa-initial-selected", { capture: false });
+  assertSelected(report.pwaInitialSelected, expectedSmall, "beta\n");
+  assert.equal(await accessibleNewSessionCount(initialOverviewPwa.cdp), 1,
+    "selected-project transition exposes exactly one labelled New session control to accessibility APIs");
+  await openOverview(initialOverviewPwa.cdp);
+  report.pwaInitialOverviewReentered = await inspect(initialOverviewPwa.cdp, "pwa-initial-overview-reentered", { capture: false });
+  assertOverview(report.pwaInitialOverviewReentered, expectedSmall);
+  assert.equal(await accessibleNewSessionCount(initialOverviewPwa.cdp), 0,
+    "returning to overview removes New session from Chromium's accessibility tree");
+  await closeChrome(initialOverviewPwa);
 
   // Desktop verifies the unfiltered initial state, canonical order, native Tab
   // sequence, independent pane scrolling, resize, and a live chrome replacement.
@@ -981,6 +1076,12 @@ try {
   assert.ok(report.pwaRotated.composerOccludedPairSequence.every((identity) =>
     !report.pwaRotated.connectorPathIdentities.includes(identity)),
   "rotated overview omits every pair whose right group surface is composer-occluded");
+  await manyPwa.cdp.evaluate(`document.querySelector('.active-project-item[data-project="studio"][data-folder="east"]')?.click()`);
+  report.pwaFolderSelected = await inspect(manyPwa.cdp, "pwa-folder-selected", { capture: false });
+  assertSelected(report.pwaFolderSelected, expectedMany, "studio\neast");
+  await openOverview(manyPwa.cdp);
+  report.pwaFolderOverviewReentered = await inspect(manyPwa.cdp, "pwa-folder-overview-reentered", { capture: false });
+  assertOverview(report.pwaFolderOverviewReentered, expectedMany);
   await closeChrome(manyPwa);
 
   await writeFile(join(artifacts, "report.json"), `${JSON.stringify(report, null, 2)}\n`);

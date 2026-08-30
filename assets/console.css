@@ -3051,7 +3051,7 @@ body.document-page {
     justify-content: safe center;
     padding: max(1.35rem, env(safe-area-inset-top)) 1rem 7.25rem max(.9rem, env(safe-area-inset-left));
     overflow: hidden;
-    border-right: 1px solid #1a1a1a;
+    border-right: 0;
     background: transparent;
     box-shadow: none;
     transform: none;

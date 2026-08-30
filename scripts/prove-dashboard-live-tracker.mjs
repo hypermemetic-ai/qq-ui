@@ -214,6 +214,20 @@ for (const id of [rootId, childId, siblingId]) {
 }
 assert.match(html, /class="new-session" action="\/qq\/project\/alpha\/sessions"/,
   "tracker mode preserves the current project new-session action");
+const initialOverviewHtml = renderSessionContent({
+  ...rawSnapshot,
+  scope: "projects",
+  project: "",
+  dashboard: validDashboard,
+}, paths);
+assert.match(initialOverviewHtml, /class="session-traversal live-tracker"[^>]*aria-label="All project sessions"[^>]*data-overview="true"/,
+  "projects-scope markup starts explicitly in the all-project sessions overview");
+assert.doesNotMatch(initialOverviewHtml, /class="new-session"/,
+  "initial all-project markup does not render a destinationless add-session control");
+const initialOverviewGroups = [...initialOverviewHtml.matchAll(/<section class="live-tracker-project"[^>]*>/g)].map((match) => match[0]);
+assert.equal(initialOverviewGroups.length, validDashboard.projects.length);
+assert.ok(initialOverviewGroups.every((group) => !/ hidden(?:>| )/.test(group) && /data-current="false"/.test(group)),
+  "initial all-project markup exposes every semantic group without selecting one");
 assert.match(html, /id="session-chrome"[^>]*sse-swap="chrome"[\s\S]*?class="session-traversal live-tracker"/,
   "the tracker belongs to the existing SSE-owned chrome region");
 const connectorRail = renderProjectRail({
@@ -385,8 +399,8 @@ assert.match(overviewSource, /for \(const group of liveTrackerGroups\(tracker\)\
   "overview reveals every server-ordered project group");
 assert.match(overviewSource, /tracker\.dataset\.overview = "true"[\s\S]*?All project sessions/,
   "overview has explicit state and accessible all-project identity");
-assert.match(overviewSource, /preserveOverviewCreateState\(tracker\)/,
-  "overview does not expose a create action without a filtered project");
+assert.match(overviewSource, /removeLiveTrackerCreate\(tracker\)/,
+  "overview removes the destinationless create control from rendering, interaction, and accessibility");
 const chooserBehaviorSource = browser.match(/  const CHOOSER_INTERACTIVE = [\s\S]*?(?=  const sessionEventsUrl)/)?.[0] ?? "";
 const chooserClickSource = browser.match(/  const modifiedClick = [\s\S]*?(?=  const applyChairMode)/)?.[0] ?? "";
 assert.notEqual(chooserBehaviorSource, "", "empty-space behavior remains independently provable");
@@ -571,18 +585,24 @@ assert.doesNotMatch(connectorSource, /targetVerticalScrollport|visibleConnectorS
   "right endpoint visibility never proxies through or requires overlap with the left project list");
 assert.match(connectorSource, /sessionConnectorLaneOrder[\s\S]*?canonicalOrderWorks[\s\S]*?reverseOrderWorks[\s\S]*?incoming/,
   "mixed vertical intervals produce deterministic pairwise constraints with canonical tie-breaking");
-assert.match(connectorSource, /SESSION_CONNECTOR_LANE_GAP = 6[\s\S]*?SESSION_CONNECTOR_MIN_LANE_GAP = 1\.25/,
-  "lanes prefer six CSS pixels while retaining a defined non-overlap minimum");
+assert.match(connectorSource, /SESSION_CONNECTOR_LANE_GAP = 6[\s\S]*?SESSION_CONNECTOR_MIN_LANE_GAP = 1\.25[\s\S]*?SESSION_CONNECTOR_LANE_BUNDLE_RATIO = 0\.34/,
+  "lanes retain defined preferred/minimum separation inside a modest adaptive bundle");
 assert.match(connectorSource, /sessionConnectorBaseline[\s\S]*?Math\.abs\(preferred - sourceY\) >= 1[\s\S]*?preferred >= sourceY \? 2 : -2/,
   "an exact source/baseline alignment selects another clear below-group baseline instead of collapsing its bend");
-assert.match(connectorSource, /channelStart[\s\S]*?channelEnd[\s\S]*?laneRanks[\s\S]*?routes\[index\]\.lane/,
-  "every eligible route receives a unique lane derived from the actual project-to-content channel");
+assert.match(connectorSource, /channelStart[\s\S]*?channelEnd[\s\S]*?channelMidpoint = \(channelStart \+ channelEnd\) \/ 2[\s\S]*?firstLane = channelMidpoint - \(laneSpan \/ 2\)[\s\S]*?laneRanks[\s\S]*?routes\[index\]\.lane/,
+  "every eligible route receives a unique modestly offset lane centered in the actual project-to-content gap");
 assert.match(connectorSource, /setAttribute\("d", `M \${start\.x[^`]* H \${lane[^`]* V \${baseline[^`]* H \${endX/,
   "every relationship is one continuous M/H/V/H path ending in its group underline");
 assert.doesNotMatch(connectorSource, /setAttribute\("d",[^\n]*[LQCSTA] \${/,
   "relationship path emission contains no diagonal, curved, or arc command");
 assert.match(browser, /const showLiveTrackerOverview[\s\S]*?scheduleSessionConnectors\(\)[\s\S]*?const showLiveTrackerProject[\s\S]*?suppressSessionConnectors\(\)/,
   "overview entry schedules routes while single-project entry synchronously removes them");
+assert.match(browser, /const removeLiveTrackerCreate[\s\S]*?create\.remove\(\)[\s\S]*?const ensureLiveTrackerCreate[\s\S]*?create\.method = "post"[\s\S]*?aria-label", "New session"/,
+  "client mode transitions remove the overview control node and reconstruct one native labelled POST form on selection");
+assert.match(browser, /const showLiveTrackerOverview[\s\S]*?removeLiveTrackerCreate\(tracker\)[\s\S]*?const showLiveTrackerProject[\s\S]*?ensureLiveTrackerCreate\(tracker, project, folder\)/,
+  "overview and selected-project transitions reconcile add-session DOM presence in opposite directions");
+assert.match(browser, /ensureLiveTrackerCreate[\s\S]*?encodeURIComponent\(project\)[\s\S]*?encodeURIComponent\(folder\)[\s\S]*?\/sessions/,
+  "the reconstructed selected-project action is project/folder aware");
 assert.match(browser, /event\.target\?\.matches\?\.\("\.active-projects, \.live-tracker"\)[\s\S]*?scheduleSessionConnectors\(\)/,
   "independent project and group pane scrolling recomputes relationship geometry");
 assert.match(browser, /new ResizeObserver[\s\S]*?window\.addEventListener\("resize", scheduleSessionConnectors[\s\S]*?orientationchange/,
@@ -611,9 +631,9 @@ const railSyncSource = browser.match(/const syncRailAfterSwitch = \(meta\) => \{
 assert.match(railSyncSource, /liveTrackerProjectFilter !== LIVE_TRACKER_OVERVIEW[\s\S]*?liveTrackerProjectFilter = projectIdentity\(\{ project, folder \}\)/,
   "selecting a session updates navigation without collapsing an active all-project overview");
 assert.match(railSyncSource, /create\.hidden = child \|\| projectsScope[\s\S]*?syncLiveTrackerProjectFilter\(\)/,
-  "session defaults are applied before the active tracker filter restores overview create state");
+  "session defaults are applied before the active tracker mode reconciles project-specific creation");
 assert.doesNotMatch(railSyncSource, /syncLiveTrackerProjectFilter\(\);[\s\S]*?create\.hidden\s*=/,
-  "a root session switch cannot unhide project-specific creation after overview restoration");
+  "a session switch cannot restore a destinationless control after overview reconciliation");
 const pickerSource = browser.match(/const selectOverlaySession = \(link\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
 assert.match(pickerSource, /const tracker = link\.matches\("\.live-tracker-session"\)[\s\S]*?const canonical = tracker[\s\S]*?\? link\.href/,
   "tracker switching keeps its authoritative session-open href rather than constructing a project route");
@@ -629,6 +649,8 @@ assert.match(css, /\.nav-mode \.project-rail \{[^}]*width:\s*50%/,
   "the project pane retains its original half-width");
 assert.match(css, /\.nav-mode \.session-traversal \{[^}]*width:\s*50%/,
   "the session pane retains its original half-width");
+assert.match(css, /\.nav-mode \.project-rail \{[^}]*width:\s*50%[^}]*border-right:\s*0/,
+  "the narrow installed-app split removes its full-height central divider");
 assert.doesNotMatch(css, /\.nav-mode \.project-rail \{[^}]*width:\s*42%|\.nav-mode \.session-traversal \{[^}]*width:\s*58%/,
   "the visual correction removes the ornamental pane proportions");
 const railClamp = css.match(/--project-rail-width:\s*clamp\(([\d.]+)rem,\s*([\d.]+)vw,\s*([\d.]+)rem\)/);
@@ -699,7 +721,7 @@ assert.match(css, /\.live-tracker-child-strip \.live-tracker-session:focus-visib
 assert.match(css, /\.live-tracker-child-strip \.live-tracker-session-current \{[^}]*background:\s*transparent/,
   "the compact active state stays understated and card-free");
 assert.match(browser, /\.new-session:not\(\[hidden\]\)/,
-  "overview's hidden project-specific create action cannot be invoked by shortcut");
+  "the new-session shortcut only targets a selected-project control that is still present");
 
 const plugin = readFileSync(new URL("../src/plugin.mjs", import.meta.url), "utf8");
 assert.match(plugin, /const dashboardOf = \(\) => ctx\.get\?\.\("qq-dashboard", false\) \?\? null;/,
