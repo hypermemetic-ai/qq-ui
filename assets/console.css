@@ -3583,13 +3583,13 @@ body.document-page {
   white-space: nowrap;
 }
 
-/* All-project session overview: explicit labels and stable grouping. */
+/* All-project session overview: connectors replace duplicate visible labels. */
 .live-tracker[data-overview="true"] {
   flex-direction: column;
   align-items: stretch;
   justify-content: center;
   justify-content: safe center;
-  gap: .65rem;
+  gap: .9rem;
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -3602,17 +3602,16 @@ body.document-page {
   padding-block: .1rem;
 }
 .live-tracker[data-overview="true"] .live-tracker-project-name {
-  position: static;
-  width: auto;
-  height: auto;
-  margin: 0 0 .22rem .15rem;
-  overflow: visible;
-  clip: auto;
-  clip-path: none;
-  color: #707070;
-  font-size: .68rem;
-  line-height: 1.2;
-  white-space: normal;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  border: 0;
+  white-space: nowrap;
 }
 .live-tracker-project-empty {
   min-height: 1.65rem;
@@ -3701,7 +3700,7 @@ body.document-page {
   outline-offset: -1px;
 }
 
-/* Project → session-group relationships are independent direct hairlines. */
+/* Each project → session-group route bends in its own orthogonal channel. */
 .session-connectors {
   position: fixed;
   z-index: 6;

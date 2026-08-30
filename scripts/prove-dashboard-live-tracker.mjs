@@ -569,10 +569,18 @@ assert.match(connectorSource, /sessionTrackerConnectorRect[\s\S]*?#session-compo
   "narrow group visibility uses the right tracker band capped by the actual composer");
 assert.doesNotMatch(connectorSource, /targetVerticalScrollport|visibleConnectorSurface\(group, tracker, projects\)/,
   "right endpoint visibility never proxies through or requires overlap with the left project list");
-assert.match(connectorSource, /setAttribute\("d", `M \${start\.x[^`]* L \${end\.x/,
-  "every relationship uses its own direct monotonic segment rather than orthogonal shared lanes");
-assert.doesNotMatch(connectorSource, /shared|trunk|lane|connectorPathData|[HV] \${/i,
-  "the new relationship design contains no shared-lane or trunk routing assumptions");
+assert.match(connectorSource, /sessionConnectorLaneOrder[\s\S]*?canonicalOrderWorks[\s\S]*?reverseOrderWorks[\s\S]*?incoming/,
+  "mixed vertical intervals produce deterministic pairwise constraints with canonical tie-breaking");
+assert.match(connectorSource, /SESSION_CONNECTOR_LANE_GAP = 6[\s\S]*?SESSION_CONNECTOR_MIN_LANE_GAP = 1\.25/,
+  "lanes prefer six CSS pixels while retaining a defined non-overlap minimum");
+assert.match(connectorSource, /sessionConnectorBaseline[\s\S]*?Math\.abs\(preferred - sourceY\) >= 1[\s\S]*?preferred >= sourceY \? 2 : -2/,
+  "an exact source/baseline alignment selects another clear below-group baseline instead of collapsing its bend");
+assert.match(connectorSource, /channelStart[\s\S]*?channelEnd[\s\S]*?laneRanks[\s\S]*?routes\[index\]\.lane/,
+  "every eligible route receives a unique lane derived from the actual project-to-content channel");
+assert.match(connectorSource, /setAttribute\("d", `M \${start\.x[^`]* H \${lane[^`]* V \${baseline[^`]* H \${endX/,
+  "every relationship is one continuous M/H/V/H path ending in its group underline");
+assert.doesNotMatch(connectorSource, /setAttribute\("d",[^\n]*[LQCSTA] \${/,
+  "relationship path emission contains no diagonal, curved, or arc command");
 assert.match(browser, /const showLiveTrackerOverview[\s\S]*?scheduleSessionConnectors\(\)[\s\S]*?const showLiveTrackerProject[\s\S]*?suppressSessionConnectors\(\)/,
   "overview entry schedules routes while single-project entry synchronously removes them");
 assert.match(browser, /event\.target\?\.matches\?\.\("\.active-projects, \.live-tracker"\)[\s\S]*?scheduleSessionConnectors\(\)/,
@@ -647,18 +655,18 @@ assert.match(connectorLayerStyle, /position:\s*fixed[\s\S]*?pointer-events:\s*no
 const connectorStroke = Number(connectorPathStyle.match(/stroke-width:\s*([\d.]+)px/)?.[1]);
 assert.ok(connectorStroke > 0 && connectorStroke <= 1,
   "relationship lines are visible hairlines no thicker than one CSS pixel");
-assert.match(connectorPathStyle, /stroke:\s*#[0-9a-f]{6}[\s\S]*?vector-effect:\s*non-scaling-stroke/i,
-  "relationship lines retain their restrained neutral stroke at actual render scale");
+assert.match(connectorPathStyle, /stroke:\s*#[0-9a-f]{6}[\s\S]*?stroke-linecap:\s*butt[\s\S]*?stroke-linejoin:\s*miter[\s\S]*?vector-effect:\s*non-scaling-stroke/i,
+  "relationship lines retain a restrained neutral, square, non-scaling stroke");
 assert.doesNotMatch(connectorPathStyle, /filter|animation|marker|drop-shadow|round/i,
   "relationship lines add no glow, animation, arrows, dots, or heavy rounding");
 const overviewStyle = css.match(/\.live-tracker\[data-overview="true"\] \{([^}]*)\}/)?.[1] ?? "";
-assert.match(overviewStyle, /flex-direction:\s*column/,
-  "overview preserves project order in a simple vertical flow");
+assert.match(overviewStyle, /flex-direction:\s*column[\s\S]*?gap:\s*\.9rem/,
+  "overview preserves project order and reserves clear below-group baseline space");
 assert.doesNotMatch(overviewStyle, /background|gradient|border|box-shadow/i,
   "overview grouping adds spacing only, not ornamental chrome");
 const overviewHeadingStyle = css.match(/\.live-tracker\[data-overview="true"\] \.live-tracker-project-name \{([^}]*)\}/)?.[1] ?? "";
-assert.match(overviewHeadingStyle, /position:\s*static[\s\S]*?clip-path:\s*none/,
-  "overview restores each human project/folder heading to visible reading order");
+assert.match(overviewHeadingStyle, /position:\s*absolute[\s\S]*?width:\s*1px[\s\S]*?clip-path:\s*inset\(50%\)/,
+  "overview project/folder headings retain semantic text while becoming visually hidden");
 assert.match(css, /\.project-rail \.active-projects:focus-visible \{[^}]*outline:\s*1px solid/,
   "the compact keyboard-operable chooser surface has a restrained visible focus state");
 const overviewSessionsStyle = css.match(/\.live-tracker\[data-overview="true"\] \.live-tracker-sessions \{([^}]*)\}/)?.[1] ?? "";
