@@ -217,6 +217,8 @@ assert.match(connectorRail, /<svg id="session-connectors" class="session-connect
   "the no-JS surface includes an inert, assistive-technology-hidden connector layer");
 assert.doesNotMatch(connectorRail, /<svg[^>]*session-connectors[^>]*>[\s\S]*?<path/,
   "decorative connectors degrade to an empty hidden layer without browser geometry");
+assert.match(connectorRail, /<nav class="active-projects"[^>]*aria-keyshortcuts="ArrowUp ArrowDown Enter Space"[^>]*tabindex="0">/,
+  "the project chooser surface exposes a focused keyboard route to the all-project overview");
 
 const secondChildId = "session-7a110000-0000-4000-8000-000000000004";
 const stackedDashboard = structuredClone(validDashboard);
@@ -298,11 +300,122 @@ assert.match(overviewSource, /tracker\.dataset\.overview = "true"[\s\S]*?All pro
   "overview has explicit state and accessible all-project identity");
 assert.match(overviewSource, /preserveOverviewCreateState\(tracker\)/,
   "overview does not expose a create action without a filtered project");
-const emptySpaceSource = browser.match(/const clearProjectFilterFromEmptySpace = \(target\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
-assert.match(emptySpaceSource, /target\.closest\("\.active-projects, \.session-traversal"\)/,
-  "empty-space clearing is limited to the two session chooser surfaces");
-assert.match(emptySpaceSource, /target\.closest\(CHOOSER_INTERACTIVE\)/,
-  "projects, sessions, forms, menus, and controls are excluded from empty-space clearing");
+const chooserBehaviorSource = browser.match(/  const CHOOSER_INTERACTIVE = [\s\S]*?(?=  const sessionEventsUrl)/)?.[0] ?? "";
+assert.notEqual(chooserBehaviorSource, "", "empty-space behavior remains independently provable");
+assert.match(chooserBehaviorSource, /closest\?\.\("#project-rail, \.active-projects"\)/,
+  "empty-space clearing includes the full left rail and its project-nav padding");
+assert.match(chooserBehaviorSource, /closest\?\.\("#inactive-project-tree"\)[\s\S]*?return null/,
+  "the whole inactive file-tree region is excluded before rail-surface classification");
+assert.match(chooserBehaviorSource, /projectChooserAction\(target, surface\)/,
+  "empty-space clearing classifies actionable descendants before changing views");
+const chooserBehavior = runInNewContext(`(() => {
+class Element {
+  constructor(kind, parent = null, actionable = false) {
+    this.kind = kind;
+    this.parent = parent;
+    this.actionable = actionable;
+  }
+  closest(selector) {
+    for (let node = this; node; node = node.parent) {
+      if (selector === "#project-rail, .active-projects") {
+        if (node.kind === "rail" || node.kind === "nav") return node;
+      } else if (selector === "#inactive-project-tree") {
+        if (node.kind === "file-tree") return node;
+      } else if (selector === ".active-projects li") {
+        if (node.kind === "project-row") return node;
+      } else if (node.actionable) {
+        return node;
+      }
+    }
+    return null;
+  }
+}
+let overviewCount = 0;
+const desktopChair = () => true;
+const navMode = () => false;
+const showLiveTrackerOverview = () => { overviewCount += 1; return true; };
+${chooserBehaviorSource}
+const rail = new Element("rail");
+const nav = new Element("nav", rail, true);
+const navPadding = new Element("padding", nav);
+const projectRow = new Element("project-row", nav);
+const projectRowGutter = new Element("project-row-gutter", projectRow);
+const projectLink = new Element("project-link", projectRow, true);
+const projectLabel = new Element("project-label", projectLink);
+const closeButton = new Element("close", rail, true);
+const closeMark = new Element("close-mark", closeButton);
+const rightSession = new Element("session", null, true);
+const sessionLabel = new Element("session-label", rightSession);
+const menu = new Element("menu", rail, true);
+const menuPadding = new Element("menu-padding", menu);
+const fileTree = new Element("file-tree", rail);
+const treeColumns = new Element("tree-columns", fileTree);
+const treePadding = new Element("tree-padding", treeColumns);
+const treeLoading = new Element("tree-loading", treeColumns);
+const treeEmptyColumn = new Element("tree-empty-column", treeColumns);
+const keyEvent = (target, key, extras = {}) => ({
+  target,
+  key,
+  defaultPrevented: false,
+  altKey: false,
+  ctrlKey: false,
+  metaKey: false,
+  shiftKey: false,
+  preventDefault() { this.defaultPrevented = true; },
+  ...extras,
+});
+const result = {
+  railPadding: clearProjectFilterFromEmptySpace(rail),
+  navPadding: clearProjectFilterFromEmptySpace(navPadding),
+  projectRow: clearProjectFilterFromEmptySpace(projectRowGutter),
+  projectLink: clearProjectFilterFromEmptySpace(projectLabel),
+  closeControl: clearProjectFilterFromEmptySpace(closeMark),
+  sessionStrip: clearProjectFilterFromEmptySpace(sessionLabel),
+  menuControl: clearProjectFilterFromEmptySpace(menuPadding),
+  fileTreeSurface: clearProjectFilterFromEmptySpace(fileTree),
+  fileTreePadding: clearProjectFilterFromEmptySpace(treePadding),
+  fileTreeLoading: clearProjectFilterFromEmptySpace(treeLoading),
+  fileTreeEmpty: clearProjectFilterFromEmptySpace(treeEmptyColumn),
+};
+const keyboard = keyEvent(nav, "Enter");
+result.keyboard = clearProjectFilterFromChooserKey(keyboard);
+result.keyboardPrevented = keyboard.defaultPrevented;
+const spaceKeyboard = keyEvent(nav, " ");
+result.spaceKeyboard = clearProjectFilterFromChooserKey(spaceKeyboard);
+result.spaceKeyboardPrevented = spaceKeyboard.defaultPrevented;
+const childKeyboard = keyEvent(projectLink, "Enter");
+result.childKeyboard = clearProjectFilterFromChooserKey(childKeyboard);
+result.childKeyboardPrevented = childKeyboard.defaultPrevented;
+const modifiedKeyboard = keyEvent(nav, "Enter", { ctrlKey: true });
+result.modifiedKeyboard = clearProjectFilterFromChooserKey(modifiedKeyboard);
+result.overviewCount = overviewCount;
+return result;
+})()`);
+assert.match(browser, /if \(drawerIsOpen\(\)\) \{[\s\S]*?return;\n    \}\n    if \(clearProjectFilterFromChooserKey\(event\)\) return;/,
+  "modal and drawer keyboard guards run before chooser-background activation");
+assert.match(browser, /!event\.defaultPrevented && !modifiedClick\(event\) && clearProjectFilterFromEmptySpace\(target\)/,
+  "ordinary pointer and synthesized touch clicks reach the guarded empty-surface action");
+assert.deepEqual({ ...chooserBehavior }, {
+  railPadding: true,
+  navPadding: true,
+  projectRow: false,
+  projectLink: false,
+  closeControl: false,
+  sessionStrip: false,
+  menuControl: false,
+  fileTreeSurface: false,
+  fileTreePadding: false,
+  fileTreeLoading: false,
+  fileTreeEmpty: false,
+  keyboard: true,
+  keyboardPrevented: true,
+  spaceKeyboard: true,
+  spaceKeyboardPrevented: true,
+  childKeyboard: false,
+  childKeyboardPrevented: false,
+  modifiedKeyboard: false,
+  overviewCount: 4,
+}, "only genuine left chooser space, or the focused chooser landmark, enters overview");
 const connectorSource = browser.match(/const paintSessionConnectors = \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
 assert.match(connectorSource, /for \(const group of liveTrackerGroups\(tracker\)\)[\s\S]*?createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "path"\)/,
   "connector geometry creates at most one path for each project group");
@@ -312,7 +425,7 @@ const connectorGeometrySource = browser.match(/  const connectorOverflowClientRe
 assert.notEqual(connectorGeometrySource, "", "connector clipping helpers remain independently provable");
 const geometry = runInNewContext(`(() => {
 ${connectorGeometrySource}
-return { connectorOverflowClientRect, intersectConnectorRect };
+return { connectorOverflowClientRect, intersectConnectorRect, connectorPathData };
 })()`, { document: { documentElement: { clientWidth: 1024, clientHeight: 768 } } });
 const overflowClient = geometry.connectorOverflowClientRect({
   clientLeft: 2,
@@ -333,14 +446,223 @@ assert.equal(geometry.intersectConnectorRect(
   { left: 20, top: 1, right: 90, bottom: 22 },
   overflowClient,
 ), null, "a viewport-visible row clipped above its overflow client paints no connector");
-assert.match(connectorSource, /projectRect\.top \+ projectRect\.height \/ 2[\s\S]*?groupRect\.top \+ groupRect\.height \/ 2/,
+assert.match(connectorGeometrySource, /projectRect\.top \+ projectRect\.height \/ 2[\s\S]*?groupRect\.top \+ groupRect\.height \/ 2/,
   "both ends use deliberate vertical centering after clipping");
-assert.match(connectorSource, /`M \${startX} \${startY} H \${elbowX} V \${endY} H \${endX}`/,
-  "each project uses one restrained orthogonal connector");
+assert.match(connectorGeometrySource, /if \(!narrow\)[\s\S]*?H \$\{elbowX\} V \$\{endY\} H \$\{endX\}/,
+  "desktop uses one restrained orthogonal cross-column connector");
+assert.match(connectorGeometrySource, /branchInset = Math\.min\(12, groupRect\.width \/ 2\)[\s\S]*?H \$\{branchX\} V \$\{endY\} H \$\{endX\}/,
+  "narrow geometry turns inside the session group instead of tracing the 50/50 divider");
+assert.match(connectorSource, /connectorPathData\(projectRect, groupRect, !desktopChair\(\)\)/,
+  "connector painting selects geometry from the live responsive layout");
+assert.doesNotMatch(connectorSource, /!desktopChair\(\)[\s\S]{0,40}!navMode\(\)/,
+  "narrow connector painting is not suppressed outside one transient chair mode");
+assert.match(connectorSource, /document\.querySelector\("\.live-tracker"\)/,
+  "connector painting runs for the ordinary selected-project tracker as well as overview");
+assert.doesNotMatch(connectorSource, /live-tracker\[data-overview/,
+  "selected-project focus is not gated out of connector painting");
+const clippedDesktopPath = geometry.connectorPathData(
+  { left: 12, top: 23, right: 80, bottom: 40, width: 68, height: 17 },
+  { left: 120, top: 50, right: 300, bottom: 110, width: 180, height: 60 },
+  false,
+);
+assert.deepEqual({ ...clippedDesktopPath }, {
+  d: "M 80.5 31.5 H 100.5 V 80.5 H 120.5",
+  layout: "desktop",
+}, "desktop connector geometry remains centered and orthogonal");
+const clippedNarrowPath = geometry.connectorPathData(
+  { left: 12, top: 23, right: 180, bottom: 40, width: 168, height: 17 },
+  { left: 211, top: 50, right: 376, bottom: 110, width: 165, height: 60 },
+  true,
+);
+assert.deepEqual({ ...clippedNarrowPath }, {
+  d: "M 180.5 31.5 H 223.5 V 80.5 H 211.5",
+  layout: "narrow",
+}, "narrow connector geometry has a visible target bracket inside the session group");
+const connectorPaint = runInNewContext(`(() => {
+class Element {}
+class HTMLElement extends Element {
+  constructor(rect = {}, client = {}) {
+    super();
+    this.rect = rect;
+    this.clientLeft = client.left ?? 0;
+    this.clientTop = client.top ?? 0;
+    this.clientWidth = client.width ?? Math.max(0, (rect.right ?? 0) - (rect.left ?? 0));
+    this.clientHeight = client.height ?? Math.max(0, (rect.bottom ?? 0) - (rect.top ?? 0));
+    this.dataset = {};
+    this.hidden = false;
+  }
+  getBoundingClientRect() { return this.rect; }
+}
+class SVGElement extends Element {
+  constructor() { super(); this.attributes = {}; this.children = []; this.hidden = true; }
+  setAttribute(name, value) { this.attributes[name] = value; }
+  replaceChildren(fragment) { this.children = [...fragment.children]; }
+}
+class PathElement extends Element {
+  constructor() { super(); this.attributes = {}; this.dataset = {}; }
+  setAttribute(name, value) { this.attributes[name] = value; }
+}
+const setRect = (node, rect, client = {}) => {
+  node.rect = rect;
+  node.clientLeft = client.left ?? 0;
+  node.clientTop = client.top ?? 0;
+  node.clientWidth = client.width ?? Math.max(0, rect.right - rect.left);
+  node.clientHeight = client.height ?? Math.max(0, rect.bottom - rect.top);
+};
+const projectOverflow = new HTMLElement(
+  { left: 0, top: 0, right: 160, bottom: 500 },
+  { width: 160, height: 500 },
+);
+const tracker = new HTMLElement(
+  { left: 180, top: 0, right: 980, bottom: 700 },
+  { width: 800, height: 700 },
+);
+const projectItem = new HTMLElement({ left: 20, top: 40, right: 145, bottom: 72, width: 125, height: 32 });
+projectItem.closest = () => projectOverflow;
+const secondProjectItem = new HTMLElement({ left: 20, top: 82, right: 150, bottom: 114, width: 130, height: 32 });
+secondProjectItem.closest = () => projectOverflow;
+const group = new HTMLElement({ left: 200, top: 120, right: 700, bottom: 200, width: 500, height: 80 });
+group.dataset = { project: "alpha", folder: "" };
+group.projectItem = projectItem;
+const secondGroup = new HTMLElement({ left: 200, top: 240, right: 700, bottom: 300, width: 500, height: 60 });
+secondGroup.dataset = { project: "beta", folder: "client" };
+secondGroup.projectItem = secondProjectItem;
+secondGroup.hidden = true;
+tracker.groups = [group, secondGroup];
+const svg = new SVGElement();
+const document = {
+  documentElement: { clientWidth: 1000, clientHeight: 700 },
+  querySelector: (selector) => selector === ".live-tracker" ? tracker : null,
+  createDocumentFragment: () => ({ children: [], append(node) { this.children.push(node); } }),
+  createElementNS: () => new PathElement(),
+};
+let narrow = false;
+let sessionConnectorFrame = 1;
+const sessionConnectors = () => svg;
+const desktopChair = () => !narrow;
+const liveTrackerGroups = () => tracker.groups;
+const connectorProjectItem = (candidate) => candidate.projectItem;
+${connectorGeometrySource}
+${connectorSource}
+const snapshot = () => ({
+  count: svg.children.length,
+  hidden: svg.hidden,
+  d: svg.children[0]?.attributes.d,
+  layout: svg.children[0]?.dataset.layout,
+  layouts: svg.children.map((child) => child.dataset.layout),
+  vectorEffect: svg.children[0]?.attributes["vector-effect"],
+  project: svg.children[0]?.dataset.project,
+  viewBox: svg.attributes.viewBox,
+  width: svg.attributes.width,
+  height: svg.attributes.height,
+});
+paintSessionConnectors();
+const desktopFocus = snapshot();
+secondGroup.hidden = false;
+paintSessionConnectors();
+const desktopOverview = snapshot();
+
+narrow = true;
+document.documentElement.clientWidth = 390;
+document.documentElement.clientHeight = 700;
+setRect(projectOverflow, { left: 0, top: 0, right: 195, bottom: 700 }, { width: 195, height: 700 });
+setRect(tracker, { left: 195, top: 0, right: 390, bottom: 700 }, { width: 195, height: 700 });
+setRect(projectItem, { left: 14, top: 40, right: 180, bottom: 72, width: 166, height: 32 });
+setRect(secondProjectItem, { left: 14, top: 82, right: 180, bottom: 114, width: 166, height: 32 });
+setRect(group, { left: 211, top: 120, right: 376, bottom: 210, width: 165, height: 90 });
+setRect(secondGroup, { left: 211, top: 240, right: 376, bottom: 320, width: 165, height: 80 });
+secondGroup.hidden = true;
+paintSessionConnectors();
+const narrowFocus = snapshot();
+secondGroup.hidden = false;
+paintSessionConnectors();
+const narrowOverview = snapshot();
+
+document.documentElement.clientWidth = 640;
+document.documentElement.clientHeight = 390;
+setRect(projectOverflow, { left: 0, top: 0, right: 320, bottom: 390 }, { width: 320, height: 390 });
+setRect(tracker, { left: 320, top: 0, right: 640, bottom: 390 }, { width: 320, height: 390 });
+setRect(projectItem, { left: 14, top: 24, right: 305, bottom: 56, width: 291, height: 32 });
+setRect(secondProjectItem, { left: 14, top: 64, right: 305, bottom: 96, width: 291, height: 32 });
+setRect(group, { left: 336, top: 72, right: 624, bottom: 152, width: 288, height: 80 });
+setRect(secondGroup, { left: 336, top: 174, right: 624, bottom: 244, width: 288, height: 70 });
+secondGroup.hidden = true;
+paintSessionConnectors();
+const narrowOrientation = snapshot();
+return { desktopFocus, desktopOverview, narrowFocus, narrowOverview, narrowOrientation };
+})()`);
+assert.deepEqual({ ...connectorPaint.desktopFocus, layouts: [...connectorPaint.desktopFocus.layouts] }, {
+  count: 1,
+  hidden: false,
+  d: "M 145.5 56.5 H 172.5 V 160.5 H 200.5",
+  layout: "desktop",
+  layouts: ["desktop"],
+  vectorEffect: "non-scaling-stroke",
+  project: "alpha",
+  viewBox: "0 0 1000 700",
+  width: "1000",
+  height: "700",
+}, "filtered desktop focus paints one visible viewport-sized connector");
+assert.equal(connectorPaint.desktopOverview.count, 2,
+  "desktop overview paints exactly one connector for each visible project group");
+assert.deepEqual([...connectorPaint.desktopOverview.layouts], ["desktop", "desktop"],
+  "desktop overview keeps both group connectors in cross-column geometry");
+assert.deepEqual({ ...connectorPaint.narrowFocus, layouts: [...connectorPaint.narrowFocus.layouts] }, {
+  count: 1,
+  hidden: false,
+  d: "M 180.5 56.5 H 223.5 V 165.5 H 211.5",
+  layout: "narrow",
+  layouts: ["narrow"],
+  vectorEffect: "non-scaling-stroke",
+  project: "alpha",
+  viewBox: "0 0 390 700",
+  width: "390",
+  height: "700",
+}, "filtered mobile focus paints one target bracket inside the right pane");
+assert.equal(connectorPaint.narrowOverview.count, 2,
+  "mobile overview paints one narrow connector for every visible project group");
+assert.deepEqual([...connectorPaint.narrowOverview.layouts], ["narrow", "narrow"],
+  "mobile overview never falls back to desktop gutter elbows");
+assert.deepEqual({
+  d: connectorPaint.narrowOrientation.d,
+  layout: connectorPaint.narrowOrientation.layout,
+  viewBox: connectorPaint.narrowOrientation.viewBox,
+  width: connectorPaint.narrowOrientation.width,
+  height: connectorPaint.narrowOrientation.height,
+}, {
+  d: "M 305.5 40.5 H 348.5 V 112.5 H 336.5",
+  layout: "narrow",
+  viewBox: "0 0 640 390",
+  width: "640",
+  height: "390",
+}, "narrow connector geometry follows resize and orientation changes");
+const orthogonalPath = (d) => {
+  const match = d.match(/^M ([\d.]+) ([\d.]+) H ([\d.]+) V ([\d.]+) H ([\d.]+)$/);
+  assert.ok(match, `connector is an orthogonal on-screen path: ${d}`);
+  return match.slice(1).map(Number);
+};
+const assertOnScreen = (paint, width, height) => {
+  const [startX, startY, branchX, endY, endX] = orthogonalPath(paint.d);
+  for (const x of [startX, branchX, endX]) assert.ok(x >= 0 && x <= width, `x=${x} stays inside ${width}px`);
+  for (const y of [startY, endY]) assert.ok(y >= 0 && y <= height, `y=${y} stays inside ${height}px`);
+  for (const coordinate of [startX, startY, branchX, endY, endX]) {
+    assert.equal(coordinate % 1, .5, `coordinate ${coordinate} centers the one-pixel stroke on a CSS pixel`);
+  }
+  return { startX, startY, branchX, endY, endX };
+};
+assertOnScreen(connectorPaint.desktopFocus, 1000, 700);
+const narrowCoordinates = assertOnScreen(connectorPaint.narrowFocus, 390, 700);
+assert.ok(narrowCoordinates.startX < 195 && narrowCoordinates.endX > 195,
+  "mobile connector crosses from the visible left project pane to the visible right group");
+assert.ok(narrowCoordinates.branchX > narrowCoordinates.endX && narrowCoordinates.branchX < 376,
+  "mobile vertical branch sits inside session content rather than on the 50/50 pane border");
+assertOnScreen(connectorPaint.narrowOrientation, 640, 390);
 assert.match(browser, /new ResizeObserver\(scheduleSessionConnectors\)/,
   "connectors track project and session count geometry changes");
 assert.match(browser, /addEventListener\("(?:resize|scroll)"[^\n]*scheduleSessionConnectors/,
   "connectors are rescheduled for viewport and scrolling changes");
+assert.match(browser, /addEventListener\("orientationchange", scheduleSessionConnectors/,
+  "connectors are rescheduled when a narrow device rotates");
 const projectPickerSource = browser.match(/const selectOverlayProject = \(item\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
 assert.match(projectPickerSource, /if \(filterLiveTrackerProject\(projectItem\)\) return true;\s+const sessions/,
   "a normal project filter returns before legacy session selection or navigation");
@@ -375,13 +697,46 @@ assert.match(css, /\.nav-mode \.session-traversal \{[^}]*width:\s*50%/,
   "the session pane retains its original half-width");
 assert.doesNotMatch(css, /\.nav-mode \.project-rail \{[^}]*width:\s*42%|\.nav-mode \.session-traversal \{[^}]*width:\s*58%/,
   "the visual correction removes the ornamental pane proportions");
+const railClamp = css.match(/--project-rail-width:\s*clamp\(([\d.]+)rem,\s*([\d.]+)vw,\s*([\d.]+)rem\)/);
+assert.ok(railClamp, "desktop project rail uses a bounded responsive proportion");
+const [, railMinRem, railIdealVw, railMaxRem] = railClamp.map(Number);
+assert.deepEqual([railMinRem, railIdealVw, railMaxRem], [8.75, 12.5, 11],
+  "desktop project rail is modestly narrower without starving labels");
+const clampedRail = (viewport, minRem, idealVw, maxRem) =>
+  Math.min(Math.max(minRem * 16, viewport * idealVw / 100), maxRem * 16);
+for (const viewport of [800, 1024, 1440]) {
+  const refined = clampedRail(viewport, railMinRem, railIdealVw, railMaxRem);
+  const previous = clampedRail(viewport, 9, 14, 12);
+  assert.ok(refined < previous && viewport - refined > viewport - previous,
+    `the refined ${viewport}px desktop rail returns space to session content`);
+}
+assert.match(css, /width:\s*min\(90ch, calc\(100% - var\(--project-rail-width\) - 2rem\)\)/,
+  "desktop session content consumes the space released by the narrower rail");
 assert.doesNotMatch(css, /\.live-tracker-session-current\s*\{[^}]*box-shadow/,
   "current sessions keep the original understated treatment without an inset bar");
 const connectorStyle = css.match(/\.session-connectors path \{([^}]*)\}/)?.[1] ?? "";
 assert.match(connectorStyle, /fill:\s*none/,
   "connectors are unfilled lines rather than decorative shapes");
-assert.match(connectorStyle, /stroke-width:\s*\.(?:[0-9]+)/,
-  "connectors remain thinner than one CSS pixel");
+const connectorStroke = connectorStyle.match(/stroke:\s*(#[0-9a-f]{6})/i)?.[1] ?? "";
+const connectorStrokeWidth = Number(connectorStyle.match(/stroke-width:\s*([\d.]+)/)?.[1] ?? NaN);
+assert.equal(connectorStrokeWidth, 1,
+  "connectors use one crisp CSS pixel rather than a disappearing antialiased subpixel");
+assert.doesNotMatch(connectorStyle, /opacity\s*:/,
+  "connector contrast is not reduced again through path opacity");
+const rgb = (hex) => [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16));
+const relativeLuminance = (color) => color
+  .map((channel) => channel / 255)
+  .map((channel) => channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4)
+  .reduce((total, channel, index) => total + channel * [.2126, .7152, .0722][index], 0);
+const contrastRatio = (foreground, background) => {
+  const [lighter, darker] = [relativeLuminance(foreground), relativeLuminance(background)].sort((a, b) => b - a);
+  return (lighter + .05) / (darker + .05);
+};
+assert.ok(/^#[0-9a-f]{6}$/i.test(connectorStroke), "connector stroke uses a directly testable solid color");
+assert.ok(contrastRatio(rgb(connectorStroke), [0, 0, 0]) >= 3,
+  "desktop connectors remain visible at 3:1 or better against the black surface");
+assert.ok(contrastRatio(rgb(connectorStroke), [0x1a, 0x1a, 0x1a]) >= 3,
+  "mobile connectors remain visible at 3:1 or better across the 50/50 divider");
 assert.doesNotMatch(connectorStyle, /background|gradient|border|box-shadow/i,
   "connector styling adds no cards, gradients, borders, or backgrounds");
 const overviewStyle = css.match(/\.live-tracker\[data-overview="true"\] \{([^}]*)\}/)?.[1] ?? "";
@@ -389,8 +744,13 @@ assert.match(overviewStyle, /flex-direction:\s*column/,
   "overview preserves project order in a simple vertical flow");
 assert.doesNotMatch(overviewStyle, /background|gradient|border|box-shadow/i,
   "overview grouping adds spacing only, not ornamental chrome");
-assert.match(css, /\.session-connectors\s*\{[^}]*pointer-events:\s*none/,
-  "decorative connector geometry can never steal chooser taps");
+const connectorLayerStyle = css.match(/\.session-connectors \{([^}]*)\}/)?.[1] ?? "";
+assert.match(connectorLayerStyle, /position:\s*fixed[\s\S]*?z-index:\s*8[\s\S]*?width:\s*100%[\s\S]*?height:\s*100%/,
+  "the fixed-inset connector layer covers the viewport above both chooser panes");
+assert.match(connectorLayerStyle, /overflow:\s*hidden[\s\S]*?pointer-events:\s*none/,
+  "the viewport connector layer clips cleanly and never steals chooser taps");
+assert.match(css, /\.project-rail \.active-projects:focus-visible \{[^}]*outline:\s*1px solid/,
+  "the compact keyboard-operable chooser surface has a restrained visible focus state");
 const overviewSessionsStyle = css.match(/\.live-tracker\[data-overview="true"\] \.live-tracker-sessions \{([^}]*)\}/)?.[1] ?? "";
 assert.match(overviewSessionsStyle, /width:\s*100%[\s\S]*?flex-direction:\s*column[\s\S]*?align-items:\s*stretch/,
   "overview stacks wide project session sets vertically so every link stays reachable");

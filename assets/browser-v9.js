@@ -1626,6 +1626,29 @@
     if (right <= left || bottom <= top) return null;
     return { left, top, right, bottom, width: right - left, height: bottom - top };
   };
+  const connectorCoordinate = (value) => Math.floor(value) + .5;
+  const connectorPathData = (projectRect, groupRect, narrow) => {
+    const startX = connectorCoordinate(projectRect.right);
+    const startY = connectorCoordinate(projectRect.top + projectRect.height / 2);
+    const endX = connectorCoordinate(groupRect.left);
+    const endY = connectorCoordinate(groupRect.top + groupRect.height / 2);
+    if (!narrow) {
+      const elbowX = connectorCoordinate((projectRect.right + groupRect.left) / 2);
+      return {
+        d: `M ${startX} ${startY} H ${elbowX} V ${endY} H ${endX}`,
+        layout: "desktop",
+      };
+    }
+    // In the mobile 50/50 chooser, turning on the pane divider reads as part
+    // of the split rather than as a relationship. Carry the line briefly
+    // inside the visible session group, then return to its left boundary.
+    const branchInset = Math.min(12, groupRect.width / 2);
+    const branchX = connectorCoordinate(groupRect.left + branchInset);
+    return {
+      d: `M ${startX} ${startY} H ${branchX} V ${endY} H ${endX}`,
+      layout: "narrow",
+    };
+  };
   const connectorProjectItem = (group) => {
     const key = projectIdentity(group?.dataset);
     return activeProjectItems().find((item) => projectIdentity(item.dataset) === key) ?? null;
@@ -1633,9 +1656,8 @@
   const paintSessionConnectors = () => {
     sessionConnectorFrame = 0;
     const svg = sessionConnectors();
-    const tracker = document.querySelector(".live-tracker[data-overview='true']");
-    if (!(svg instanceof SVGElement) || !(tracker instanceof HTMLElement)
-      || (!desktopChair() && !navMode())) {
+    const tracker = document.querySelector(".live-tracker");
+    if (!(svg instanceof SVGElement) || !(tracker instanceof HTMLElement)) {
       hideSessionConnectors();
       return;
     }
@@ -1656,20 +1678,19 @@
         connectorOverflowClientRect(tracker),
       );
       if (!projectRect || !groupRect) continue;
-      const startX = Math.round(projectRect.right * 2) / 2;
-      const startY = Math.round((projectRect.top + projectRect.height / 2) * 2) / 2;
-      const endX = Math.round(groupRect.left * 2) / 2;
-      const endY = Math.round((groupRect.top + groupRect.height / 2) * 2) / 2;
-      const elbowX = Math.round(((startX + endX) / 2) * 2) / 2;
+      const geometry = connectorPathData(projectRect, groupRect, !desktopChair());
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", `M ${startX} ${startY} H ${elbowX} V ${endY} H ${endX}`);
+      path.setAttribute("d", geometry.d);
       path.setAttribute("vector-effect", "non-scaling-stroke");
+      path.dataset.layout = geometry.layout;
       path.dataset.project = String(group.dataset.project || "");
       path.dataset.folder = String(group.dataset.folder || "");
       paths.append(path);
       count += 1;
     }
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("width", String(width));
+    svg.setAttribute("height", String(height));
     svg.replaceChildren(paths);
     svg.hidden = count === 0;
   };
@@ -1681,7 +1702,7 @@
     sessionConnectorObserver?.disconnect();
     if (typeof ResizeObserver !== "function") return;
     if (!sessionConnectorObserver) sessionConnectorObserver = new ResizeObserver(scheduleSessionConnectors);
-    const tracker = document.querySelector(".live-tracker[data-overview='true']");
+    const tracker = document.querySelector(".live-tracker");
     if (!(tracker instanceof HTMLElement)) return;
     for (const node of [document.querySelector(".active-projects"), tracker, ...activeProjectItems(), ...liveTrackerGroups(tracker)]) {
       if (node instanceof Element) sessionConnectorObserver.observe(node);
@@ -1727,8 +1748,6 @@
     const folder = String(group?.dataset?.folder ?? item?.dataset?.folder ?? "");
     if (!project) return false;
     delete tracker.dataset.overview;
-    hideSessionConnectors();
-    sessionConnectorObserver?.disconnect();
     for (const candidate of liveTrackerGroups(tracker)) {
       const selected = candidate === group;
       candidate.hidden = !selected;
@@ -1753,6 +1772,8 @@
     if (remember || !liveTrackerProjectFilter) {
       liveTrackerProjectFilter = projectIdentity({ project, folder });
     }
+    observeSessionConnectorGeometry();
+    scheduleSessionConnectors();
     return true;
   };
   const filterLiveTrackerProject = (item) => {
@@ -1789,11 +1810,31 @@
     showLiveTrackerProject(selected, { remember: false });
   };
   const CHOOSER_INTERACTIVE = "a, button, input, select, textarea, summary, details, form, label, menu, [role='button'], [role='link'], [contenteditable], [tabindex]";
+  const projectChooserSurface = (target) => {
+    if (target?.closest?.("#inactive-project-tree")) return null;
+    return target?.closest?.("#project-rail, .active-projects") ?? null;
+  };
+  const projectChooserAction = (target, surface) => {
+    const row = target?.closest?.(".active-projects li") ?? null;
+    if (row) return row;
+    const action = target?.closest?.(CHOOSER_INTERACTIVE) ?? null;
+    return action && action !== surface ? action : null;
+  };
   const clearProjectFilterFromEmptySpace = (target) => {
     if (!(target instanceof Element) || (!desktopChair() && !navMode())) return false;
-    const surface = target.closest(".active-projects, .session-traversal");
-    if (!(surface instanceof Element) || target.closest(CHOOSER_INTERACTIVE)) return false;
+    const surface = projectChooserSurface(target);
+    if (!(surface instanceof Element) || projectChooserAction(target, surface)) return false;
     return showLiveTrackerOverview();
+  };
+  const clearProjectFilterFromChooserKey = (event) => {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
+      || (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar")) return false;
+    const target = event.target instanceof Element ? event.target : null;
+    const surface = projectChooserSurface(target);
+    if (!(surface instanceof Element) || target !== surface || projectChooserAction(target, surface)) return false;
+    if (!showLiveTrackerOverview()) return false;
+    event.preventDefault();
+    return true;
   };
   const sessionEventsUrl = (sessionId) =>
     `${consoleBasePath()}/session/${encodeURIComponent(sessionId)}/events`;
@@ -3014,6 +3055,7 @@
       }
       return;
     }
+    if (clearProjectFilterFromChooserKey(event)) return;
     const input = event.target;
     const inComposer = input instanceof HTMLTextAreaElement && input.id === "prompt";
 

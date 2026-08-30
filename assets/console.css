@@ -2831,6 +2831,10 @@ body.document-page {
   width: 100%;
   min-width: 0;
 }
+.project-rail .active-projects:focus-visible {
+  outline: 1px solid #333;
+  outline-offset: .2rem;
+}
 .project-rail .project-sessions {
   flex: 1 1 auto;
   width: 100%;
@@ -2942,7 +2946,7 @@ body.document-page {
 
 @media (min-width: 42.01rem) {
   body {
-    --project-rail-width: clamp(9rem, 14vw, 12rem);
+    --project-rail-width: clamp(8.75rem, 12.5vw, 11rem);
     --case-rail-width: clamp(14rem, 18vw, 20rem);
   }
 
@@ -3341,18 +3345,18 @@ body.document-page {
 }
 .session-connectors {
   position: fixed;
-  z-index: 7;
+  z-index: 8;
   inset: 0;
   width: 100%;
   height: 100%;
-  overflow: visible;
+  overflow: hidden;
   pointer-events: none;
 }
 .session-connectors[hidden] { display: none !important; }
 .session-connectors path {
   fill: none;
-  stroke: #2d2d2d;
-  stroke-width: .625;
+  stroke: #686868;
+  stroke-width: 1;
   stroke-linecap: square;
   stroke-linejoin: miter;
   pointer-events: none;
