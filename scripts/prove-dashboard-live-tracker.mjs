@@ -222,12 +222,88 @@ const connectorRail = renderProjectRail({
   activeProjects: legacyRows,
   dashboard: validDashboard,
 }, paths);
-assert.match(connectorRail, /<svg id="session-connectors" class="session-connectors" aria-hidden="true" focusable="false" hidden><\/svg>/,
-  "the no-JS surface includes an inert, assistive-technology-hidden connector layer");
-assert.doesNotMatch(connectorRail, /<svg[^>]*session-connectors[^>]*>[\s\S]*?<path/,
-  "decorative connectors degrade to an empty hidden layer without browser geometry");
+assert.doesNotMatch(connectorRail, /session-connectors|<svg[^>]*>\s*<path/,
+  "project/session connector markup is absent rather than retained as dead decoration");
 assert.match(connectorRail, /<nav class="active-projects"[^>]*aria-keyshortcuts="ArrowUp ArrowDown Enter Space"[^>]*tabindex="0">/,
   "the project chooser surface exposes a focused keyboard route to the all-project overview");
+
+const familyIds = Array.from({ length: 5 }, (_, index) =>
+  `session-7a120000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`);
+const idleRow = (sessionId, alias, parentSessionId = "", depth = 0) => ({
+  sessionId, alias, label: depth ? "implementation" : "architect", parentSessionId, depth,
+  activity: "idle", idleForMs: 1_000, workflow: null, phase: "none", phaseStartedAt: null,
+});
+const canonicalCandidate = {
+  schema: "qq.dashboard/v1",
+  projects: [{
+    key: "p:zeta:", name: "zeta", label: "Zeta", folder: "", folderLabel: "",
+    sessions: [idleRow("session-7a120000-0000-4000-8000-000000000010", "zeta-root")],
+  }, {
+    key: "p:atlas:south", name: "atlas", label: "Atlas", folder: "south", folderLabel: "South",
+    sessions: [idleRow("session-7a120000-0000-4000-8000-000000000011", "south-root")],
+  }, {
+    key: "p:beta:", name: "beta", label: "Beta", folder: "", folderLabel: "", sessions: [],
+  }, {
+    key: "p:atlas:north", name: "atlas", label: "Atlas", folder: "north", folderLabel: "North",
+    sessions: [
+      idleRow(familyIds[3], "b-child-2", familyIds[0], 1),
+      idleRow(familyIds[0], "architect-b"),
+      idleRow(familyIds[1], "architect-a"),
+      idleRow(familyIds[2], "a-child", familyIds[1], 1),
+      idleRow(familyIds[4], "b-child-1", familyIds[0], 1),
+    ],
+  }],
+};
+const canonicalDashboard = validatedDashboardSnapshot(canonicalCandidate);
+assert.ok(canonicalDashboard, "valid interleaved families and empty projects remain available");
+assert.deepEqual(canonicalDashboard.projects.map((project) => `${project.name}\n${project.folder}`), [
+  "atlas\nnorth", "atlas\nsouth", "beta\n", "zeta\n",
+], "dashboard places use one human, stable order independent of producer activity order");
+assert.deepEqual(canonicalDashboard.projects[0].sessions.map((row) => row.sessionId), [
+  familyIds[0], familyIds[3], familyIds[4], familyIds[1], familyIds[2],
+], "authoritative parents form contiguous families while root and sibling source order remains stable");
+for (const child of canonicalDashboard.projects[0].sessions.filter((row) => row.depth === 1)) {
+  const parent = canonicalDashboard.projects[0].sessions.find((row) => row.sessionId === child.parentSessionId);
+  assert.ok(parent && parent.depth === 0, "every normalized direct child retains its authoritative parent ID");
+}
+const reversedActive = canonicalDashboard.projects.slice().reverse().flatMap((project, index) =>
+  project.sessions[0] ? [{
+    id: project.sessions[0].sessionId,
+    project: project.name,
+    projectLabel: project.label,
+    folder: project.folder,
+    folderLabel: project.folderLabel,
+    createdAt: 10_000 - index,
+  }] : []);
+const canonicalSnapshot = {
+  ...rawSnapshot,
+  id: familyIds[0],
+  project: "atlas",
+  projectLabel: "Atlas",
+  folder: "north",
+  folderLabel: "North",
+  sessions: reversedActive,
+  activeProjects: reversedActive,
+  dashboard: canonicalDashboard,
+};
+const canonicalRail = renderProjectRail(canonicalSnapshot, paths);
+const canonicalTracker = renderSessionContent(canonicalSnapshot, paths);
+const identitySequence = (markup, pattern) => [...markup.matchAll(pattern)]
+  .map((match) => `${match[1]}\n${match[2]}`);
+const railSequence = identitySequence(canonicalRail,
+  /class="active-project-item[^"]*"[^>]*data-project="([^"]+)" data-folder="([^"]*)"/g);
+const groupSequence = identitySequence(canonicalTracker,
+  /class="live-tracker-project"[^>]*data-project="([^"]+)" data-folder="([^"]*)"/g);
+assert.deepEqual(railSequence, groupSequence,
+  "left project DOM/focus order exactly equals right group DOM/reading order");
+assert.deepEqual(railSequence, ["atlas\nnorth", "atlas\nsouth", "beta\n", "zeta\n"],
+  "duplicate project names are distinguished and ordered by authoritative folder identity");
+assert.match(canonicalRail, />Atlas \/ North<\/span>/,
+  "folder projects are labeled unambiguously in the left sequence");
+assert.match(canonicalTracker, /class="live-tracker-project-empty">no live sessions<\/li>/,
+  "an empty project has a deliberate stable group rather than disappearing or shifting peers");
+assert.doesNotMatch(canonicalRail + canonicalTracker, /session-connectors/,
+  "selected and overview server states contain no connector layer");
 
 const secondChildId = "session-7a110000-0000-4000-8000-000000000004";
 const stackedDashboard = structuredClone(validDashboard);
@@ -480,259 +556,14 @@ assert.deepEqual({ ...chooserBehavior }, {
   modifiedKeyboard: false,
   overviewCount: 8,
 }, "only genuine Projects/Sessions background or the focused chooser landmark enters overview across desktop and nav mode");
-const connectorSource = browser.match(/const paintSessionConnectors = \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
-assert.match(connectorSource, /for \(const group of liveTrackerGroups\(tracker\)\)[\s\S]*?createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "path"\)/,
-  "connector geometry creates at most one path for each project group");
-assert.match(connectorSource, /removeAttribute\("hidden"\)/,
-  "a painted SVG removes the real hidden attribute rather than assigning an SVG expando");
-assert.doesNotMatch(connectorSource, /svg\.hidden\s*=/,
-  "connector visibility never relies on non-reflecting SVGElement.hidden assignment");
-assert.match(connectorSource, /projectItem\?\.closest\("\.active-projects"\)[\s\S]*?connectorOverflowClientRect\(projectOverflow\)[\s\S]*?connectorOverflowClientRect\(tracker\)/,
-  "connector endpoints are clipped to the project and session overflow clients");
-const connectorGeometrySource = browser.match(/  const connectorOverflowClientRect = [\s\S]*?(?=  const connectorProjectItem)/)?.[0] ?? "";
-assert.notEqual(connectorGeometrySource, "", "connector clipping helpers remain independently provable");
-const geometry = runInNewContext(`(() => {
-${connectorGeometrySource}
-return { connectorOverflowClientRect, intersectConnectorRect, connectorPathData };
-})()`, { document: { documentElement: { clientWidth: 1024, clientHeight: 768 } } });
-const overflowClient = geometry.connectorOverflowClientRect({
-  clientLeft: 2,
-  clientTop: 3,
-  clientWidth: 100,
-  clientHeight: 80,
-  getBoundingClientRect: () => ({ left: 10, top: 20 }),
-});
-assert.deepEqual({ ...overflowClient }, { left: 12, top: 23, right: 112, bottom: 103 },
-  "overflow clipping uses the content client box rather than border or rail padding");
-const clippedEndpoint = geometry.intersectConnectorRect(
-  { left: 5, top: 5, right: 80, bottom: 40 },
-  overflowClient,
-);
-assert.deepEqual({ ...clippedEndpoint }, { left: 12, top: 23, right: 80, bottom: 40, width: 68, height: 17 },
-  "a partially clipped endpoint is centered within only its visible scroll-client slice");
-assert.equal(geometry.intersectConnectorRect(
-  { left: 20, top: 1, right: 90, bottom: 22 },
-  overflowClient,
-), null, "a viewport-visible row clipped above its overflow client paints no connector");
-assert.match(connectorGeometrySource, /projectRect\.top \+ projectRect\.height \/ 2[\s\S]*?groupRect\.top \+ groupRect\.height \/ 2/,
-  "both ends use deliberate vertical centering after clipping");
-assert.match(connectorGeometrySource, /projectRect\.right - projectInset[\s\S]*?groupRect\.left \+ groupInset/,
-  "connector endpoints visibly lead out of and into their related surfaces");
-assert.match(connectorGeometrySource, /laneX = connectorCoordinate\(\(projectRect\.right \+ groupRect\.left\) \/ 2\)[\s\S]*?H \$\{laneX\} V \$\{endY\} H \$\{endX\}/,
-  "both responsive layouts use one restrained orthogonal route through the clear inter-pane lane");
-assert.match(connectorSource, /connectorPathData\(projectRect, groupRect, !desktopChair\(\)\)/,
-  "connector painting selects geometry from the live responsive layout");
-assert.doesNotMatch(connectorSource, /!desktopChair\(\)[\s\S]{0,40}!navMode\(\)/,
-  "narrow connector painting is not suppressed outside one transient chair mode");
-assert.match(connectorSource, /document\.querySelector\("\.live-tracker"\)/,
-  "connector painting runs for the ordinary selected-project tracker as well as overview");
-assert.doesNotMatch(connectorSource, /live-tracker\[data-overview/,
-  "selected-project focus is not gated out of connector painting");
-const clippedDesktopPath = geometry.connectorPathData(
-  { left: 12, top: 23, right: 80, bottom: 40, width: 68, height: 17 },
-  { left: 120, top: 50, right: 300, bottom: 110, width: 180, height: 60 },
-  false,
-);
-assert.deepEqual({ ...clippedDesktopPath }, {
-  d: "M 72.5 31.5 H 100.5 V 80.5 H 128.5",
-  layout: "desktop",
-}, "desktop connector geometry remains centered and orthogonal");
-const clippedNarrowPath = geometry.connectorPathData(
-  { left: 12, top: 23, right: 180, bottom: 40, width: 168, height: 17 },
-  { left: 211, top: 50, right: 376, bottom: 110, width: 165, height: 60 },
-  true,
-);
-assert.deepEqual({ ...clippedNarrowPath }, {
-  d: "M 172.5 31.5 H 195.5 V 80.5 H 219.5",
-  layout: "narrow",
-}, "narrow connector geometry visibly enters both related surfaces");
-const connectorPaint = runInNewContext(`(() => {
-class Element {}
-class HTMLElement extends Element {
-  constructor(rect = {}, client = {}) {
-    super();
-    this.rect = rect;
-    this.clientLeft = client.left ?? 0;
-    this.clientTop = client.top ?? 0;
-    this.clientWidth = client.width ?? Math.max(0, (rect.right ?? 0) - (rect.left ?? 0));
-    this.clientHeight = client.height ?? Math.max(0, (rect.bottom ?? 0) - (rect.top ?? 0));
-    this.dataset = {};
-    this.hidden = false;
-  }
-  getBoundingClientRect() { return this.rect; }
-}
-class SVGElement extends Element {
-  constructor() { super(); this.attributes = { hidden: "" }; this.children = []; }
-  setAttribute(name, value) { this.attributes[name] = value; }
-  removeAttribute(name) { delete this.attributes[name]; }
-  hasAttribute(name) { return Object.hasOwn(this.attributes, name); }
-  replaceChildren(fragment) { this.children = [...fragment.children]; }
-}
-class PathElement extends Element {
-  constructor() { super(); this.attributes = {}; this.dataset = {}; }
-  setAttribute(name, value) { this.attributes[name] = value; }
-}
-const setRect = (node, rect, client = {}) => {
-  node.rect = rect;
-  node.clientLeft = client.left ?? 0;
-  node.clientTop = client.top ?? 0;
-  node.clientWidth = client.width ?? Math.max(0, rect.right - rect.left);
-  node.clientHeight = client.height ?? Math.max(0, rect.bottom - rect.top);
-};
-const projectOverflow = new HTMLElement(
-  { left: 0, top: 0, right: 160, bottom: 500 },
-  { width: 160, height: 500 },
-);
-const tracker = new HTMLElement(
-  { left: 180, top: 0, right: 980, bottom: 700 },
-  { width: 800, height: 700 },
-);
-const projectItem = new HTMLElement({ left: 20, top: 40, right: 145, bottom: 72, width: 125, height: 32 });
-projectItem.closest = () => projectOverflow;
-const secondProjectItem = new HTMLElement({ left: 20, top: 82, right: 150, bottom: 114, width: 130, height: 32 });
-secondProjectItem.closest = () => projectOverflow;
-const group = new HTMLElement({ left: 200, top: 120, right: 700, bottom: 200, width: 500, height: 80 });
-group.dataset = { project: "alpha", folder: "" };
-group.projectItem = projectItem;
-const secondGroup = new HTMLElement({ left: 200, top: 240, right: 700, bottom: 300, width: 500, height: 60 });
-secondGroup.dataset = { project: "beta", folder: "client" };
-secondGroup.projectItem = secondProjectItem;
-secondGroup.hidden = true;
-tracker.groups = [group, secondGroup];
-const svg = new SVGElement();
-const document = {
-  documentElement: { clientWidth: 1000, clientHeight: 700 },
-  querySelector: (selector) => selector === ".live-tracker" ? tracker : null,
-  createDocumentFragment: () => ({ children: [], append(node) { this.children.push(node); } }),
-  createElementNS: () => new PathElement(),
-};
-let narrow = false;
-let sessionConnectorFrame = 1;
-const sessionConnectors = () => svg;
-const desktopChair = () => !narrow;
-const liveTrackerGroups = () => tracker.groups;
-const connectorProjectItem = (candidate) => candidate.projectItem;
-${connectorGeometrySource}
-${connectorSource}
-const snapshot = () => ({
-  count: svg.children.length,
-  hidden: svg.hasAttribute("hidden"),
-  d: svg.children[0]?.attributes.d,
-  layout: svg.children[0]?.dataset.layout,
-  layouts: svg.children.map((child) => child.dataset.layout),
-  vectorEffect: svg.children[0]?.attributes["vector-effect"],
-  project: svg.children[0]?.dataset.project,
-  viewBox: svg.attributes.viewBox,
-  width: svg.attributes.width,
-  height: svg.attributes.height,
-});
-paintSessionConnectors();
-const desktopFocus = snapshot();
-secondGroup.hidden = false;
-paintSessionConnectors();
-const desktopOverview = snapshot();
-
-narrow = true;
-document.documentElement.clientWidth = 390;
-document.documentElement.clientHeight = 700;
-setRect(projectOverflow, { left: 0, top: 0, right: 195, bottom: 700 }, { width: 195, height: 700 });
-setRect(tracker, { left: 195, top: 0, right: 390, bottom: 700 }, { width: 195, height: 700 });
-setRect(projectItem, { left: 14, top: 40, right: 180, bottom: 72, width: 166, height: 32 });
-setRect(secondProjectItem, { left: 14, top: 82, right: 180, bottom: 114, width: 166, height: 32 });
-setRect(group, { left: 211, top: 120, right: 376, bottom: 210, width: 165, height: 90 });
-setRect(secondGroup, { left: 211, top: 240, right: 376, bottom: 320, width: 165, height: 80 });
-secondGroup.hidden = true;
-paintSessionConnectors();
-const narrowFocus = snapshot();
-secondGroup.hidden = false;
-paintSessionConnectors();
-const narrowOverview = snapshot();
-
-document.documentElement.clientWidth = 640;
-document.documentElement.clientHeight = 390;
-setRect(projectOverflow, { left: 0, top: 0, right: 320, bottom: 390 }, { width: 320, height: 390 });
-setRect(tracker, { left: 320, top: 0, right: 640, bottom: 390 }, { width: 320, height: 390 });
-setRect(projectItem, { left: 14, top: 24, right: 305, bottom: 56, width: 291, height: 32 });
-setRect(secondProjectItem, { left: 14, top: 64, right: 305, bottom: 96, width: 291, height: 32 });
-setRect(group, { left: 336, top: 72, right: 624, bottom: 152, width: 288, height: 80 });
-setRect(secondGroup, { left: 336, top: 174, right: 624, bottom: 244, width: 288, height: 70 });
-secondGroup.hidden = true;
-paintSessionConnectors();
-const narrowOrientation = snapshot();
-return { desktopFocus, desktopOverview, narrowFocus, narrowOverview, narrowOrientation };
-})()`);
-assert.deepEqual({ ...connectorPaint.desktopFocus, layouts: [...connectorPaint.desktopFocus.layouts] }, {
-  count: 1,
-  hidden: false,
-  d: "M 137.5 56.5 H 172.5 V 160.5 H 208.5",
-  layout: "desktop",
-  layouts: ["desktop"],
-  vectorEffect: "non-scaling-stroke",
-  project: "alpha",
-  viewBox: "0 0 1000 700",
-  width: "1000",
-  height: "700",
-}, "filtered desktop focus paints one visible viewport-sized connector");
-assert.equal(connectorPaint.desktopOverview.count, 2,
-  "desktop overview paints exactly one connector for each visible project group");
-assert.deepEqual([...connectorPaint.desktopOverview.layouts], ["desktop", "desktop"],
-  "desktop overview keeps both group connectors in cross-column geometry");
-assert.deepEqual({ ...connectorPaint.narrowFocus, layouts: [...connectorPaint.narrowFocus.layouts] }, {
-  count: 1,
-  hidden: false,
-  d: "M 172.5 56.5 H 195.5 V 165.5 H 219.5",
-  layout: "narrow",
-  layouts: ["narrow"],
-  vectorEffect: "non-scaling-stroke",
-  project: "alpha",
-  viewBox: "0 0 390 700",
-  width: "390",
-  height: "700",
-}, "filtered mobile focus paints one route that enters both chooser surfaces");
-assert.equal(connectorPaint.narrowOverview.count, 2,
-  "mobile overview paints one narrow connector for every visible project group");
-assert.deepEqual([...connectorPaint.narrowOverview.layouts], ["narrow", "narrow"],
-  "mobile overview never falls back to desktop gutter elbows");
-assert.deepEqual({
-  d: connectorPaint.narrowOrientation.d,
-  layout: connectorPaint.narrowOrientation.layout,
-  viewBox: connectorPaint.narrowOrientation.viewBox,
-  width: connectorPaint.narrowOrientation.width,
-  height: connectorPaint.narrowOrientation.height,
-}, {
-  d: "M 297.5 40.5 H 320.5 V 112.5 H 344.5",
-  layout: "narrow",
-  viewBox: "0 0 640 390",
-  width: "640",
-  height: "390",
-}, "narrow connector geometry follows resize and orientation changes");
-const orthogonalPath = (d) => {
-  const match = d.match(/^M ([\d.]+) ([\d.]+) H ([\d.]+) V ([\d.]+) H ([\d.]+)$/);
-  assert.ok(match, `connector is an orthogonal on-screen path: ${d}`);
-  return match.slice(1).map(Number);
-};
-const assertOnScreen = (paint, width, height) => {
-  const [startX, startY, branchX, endY, endX] = orthogonalPath(paint.d);
-  for (const x of [startX, branchX, endX]) assert.ok(x >= 0 && x <= width, `x=${x} stays inside ${width}px`);
-  for (const y of [startY, endY]) assert.ok(y >= 0 && y <= height, `y=${y} stays inside ${height}px`);
-  for (const coordinate of [startX, startY, branchX, endY, endX]) {
-    assert.equal(coordinate % 1, .5, `coordinate ${coordinate} centers the one-pixel stroke on a CSS pixel`);
-  }
-  return { startX, startY, branchX, endY, endX };
-};
-assertOnScreen(connectorPaint.desktopFocus, 1000, 700);
-const narrowCoordinates = assertOnScreen(connectorPaint.narrowFocus, 390, 700);
-assert.ok(narrowCoordinates.startX < 195 && narrowCoordinates.endX > 195,
-  "mobile connector crosses from the visible left project pane to the visible right group");
-assert.ok(narrowCoordinates.branchX > narrowCoordinates.startX && narrowCoordinates.branchX < narrowCoordinates.endX,
-  "mobile vertical route stays in the clear lane between the two endpoint surfaces");
-assertOnScreen(connectorPaint.narrowOrientation, 640, 390);
-assert.match(browser, /new ResizeObserver\(scheduleSessionConnectors\)/,
-  "connectors track project and session count geometry changes");
-assert.match(browser, /addEventListener\("(?:resize|scroll)"[^\n]*scheduleSessionConnectors/,
-  "connectors are rescheduled for viewport and scrolling changes");
-assert.match(browser, /addEventListener\("orientationchange", scheduleSessionConnectors/,
-  "connectors are rescheduled when a narrow device rotates");
+assert.doesNotMatch(browser, /sessionConnectors|sessionConnector|paintSessionConnectors|connectorPathData/,
+  "obsolete connector geometry, observers, and scheduling are removed from the browser");
+assert.match(browser, /const activeProjectEntry = \(item\) => \(\{[\s\S]*?projectLabel:[\s\S]*?folderLabel:/,
+  "client reconciliation retains the labels required by canonical ordering");
+assert.match(browser, /const appendActiveProject = \(entry\) => \{[\s\S]*?restoreActiveProjects\(\)/,
+  "asynchronous project discovery re-runs canonical ordering instead of appending by completion time");
+assert.doesNotMatch(browser, /qq-active-projects|readRememberedProjects|restoreListOrder/,
+  "session storage can no longer override canonical project order");
 const projectPickerSource = browser.match(/const selectOverlayProject = \(item\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
 assert.match(projectPickerSource, /if \(filterLiveTrackerProject\(projectItem\)\) return true;\s+const sessions/,
   "a normal project filter returns before legacy session selection or navigation");
@@ -784,41 +615,16 @@ assert.match(css, /width:\s*min\(90ch, calc\(100% - var\(--project-rail-width\) 
   "desktop session content consumes the space released by the narrower rail");
 assert.doesNotMatch(css, /\.live-tracker-session-current\s*\{[^}]*box-shadow/,
   "current sessions keep the original understated treatment without an inset bar");
-const connectorStyle = css.match(/\.session-connectors path \{([^}]*)\}/)?.[1] ?? "";
-assert.match(connectorStyle, /fill:\s*none/,
-  "connectors are unfilled lines rather than decorative shapes");
-const connectorStroke = connectorStyle.match(/stroke:\s*(#[0-9a-f]{6})/i)?.[1] ?? "";
-const connectorStrokeWidth = Number(connectorStyle.match(/stroke-width:\s*([\d.]+)/)?.[1] ?? NaN);
-assert.equal(connectorStrokeWidth, 1.25,
-  "connectors use a restrained but durable stroke in desktop and high-density PWA paint");
-assert.doesNotMatch(connectorStyle, /opacity\s*:/,
-  "connector contrast is not reduced again through path opacity");
-const rgb = (hex) => [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16));
-const relativeLuminance = (color) => color
-  .map((channel) => channel / 255)
-  .map((channel) => channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4)
-  .reduce((total, channel, index) => total + channel * [.2126, .7152, .0722][index], 0);
-const contrastRatio = (foreground, background) => {
-  const [lighter, darker] = [relativeLuminance(foreground), relativeLuminance(background)].sort((a, b) => b - a);
-  return (lighter + .05) / (darker + .05);
-};
-assert.ok(/^#[0-9a-f]{6}$/i.test(connectorStroke), "connector stroke uses a directly testable solid color");
-assert.ok(contrastRatio(rgb(connectorStroke), [0, 0, 0]) >= 3,
-  "desktop connectors remain visible at 3:1 or better against the black surface");
-assert.ok(contrastRatio(rgb(connectorStroke), [0x1a, 0x1a, 0x1a]) >= 3,
-  "mobile connectors remain visible at 3:1 or better across the 50/50 divider");
-assert.doesNotMatch(connectorStyle, /background|gradient|border|box-shadow/i,
-  "connector styling adds no cards, gradients, borders, or backgrounds");
+assert.doesNotMatch(css, /\.session-connectors|#session-connectors/,
+  "obsolete connector layer and path styling are removed");
 const overviewStyle = css.match(/\.live-tracker\[data-overview="true"\] \{([^}]*)\}/)?.[1] ?? "";
 assert.match(overviewStyle, /flex-direction:\s*column/,
   "overview preserves project order in a simple vertical flow");
 assert.doesNotMatch(overviewStyle, /background|gradient|border|box-shadow/i,
   "overview grouping adds spacing only, not ornamental chrome");
-const connectorLayerStyle = css.match(/\.session-connectors \{([^}]*)\}/)?.[1] ?? "";
-assert.match(connectorLayerStyle, /position:\s*fixed[\s\S]*?z-index:\s*8[\s\S]*?width:\s*100%[\s\S]*?height:\s*100%/,
-  "the fixed-inset connector layer covers the viewport above both chooser panes");
-assert.match(connectorLayerStyle, /overflow:\s*hidden[\s\S]*?pointer-events:\s*none/,
-  "the viewport connector layer clips cleanly and never steals chooser taps");
+const overviewHeadingStyle = css.match(/\.live-tracker\[data-overview="true"\] \.live-tracker-project-name \{([^}]*)\}/)?.[1] ?? "";
+assert.match(overviewHeadingStyle, /position:\s*static[\s\S]*?clip-path:\s*none/,
+  "overview restores each human project/folder heading to visible reading order");
 assert.match(css, /\.project-rail \.active-projects:focus-visible \{[^}]*outline:\s*1px solid/,
   "the compact keyboard-operable chooser surface has a restrained visible focus state");
 const overviewSessionsStyle = css.match(/\.live-tracker\[data-overview="true"\] \.live-tracker-sessions \{([^}]*)\}/)?.[1] ?? "";

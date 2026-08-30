@@ -6,6 +6,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { validatedDashboardSnapshot } from "../src/http-app.mjs";
 import { renderPage } from "../src/render.mjs";
 
 const diagnose = process.argv.includes("--diagnose");
@@ -15,12 +16,12 @@ const cachedChromium = [
   process.env.PLAYWRIGHT_BROWSERS_PATH,
   join(process.env.HOME || "", ".cache/ms-playwright"),
   "/home/qqp/.cache/ms-playwright",
-].filter(Boolean).flatMap(cache => {
+].filter(Boolean).flatMap((cache) => {
   try {
     return readdirSync(cache)
-      .filter(entry => entry.startsWith("chromium-") && !entry.includes("headless"))
+      .filter((entry) => entry.startsWith("chromium-") && !entry.includes("headless"))
       .sort().reverse()
-      .flatMap(entry => ["chrome-linux64/chrome", "chrome-linux/chrome"].map(path => join(cache, entry, path)));
+      .flatMap((entry) => ["chrome-linux64/chrome", "chrome-linux/chrome"].map((path) => join(cache, entry, path)));
   } catch { return []; }
 }).find(existsSync);
 const chromeBinary = [
@@ -29,76 +30,122 @@ const chromeBinary = [
   "/usr/bin/chromium",
   "/usr/bin/chromium-browser",
   "/usr/bin/google-chrome",
-].find(candidate => candidate && existsSync(candidate));
+].find((candidate) => candidate && existsSync(candidate));
 assert.ok(chromeBinary, "browser-rendered proof requires Chromium (set CHROME_BIN when it is not installed conventionally)");
-const alphaArchitect = "session-7a330000-0000-4000-8000-000000000001";
-const alphaChild = "session-7a330000-0000-4000-8000-000000000002";
-const projectNames = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", "lambda", "mu", "nu", "xi"];
-const now = Date.now();
 
-const projects = projectNames.map((name, index) => {
-  const id = index === 0 ? alphaArchitect : `session-7a330000-0000-4000-8000-${String(index + 10).padStart(12, "0")}`;
-  const label = name[0].toUpperCase() + name.slice(1);
-  const architect = {
-    sessionId: id,
-    alias: index === 0 ? "opal" : `${name}-arch`,
-    label: "architect",
-    parentSessionId: "",
-    depth: 0,
-    activity: index === 0 ? "idle" : index % 3 === 0 ? "working" : "idle",
-    workflow: "architect",
-    phase: index === 0 || index % 3 !== 0 ? "none" : "planning",
-    phaseStartedAt: index === 0 || index % 3 !== 0 ? null : now - (index + 2) * 60_000,
-  };
-  const sessions = index === 0 ? [architect, {
-    sessionId: alphaChild,
-    alias: "runner",
-    label: "implementation",
-    parentSessionId: alphaArchitect,
-    depth: 1,
-    activity: "working",
-    workflow: "implementation",
-    phase: "work",
-    phaseStartedAt: now - 8 * 60_000 - 25_000,
-  }] : [architect];
-  return {
-    key: `p:${name}:`, name, label, folder: "", folderLabel: "", sessions,
-  };
+const now = Date.now();
+const sessionId = (serial) => `session-7b330000-0000-4000-8000-${String(serial).padStart(12, "0")}`;
+const idleRow = (serial, alias, { parentSessionId = "", depth = 0 } = {}) => ({
+  sessionId: sessionId(serial),
+  alias,
+  label: depth ? "implementation" : "architect",
+  parentSessionId,
+  depth,
+  activity: "idle",
+  idleForMs: 60_000,
+  workflow: null,
+  phase: "none",
+  phaseStartedAt: null,
+});
+const workingRow = (serial, alias, {
+  parentSessionId = "", depth = 0, workflow = depth ? "implementation" : "architect",
+  phase = depth ? "work" : "planning", elapsed = 8 * 60_000,
+} = {}) => ({
+  sessionId: sessionId(serial),
+  alias,
+  label: depth ? "implementation" : "architect",
+  parentSessionId,
+  depth,
+  activity: "working",
+  idleForMs: null,
+  workflow,
+  phase,
+  phaseStartedAt: now - elapsed,
 });
 
-const activeProjects = projects.map((project, index) => ({
-  id: project.sessions[0].sessionId,
-  project: project.name,
-  projectLabel: project.label,
-  folder: "",
-  folderLabel: "",
-  alias: project.sessions[0].alias,
-  createdAt: now - index * 1000,
-}));
+const architectB = sessionId(1);
+const architectA = sessionId(2);
+const childA = sessionId(3);
+const childB2 = sessionId(4);
+const childB1 = sessionId(5);
+const alphaSessions = [
+  // Deliberately flat/interleaved producer order. Validation must rebuild
+  // architect B's family before architect A's without using activity.
+  workingRow(4, "runner-b2", { parentSessionId: architectB, depth: 1, elapsed: 11 * 60_000 }),
+  idleRow(1, "opal-b"),
+  workingRow(2, "opal-a", { elapsed: 4 * 60_000 }),
+  workingRow(3, "runner-a", { parentSessionId: architectA, depth: 1, elapsed: 7 * 60_000 }),
+  workingRow(5, "runner-b1", { parentSessionId: architectB, depth: 1, elapsed: 9 * 60_000 }),
+];
+const sourceProjects = [
+  { key: "p:theta:", name: "theta", label: "Theta", folder: "", folderLabel: "", sessions: [idleRow(20, "theta-arch")] },
+  { key: "p:studio:west", name: "studio", label: "Studio", folder: "west", folderLabel: "West", sessions: [idleRow(21, "studio-west")] },
+  { key: "p:beta:", name: "beta", label: "Beta", folder: "", folderLabel: "", sessions: [] },
+  { key: "p:alpha:", name: "alpha", label: "Alpha", folder: "", folderLabel: "", sessions: alphaSessions },
+  { key: "p:mu:", name: "mu", label: "Mu", folder: "", folderLabel: "", sessions: [idleRow(22, "mu-arch")] },
+  { key: "p:studio:east", name: "studio", label: "Studio", folder: "east", folderLabel: "East", sessions: [idleRow(23, "studio-east")] },
+  { key: "p:kappa:", name: "kappa", label: "Kappa", folder: "", folderLabel: "", sessions: [idleRow(24, "kappa-arch")] },
+  { key: "p:zeta:", name: "zeta", label: "Zeta", folder: "", folderLabel: "", sessions: [idleRow(25, "zeta-arch")] },
+  { key: "p:delta:", name: "delta", label: "Delta", folder: "", folderLabel: "", sessions: [idleRow(26, "delta-arch")] },
+  { key: "p:lambda:", name: "lambda", label: "Lambda", folder: "", folderLabel: "", sessions: [idleRow(27, "lambda-arch")] },
+  { key: "p:eta:", name: "eta", label: "Eta", folder: "", folderLabel: "", sessions: [idleRow(28, "eta-arch")] },
+  { key: "p:gamma:", name: "gamma", label: "Gamma", folder: "", folderLabel: "", sessions: [idleRow(29, "gamma-arch")] },
+  { key: "p:iota:", name: "iota", label: "Iota", folder: "", folderLabel: "", sessions: [idleRow(30, "iota-arch")] },
+  { key: "p:epsilon:", name: "epsilon", label: "Epsilon", folder: "", folderLabel: "", sessions: [idleRow(31, "epsilon-arch")] },
+];
+const dashboard = validatedDashboardSnapshot({ schema: "qq.dashboard/v1", projects: sourceProjects });
+assert.ok(dashboard, "representative dashboard fixture validates");
+const expectedMany = dashboard.projects.map((project) => `${project.name}\n${project.folder}`);
+assert.deepEqual(expectedMany.slice(-2), ["theta\n", "zeta\n"], "fixture canonical order is deterministic");
+assert.ok(expectedMany.includes("studio\neast") && expectedMany.includes("studio\nwest"),
+  "fixture contains duplicate project names with distinct authoritative folders");
+const alpha = dashboard.projects.find((project) => project.name === "alpha");
+assert.deepEqual(alpha.sessions.map((row) => row.sessionId), [architectB, childB2, childB1, architectA, childA],
+  "fixture validation establishes contiguous architect families before browser rendering");
 
-const snapshot = {
-  id: alphaArchitect,
-  project: "alpha",
-  projectLabel: "Alpha",
-  alias: "opal",
-  createdAt: now - 3_600_000,
-  events: [],
-  activeProjects,
-  sessions: activeProjects,
-  agentStatus: "idle",
-  children: [],
-  conversation: { nodes: [], pending: [] },
-  dashboard: { schema: "qq.dashboard/v1", projects },
+const activeProjectsFor = (projects) => projects.slice().reverse().flatMap((project, index) => {
+  const rootSession = project.sessions.find((row) => row.depth === 0);
+  if (!rootSession) return [];
+  return [{
+    id: rootSession.sessionId,
+    project: project.name,
+    projectLabel: project.label,
+    folder: project.folder,
+    folderLabel: project.folderLabel,
+    alias: rootSession.alias,
+    // Volatile values intentionally conflict with visual order.
+    createdAt: now - ((index * 7919) % 60_000),
+    latestEventAt: now - ((index * 3571) % 60_000),
+  }];
+});
+const snapshotFor = (projects) => {
+  const activeProjects = activeProjectsFor(projects);
+  return {
+    id: architectB,
+    project: "alpha",
+    projectLabel: "Alpha",
+    alias: "opal-b",
+    createdAt: now - 3_600_000,
+    events: [],
+    activeProjects,
+    sessions: activeProjects.filter((entry) => entry.project === "alpha"),
+    agentStatus: "idle",
+    children: [],
+    conversation: { nodes: [], pending: [] },
+    dashboard: { schema: "qq.dashboard/v1", projects },
+  };
 };
+const smallProjects = dashboard.projects.slice(0, 4);
+const expectedSmall = smallProjects.map((project) => `${project.name}\n${project.folder}`);
 const paths = {
-  canonical: `/qq/project/alpha/session/${alphaArchitect}`,
+  canonical: `/qq/project/alpha/session/${architectB}`,
   projectsBase: "/qq/project",
   projectsSession: "/qq/projects",
   createSession: "/qq/project/alpha/sessions",
   switchSession: "/qq/sessions/open",
-  close: `/qq/session/${alphaArchitect}/close`,
-  prompt: `/qq/session/${alphaArchitect}/prompt`,
-  interrupt: `/qq/session/${alphaArchitect}/interrupt`,
+  close: `/qq/session/${architectB}/close`,
+  prompt: `/qq/session/${architectB}/prompt`,
+  interrupt: `/qq/session/${architectB}/interrupt`,
 };
 const assetPaths = {
   css: "/qq/assets/console.css",
@@ -110,8 +157,10 @@ const assetPaths = {
   icon512: "/qq/assets/icon-v2-512.png",
   manifest: "/qq/assets/manifest.webmanifest",
 };
-const page = renderPage(snapshot, paths, assetPaths);
-
+const pages = {
+  "/small": renderPage(snapshotFor(smallProjects), paths, assetPaths),
+  "/many": renderPage(snapshotFor(dashboard.projects), paths, assetPaths),
+};
 const mime = (path) => path.endsWith(".css") ? "text/css; charset=utf-8"
   : path.endsWith(".js") ? "text/javascript; charset=utf-8"
     : path.endsWith(".png") ? "image/png"
@@ -141,7 +190,7 @@ async function fixtureServer() {
       return;
     }
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-    response.end(page);
+    response.end(pages[pathname] ?? pages["/many"]);
   });
   await new Promise((resolveListen, reject) => {
     server.once("error", reject);
@@ -160,7 +209,6 @@ async function freePort() {
   await new Promise((resolveClose) => server.close(resolveClose));
   return port;
 }
-
 const sleep = (milliseconds) => new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds));
 
 class Cdp {
@@ -168,8 +216,13 @@ class Cdp {
     this.socket = new WebSocket(url);
     this.nextId = 0;
     this.pending = new Map();
+    this.exceptions = [];
     this.socket.onmessage = (event) => {
       const message = JSON.parse(event.data);
+      if (message.method === "Runtime.exceptionThrown") {
+        this.exceptions.push(message.params?.exceptionDetails?.exception?.description || message.params?.exceptionDetails?.text || "browser exception");
+        return;
+      }
       if (!message.id) return;
       const request = this.pending.get(message.id);
       if (!request) return;
@@ -193,276 +246,283 @@ class Cdp {
     });
   }
   async evaluate(expression) {
-    const result = await this.send("Runtime.evaluate", {
-      expression, awaitPromise: true, returnByValue: true,
-    });
+    const result = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
     if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
     return result.result.value;
   }
   close() { this.socket.close(); }
 }
 
-async function connectChrome(debugPort, expectedUrl = "") {
+async function connectChrome(debugPort, expectedUrl) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     try {
       const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
       const targets = await response.json();
-      const pages = targets.filter((target) => target.type === "page");
-      const pageTarget = (expectedUrl ? pages.find((target) => target.url.startsWith(expectedUrl)) : null) ?? (!expectedUrl ? pages[0] : null);
-      if (pageTarget?.webSocketDebuggerUrl) {
-        const cdp = new Cdp(pageTarget.webSocketDebuggerUrl);
+      const target = targets.find((entry) => entry.type === "page" && entry.url.startsWith(expectedUrl));
+      if (target?.webSocketDebuggerUrl) {
+        const cdp = new Cdp(target.webSocketDebuggerUrl);
         await cdp.open();
         return cdp;
       }
-    } catch { /* Chrome is still starting. */ }
+    } catch { /* Chrome is starting. */ }
     await sleep(50);
   }
   throw new Error("Chromium DevTools target did not start");
 }
 
-const geometryExpression = `(() => {
-  const round = value => Math.round(value * 100) / 100;
-  const rect = element => {
-    const value = element.getBoundingClientRect();
-    return { left: round(value.left), top: round(value.top), right: round(value.right), bottom: round(value.bottom), width: round(value.width), height: round(value.height) };
-  };
-  const trackerElement = document.querySelector('.live-tracker');
-  const activeElement = document.querySelector('.active-projects');
-  const trackerRect = trackerElement?.getBoundingClientRect();
-  const activeRect = activeElement?.getBoundingClientRect();
-  const projectItems = [...document.querySelectorAll('.active-project-item[data-project]')];
-  const overlapsClip = (value, clip) => clip
-    && value.right > Math.max(0, clip.left) && value.left < Math.min(innerWidth, clip.right)
-    && value.bottom > Math.max(0, clip.top) && value.top < Math.min(innerHeight, clip.bottom);
-  const clippedRect = (value, clip) => {
-    const left = Math.max(value.left, clip.left, 0);
-    const top = Math.max(value.top, clip.top, 0);
-    const right = Math.min(value.right, clip.right, innerWidth);
-    const bottom = Math.min(value.bottom, clip.bottom, innerHeight);
-    return { left: round(left), top: round(top), right: round(right), bottom: round(bottom), width: round(right - left), height: round(bottom - top) };
-  };
-  const visibleGroups = [...document.querySelectorAll('.live-tracker-project[data-project]')].filter(group => {
-    if (group.hidden) return false;
-    const project = projectItems.find(item => item.dataset.project === group.dataset.project && (item.dataset.folder || '') === (group.dataset.folder || ''));
-    return project && overlapsClip(group.getBoundingClientRect(), trackerRect)
-      && overlapsClip(project.getBoundingClientRect(), activeRect);
-  });
-  const paths = [...document.querySelectorAll('#session-connectors path')].map(path => {
-    const length = path.getTotalLength();
-    const start = path.getPointAtLength(0);
-    const end = path.getPointAtLength(length);
-    const style = getComputedStyle(path);
-    const group = visibleGroups.find(item => item.dataset.project === path.dataset.project && (item.dataset.folder || '') === (path.dataset.folder || ''));
-    const project = projectItems.find(item => item.dataset.project === path.dataset.project && (item.dataset.folder || '') === (path.dataset.folder || ''));
-    return {
-      project: path.dataset.project,
-      layout: path.dataset.layout,
-      d: path.getAttribute('d'),
-      length: round(length),
-      bounds: rect(path),
-      start: { x: round(start.x), y: round(start.y) },
-      end: { x: round(end.x), y: round(end.y) },
-      stroke: style.stroke,
-      strokeWidth: style.strokeWidth,
-      opacity: style.opacity,
-      visibility: style.visibility,
-      projectRect: project ? clippedRect(project.getBoundingClientRect(), activeRect) : null,
-      groupRect: group ? clippedRect(group.getBoundingClientRect(), trackerRect) : null,
-    };
-  });
-  const child = document.querySelector('.live-tracker-child-strip .live-tracker-session');
-  const identity = child?.querySelector('.live-tracker-identity');
-  const state = child?.querySelector('.live-tracker-state');
-  const phase = child?.querySelector('.live-tracker-phase');
-  const time = child?.querySelector('.live-tracker-elapsed');
-  const parent = document.querySelector('.live-tracker-depth-0 .live-tracker-session');
-  const svg = document.querySelector('#session-connectors');
-  const tracker = document.querySelector('.live-tracker');
-  const active = activeElement;
-  const ancestors = node => {
-    const values = [];
-    for (let item = node; item; item = item.parentElement) {
-      const style = getComputedStyle(item);
-      values.push({ tag: item.tagName, id: item.id, className: item.className, zIndex: style.zIndex, overflow: style.overflow, transform: style.transform, opacity: style.opacity, background: style.backgroundColor });
-    }
-    return values;
-  };
-  return {
-    viewport: { width: innerWidth, height: innerHeight, clientWidth: document.documentElement.clientWidth, clientHeight: document.documentElement.clientHeight,
-      visual: window.visualViewport ? { width: round(visualViewport.width), height: round(visualViewport.height), offsetLeft: round(visualViewport.offsetLeft), offsetTop: round(visualViewport.offsetTop), scale: visualViewport.scale } : null },
-    standalone: matchMedia('(display-mode: standalone)').matches,
-    navMode: document.body.classList.contains('nav-mode'),
-    overview: tracker?.dataset.overview === 'true',
-    svg: svg ? { hidden: svg.hasAttribute('hidden'), rect: rect(svg), display: getComputedStyle(svg).display, visibility: getComputedStyle(svg).visibility, opacity: getComputedStyle(svg).opacity, zIndex: getComputedStyle(svg).zIndex } : null,
-    paths,
-    visibleProjects: visibleGroups.map(group => group.dataset.project),
-    child: child ? {
-      row: rect(child), identity: rect(identity), state: rect(state), phase: phase?.textContent || '', phaseRect: phase ? rect(phase) : null,
-      elapsed: time?.textContent || '', elapsedHidden: time?.hidden ?? true, elapsedRect: time ? rect(time) : null,
-      identityStateGap: round(rect(state).left - rect(identity).right), overflow: getComputedStyle(child).overflow,
-    } : null,
-    parentElapsedCount: parent?.querySelectorAll('.live-tracker-elapsed').length ?? 0,
-    scroll: { activeTop: active?.scrollTop ?? 0, activeHeight: active?.clientHeight ?? 0, activeScrollHeight: active?.scrollHeight ?? 0,
-      trackerTop: tracker?.scrollTop ?? 0, trackerHeight: tracker?.clientHeight ?? 0, trackerScrollHeight: tracker?.scrollHeight ?? 0 },
-    stacking: svg ? ancestors(svg) : [],
-  };
-})()`;
-
-async function waitForPaint(cdp) {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    const ready = await cdp.evaluate(`document.readyState === 'complete' && Boolean(document.querySelector('.live-tracker-elapsed'))`);
-    if (ready) {
-      await cdp.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
-      return;
-    }
-    await sleep(50);
-  }
-  throw new Error("rendered fixture did not become ready");
+const fixture = await fixtureServer();
+const fixtureOrigin = `http://127.0.0.1:${fixture.address().port}`;
+let chromeErrors = "";
+async function launchChrome(path, { app = false } = {}) {
+  const debugPort = await freePort();
+  const profile = await mkdtemp(join(tmpdir(), "qq-sessions-rendered-"));
+  const url = `${fixtureOrigin}${path}`;
+  const args = [
+    "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+    "--disable-background-networking", "--disable-component-update", "--no-first-run",
+    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`,
+    ...(app ? [`--app=${url}`] : [url]),
+  ];
+  const child = spawn(chromeBinary, args, { stdio: ["ignore", "ignore", "pipe"] });
+  child.stderr.on("data", (chunk) => { chromeErrors += chunk; });
+  const cdp = await connectChrome(debugPort, url);
+  await cdp.send("Page.enable");
+  await cdp.send("Runtime.enable");
+  return { child, cdp, profile, url };
 }
-
+async function closeChrome(chrome) {
+  try { await chrome.cdp.send("Browser.close"); } catch { chrome.child.kill("SIGKILL"); }
+  chrome.cdp.close();
+  await Promise.race([
+    new Promise((resolveExit) => chrome.child.once("exit", resolveExit)),
+    sleep(1_000).then(() => chrome.child.kill("SIGKILL")),
+  ]);
+  await rm(chrome.profile, { recursive: true, force: true });
+}
+async function waitForPaint(cdp) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const ready = await cdp.evaluate(`document.readyState === 'complete' && Boolean(document.querySelector('.live-tracker'))`);
+    if (ready) break;
+    await sleep(25);
+  }
+  await sleep(180);
+}
 async function screenshot(cdp, name) {
-  const capture = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+  const capture = await cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true });
   await writeFile(join(artifacts, `${name}.png`), Buffer.from(capture.data, "base64"));
 }
+const openNavigation = (cdp) => cdp.evaluate(`document.querySelector('.session-heading-start').click()`);
+const openOverview = (cdp) => cdp.evaluate(`(() => {
+  const nav = document.querySelector('.active-projects');
+  nav.focus();
+  nav.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+})()`);
 
-async function inspect(cdp, name) {
-  await cdp.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
-  const value = await cdp.evaluate(geometryExpression);
-  await screenshot(cdp, name);
-  return value;
+const inspectExpression = `(() => {
+  const identity = (node) => node ? (node.dataset.project || '') + '\\n' + (node.dataset.folder || '') : '';
+  const projects = [...document.querySelectorAll('.active-project-item[data-project]')];
+  const groups = [...document.querySelectorAll('.live-tracker-project[data-project]')];
+  const visibleGroups = groups.filter((group) => !group.hidden);
+  const alphaGroup = groups.find((group) => group.dataset.project === 'alpha' && (group.dataset.folder || '') === '');
+  const child = alphaGroup?.querySelector('.live-tracker-child-strip .live-tracker-session');
+  const childStyle = child ? getComputedStyle(child) : null;
+  const headingVisibility = visibleGroups.map((group) => {
+    const heading = group.querySelector('.live-tracker-project-name');
+    const style = heading ? getComputedStyle(heading) : null;
+    return { text: heading?.textContent.trim() || '', position: style?.position || '', width: heading?.getBoundingClientRect().width || 0 };
+  });
+  return {
+    standalone: matchMedia('(display-mode: standalone)').matches,
+    navMode: document.body.classList.contains('nav-mode'),
+    overview: document.querySelector('.live-tracker')?.dataset.overview === 'true',
+    connectorElements: document.querySelectorAll('#session-connectors, .session-connectors').length,
+    connectorPaths: document.querySelectorAll('svg path[data-project]').length,
+    projectSequence: projects.map(identity),
+    groupSequence: groups.map(identity),
+    groupHeadings: groups.map((group) => group.querySelector('.live-tracker-project-name')?.textContent.trim() || ''),
+    visibleGroups: visibleGroups.map(identity),
+    projectVisualTops: projects.map((item) => item.offsetTop),
+    groupVisualTops: visibleGroups.map((group) => group.offsetTop),
+    headingVisibility,
+    alphaRows: alphaGroup ? [...alphaGroup.querySelectorAll('.live-tracker-session')].map((row) => ({ id: row.dataset.sessionId, depth: Number(row.dataset.depth) })) : [],
+    emptyGroups: groups.filter((group) => group.querySelector('.live-tracker-project-empty')).map(identity),
+    duplicateStudio: groups.filter((group) => group.dataset.project === 'studio').map(identity),
+    child: child ? {
+      display: childStyle.display,
+      direction: childStyle.flexDirection,
+      justify: childStyle.justifyContent,
+      minHeight: childStyle.minHeight,
+      identity: child.querySelector('.live-tracker-face')?.textContent.trim() || '',
+      phase: child.querySelector('.live-tracker-phase')?.textContent.trim() || '',
+      elapsed: child.querySelector('.live-tracker-elapsed')?.textContent.trim() || '',
+      elapsedOwner: child.querySelectorAll('.live-tracker-elapsed').length,
+      fullRowLink: child.parentElement?.tagName === 'LI',
+    } : null,
+    idleParentElapsedCount: alphaGroup?.querySelector('.live-tracker-session[data-session-id="${architectB}"] .live-tracker-elapsed')?.textContent.trim() ? 1 : 0,
+    scroll: {
+      projectTop: document.querySelector('.active-projects')?.scrollTop || 0,
+      projectHeight: document.querySelector('.active-projects')?.clientHeight || 0,
+      projectScrollHeight: document.querySelector('.active-projects')?.scrollHeight || 0,
+      trackerTop: document.querySelector('.live-tracker')?.scrollTop || 0,
+      trackerHeight: document.querySelector('.live-tracker')?.clientHeight || 0,
+      trackerScrollHeight: document.querySelector('.live-tracker')?.scrollHeight || 0,
+    },
+  };
+})()`;
+async function inspect(cdp, name, { capture = true } = {}) {
+  await sleep(90);
+  const state = await cdp.evaluate(inspectExpression);
+  assert.deepEqual(cdp.exceptions, [], `${name}: browser has no uncaught runtime exception`);
+  if (capture) await screenshot(cdp, name);
+  return state;
 }
-
-function assertChooserClosed(state) {
-  assert.equal(state.standalone, true, "closed mobile proof remains in installed-app display mode");
-  assert.equal(state.navMode, false, "mobile project/session chooser is closed");
-  assert.equal(state.svg.hidden, true, "connector layer is hidden outside the mobile chooser");
-  assert.equal(state.paths.length, 0, "closed mobile navigation leaves no connector over conversation controls");
+async function nativeProjectFocusSequence(cdp, count) {
+  await cdp.evaluate(`document.querySelector('.active-project-item[data-project]')?.focus()`);
+  const sequence = [];
+  for (let index = 0; index < count; index += 1) {
+    sequence.push(await cdp.evaluate(`(() => {
+      const item = document.activeElement?.closest?.('.active-project-item[data-project]');
+      return item ? (item.dataset.project || '') + '\\n' + (item.dataset.folder || '') : '';
+    })()`));
+    if (index + 1 < count) {
+      await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+      await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+    }
+  }
+  return sequence;
 }
-
-function assertRendered(state, { overview = false, standalone = false, scrolled = "" } = {}) {
-  assert.equal(state.overview, overview, "fixture is in the requested project-filter state");
-  assert.equal(state.standalone, standalone, "fixture is in the requested display mode");
-  assert.equal(state.svg.hidden, false, "connector layer is not hidden");
-  assert.equal(state.svg.display, "block", "connector layer participates in paint");
-  assert.equal(state.svg.visibility, "visible", "connector layer is visible");
-  assert.equal(state.paths.length, state.visibleProjects.length, "every visible session project has exactly one connector");
-  for (const path of state.paths) {
-    assert.ok(path.length >= 24, `${path.project} connector occupies a perceptible continuous span`);
-    assert.ok(path.bounds.width >= 24 && (path.bounds.height > 0 || Number.parseFloat(path.strokeWidth) >= 1),
-      `${path.project} connector has a visible horizontal span and painted stroke`);
-    assert.notEqual(path.stroke, "none", `${path.project} connector has a computed stroke`);
-    assert.ok(Number(path.opacity) >= 0.75, `${path.project} connector remains perceptible`);
-    assert.ok(path.projectRect && path.groupRect, `${path.project} connector resolves both matching endpoints`);
-    assert.ok(Math.abs(path.start.y - (path.projectRect.top + path.projectRect.height / 2)) <= 2,
-      `${path.project} connector starts centered on its project surface`);
-    assert.ok(path.start.x < path.projectRect.right && path.start.x >= path.projectRect.right - 10,
-      `${path.project} connector visibly leads from inside its project surface`);
-    assert.ok(Math.abs(path.end.y - (path.groupRect.top + path.groupRect.height / 2)) <= 2,
-      `${path.project} connector ends centered on its session surface`);
-    assert.ok(path.end.x > path.groupRect.left && path.end.x <= path.groupRect.left + 10,
-      `${path.project} connector visibly leads into its session-group surface`);
-  }
-  if (scrolled === "tracker" || scrolled === "both") {
-    assert.ok(state.scroll.trackerTop > 0, "session-group pane scroll transition was exercised");
-  }
-  if (scrolled === "both") {
-    assert.ok(state.scroll.activeTop > 0, "active-project pane scroll transition was exercised");
-  }
-  if (state.visibleProjects.includes("alpha")) {
-    assert.equal(state.child.phase, "implementation", "active child preserves authoritative phase/workflow text");
-    assert.equal(state.child.elapsed, "8m", "active child shows completed own elapsed minutes");
-    assert.equal(state.child.elapsedHidden, false, "eligible child time is visibly rendered");
-    assert.ok(state.child.identityStateGap >= 0 && state.child.identityStateGap <= 12,
-      "child identity, phase, and elapsed time form one compact left-biased cluster");
-    assert.ok(state.child.elapsedRect.right <= state.child.row.right,
-      "child elapsed value remains inside its full-row target");
-    assert.equal(state.parentElapsedCount, 0, "delegated child time is not copied onto the idle architect");
-  }
+const ascending = (values) => values.every((value, index) => index === 0 || value >= values[index - 1]);
+function assertSelected(state, expected) {
+  assert.equal(state.connectorElements, 0, "selected mode has no connector layer");
+  assert.equal(state.connectorPaths, 0, "selected mode has no project connector path");
+  assert.equal(state.overview, false, "one project group is selected");
+  assert.deepEqual(state.projectSequence, expected, "left DOM/reading order is canonical");
+  assert.deepEqual(state.groupSequence, expected, "right DOM/reading order matches the left exactly");
+  assert.deepEqual(state.visibleGroups, ["alpha\n"], "selected mode exposes only its authoritative project group");
+}
+function assertOverview(state, expected) {
+  assert.equal(state.connectorElements, 0, "overview has no connector layer");
+  assert.equal(state.connectorPaths, 0, "overview has no connector paths or persistent bundle");
+  assert.equal(state.overview, true, "overview mode is active");
+  assert.deepEqual(state.projectSequence, expected, "left project identities keep canonical order");
+  assert.deepEqual(state.groupSequence, expected, "right group identities exactly match canonical left order");
+  assert.deepEqual(state.visibleGroups, expected, "overview exposes every group in reading order");
+  assert.ok(ascending(state.projectVisualTops), "left visual top order follows DOM order");
+  assert.ok(ascending(state.groupVisualTops), "right visual top order follows DOM order despite uneven heights");
+  assert.ok(state.headingVisibility.every((heading) => heading.position === "static" && heading.width > 1 && heading.text),
+    "every overview group has a visible human heading instead of relying on a line");
 }
 
 await mkdir(artifacts, { recursive: true });
-const server = await fixtureServer();
-const { port } = server.address();
-let chromeErrors = "";
-
-async function launchChrome({ app = false } = {}) {
-  const debugPort = await freePort();
-  const profile = await mkdtemp(join(tmpdir(), "qq-sessions-rendered-"));
-  const url = `http://127.0.0.1:${port}${paths.canonical}${app ? "?standalone=1" : ""}`;
-  const chrome = spawn(chromeBinary, [
-    "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
-    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`,
-    app ? `--app=${url}` : "about:blank",
-  ], { stdio: ["ignore", "ignore", "pipe"] });
-  chrome.stderr.on("data", chunk => { chromeErrors += chunk; });
-  const cdp = await connectChrome(debugPort, app ? url : "");
-  await cdp.send("Page.enable");
-  await cdp.send("Runtime.enable");
-  return { chrome, cdp, profile, url };
-}
-
-async function closeChrome(instance) {
-  instance.cdp.close();
-  instance.chrome.kill("SIGTERM");
-  if (instance.chrome.exitCode === null) await new Promise(resolveExit => instance.chrome.once("exit", resolveExit));
-  await rm(instance.profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
-}
-
 try {
   const report = {};
-  const desktop = await launchChrome();
-  await desktop.cdp.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
-  await desktop.cdp.send("Page.navigate", { url: desktop.url });
-  await waitForPaint(desktop.cdp);
 
-  report.desktopSelected = await inspect(desktop.cdp, "desktop-selected");
-  await desktop.cdp.evaluate(`(() => { const nav = document.querySelector('.active-projects'); nav.focus(); nav.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
-  report.desktopOverview = await inspect(desktop.cdp, "desktop-overview");
-  await desktop.cdp.evaluate(`(() => { const tracker = document.querySelector('.live-tracker'); tracker.scrollTop = Math.min(110, tracker.scrollHeight - tracker.clientHeight); const projects = document.querySelector('.active-projects'); projects.scrollTop = Math.min(85, projects.scrollHeight - projects.clientHeight); })()`);
-  report.desktopScrolled = await inspect(desktop.cdp, "desktop-overview-scrolled");
+  // Desktop verifies the unfiltered initial state, canonical order, native Tab
+  // sequence, independent pane scrolling, resize, and a live chrome replacement.
+  const desktop = await launchChrome("/many");
+  await desktop.cdp.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await waitForPaint(desktop.cdp);
+  report.desktopSelected = await inspect(desktop.cdp, "desktop-selected", { capture: false });
+  assertSelected(report.desktopSelected, expectedMany);
+  report.desktopFocusSequence = await nativeProjectFocusSequence(desktop.cdp, expectedMany.length);
+  assert.deepEqual(report.desktopFocusSequence, expectedMany,
+    "native keyboard Tab traversal follows the same canonical visible project sequence");
+  await openOverview(desktop.cdp);
+  report.desktopOverview = await inspect(desktop.cdp, "desktop-overview", { capture: false });
+  assertOverview(report.desktopOverview, expectedMany);
+  assert.deepEqual(report.desktopOverview.alphaRows, [
+    { id: architectB, depth: 0 }, { id: childB2, depth: 1 }, { id: childB1, depth: 1 },
+    { id: architectA, depth: 0 }, { id: childA, depth: 1 },
+  ], "architects and their authoritative direct children remain contiguous in browser focus order");
+  assert.deepEqual(report.desktopOverview.duplicateStudio, ["studio\neast", "studio\nwest"],
+    "duplicate project names remain distinct by authoritative folder identity");
+  assert.deepEqual(report.desktopOverview.emptyGroups, ["beta\n"],
+    "empty groups retain a deliberate canonical position");
+  assert.ok(report.desktopOverview.child?.fullRowLink && report.desktopOverview.child?.display === "flex"
+    && report.desktopOverview.child?.direction === "row" && report.desktopOverview.child?.justify === "flex-start",
+  "compact child metadata remains a full-row, left-biased focus target");
+  assert.equal(report.desktopOverview.child?.phase, "implementation", "child keeps its own workflow phase");
+  assert.match(report.desktopOverview.child?.elapsed ?? "", /^\d+[mh]$/, "child keeps its own elapsed time");
+  assert.equal(report.desktopOverview.child?.elapsedOwner, 1, "elapsed metadata belongs to the child row");
+  assert.equal(report.desktopOverview.idleParentElapsedCount, 0, "idle architect does not inherit delegated elapsed time");
+  await desktop.cdp.evaluate(`(() => {
+    const tracker = document.querySelector('.live-tracker');
+    const projects = document.querySelector('.active-projects');
+    tracker.scrollTop = Math.min(140, tracker.scrollHeight - tracker.clientHeight);
+    projects.scrollTop = Math.min(95, projects.scrollHeight - projects.clientHeight);
+  })()`);
+  report.desktopScrolled = await inspect(desktop.cdp, "desktop-scrolled", { capture: false });
+  assertOverview(report.desktopScrolled, expectedMany);
+  assert.ok(report.desktopScrolled.scroll.trackerTop > 0, "session groups scroll independently");
   await desktop.cdp.send("Emulation.setDeviceMetricsOverride", { width: 1120, height: 720, deviceScaleFactor: 1, mobile: false });
-  report.desktopResized = await inspect(desktop.cdp, "desktop-overview-resized");
-  await desktop.cdp.evaluate(`document.querySelector('.active-project-item[data-project="alpha"]').click()`);
-  report.desktopRefiltered = await inspect(desktop.cdp, "desktop-refiltered");
-  await desktop.cdp.evaluate(`document.querySelector('.live-tracker-child-strip').style.minHeight = '3rem'`);
-  report.desktopLiveUpdate = await inspect(desktop.cdp, "desktop-live-update");
+  report.desktopResized = await inspect(desktop.cdp, "desktop-resized", { capture: false });
+  assertOverview(report.desktopResized, expectedMany);
+  await desktop.cdp.evaluate(`(() => {
+    const oldChrome = document.querySelector('#session-chrome');
+    const replacement = oldChrome.cloneNode(true);
+    oldChrome.replaceWith(replacement);
+    document.dispatchEvent(new CustomEvent('htmx:afterSwap', { detail: { target: replacement } }));
+  })()`);
+  report.desktopLiveSwap = await inspect(desktop.cdp, "desktop-live-swap", { capture: false });
+  assert.equal(report.desktopLiveSwap.connectorElements, 0, "live swaps cannot recreate connector machinery");
   await closeChrome(desktop);
 
-  const standalone = await launchChrome({ app: true });
-  await standalone.cdp.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 700, deviceScaleFactor: 3, mobile: true, screenWidth: 390, screenHeight: 700 });
-  await waitForPaint(standalone.cdp);
-  report.standaloneClosed = await inspect(standalone.cdp, "standalone-closed");
-  await standalone.cdp.evaluate(`document.querySelector('.session-heading-start').click()`);
-  report.standaloneSelected = await inspect(standalone.cdp, "standalone-selected");
-  await standalone.cdp.evaluate(`(() => { const nav = document.querySelector('.active-projects'); nav.focus(); nav.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
-  report.standaloneOverview = await inspect(standalone.cdp, "standalone-overview");
-  await standalone.cdp.evaluate(`(() => { const tracker = document.querySelector('.live-tracker'); tracker.scrollTop = Math.min(95, tracker.scrollHeight - tracker.clientHeight); const projects = document.querySelector('.active-projects'); projects.scrollTop = Math.min(80, projects.scrollHeight - projects.clientHeight); })()`);
-  report.standaloneScrolled = await inspect(standalone.cdp, "standalone-overview-scrolled");
-  await standalone.cdp.send("Emulation.setDeviceMetricsOverride", { width: 640, height: 390, deviceScaleFactor: 2, mobile: true, screenWidth: 640, screenHeight: 390 });
-  report.standaloneRotated = await inspect(standalone.cdp, "standalone-overview-rotated");
-  await standalone.cdp.evaluate(`document.body.click()`);
-  report.standaloneClosedAfter = await inspect(standalone.cdp, "standalone-closed-after");
-  await closeChrome(standalone);
+  // Installed/standalone narrow PWA: mandatory selected and small-overview images.
+  const smallPwa = await launchChrome("/small", { app: true });
+  await smallPwa.cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 390, height: 700, deviceScaleFactor: 3, mobile: true, screenWidth: 390, screenHeight: 700,
+  });
+  await waitForPaint(smallPwa.cdp);
+  report.smallClosed = await inspect(smallPwa.cdp, "small-closed", { capture: false });
+  assert.equal(report.smallClosed.connectorElements, 0, "closed narrow navigation has no connector layer");
+  await openNavigation(smallPwa.cdp);
+  report.pwaSelected = await inspect(smallPwa.cdp, "pwa-selected");
+  assert.ok(report.pwaSelected.standalone && report.pwaSelected.navMode, "selected screenshot is installed-PWA navigation");
+  assertSelected(report.pwaSelected, expectedSmall);
+  await openOverview(smallPwa.cdp);
+  report.pwaSmallOverview = await inspect(smallPwa.cdp, "pwa-small-overview");
+  assertOverview(report.pwaSmallOverview, expectedSmall);
+  await smallPwa.cdp.evaluate(`document.body.click()`);
+  report.smallClosedAfter = await inspect(smallPwa.cdp, "small-closed-after", { capture: false });
+  assert.equal(report.smallClosedAfter.connectorElements, 0, "closing narrow navigation leaves no connector layer");
+  await openNavigation(smallPwa.cdp);
+  report.smallReopened = await inspect(smallPwa.cdp, "small-reopened", { capture: false });
+  assert.equal(report.smallReopened.connectorElements, 0, "reopening narrow navigation leaves selected mode connector-free");
+  await closeChrome(smallPwa);
+
+  // Installed/standalone many-project PWA: mandatory many, independently
+  // scrolled, and rotated screenshots.
+  const manyPwa = await launchChrome("/many", { app: true });
+  await manyPwa.cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 390, height: 700, deviceScaleFactor: 3, mobile: true, screenWidth: 390, screenHeight: 700,
+  });
+  await waitForPaint(manyPwa.cdp);
+  await openNavigation(manyPwa.cdp);
+  await openOverview(manyPwa.cdp);
+  report.pwaManyOverview = await inspect(manyPwa.cdp, "pwa-many-overview");
+  assertOverview(report.pwaManyOverview, expectedMany);
+  await manyPwa.cdp.evaluate(`(() => {
+    const tracker = document.querySelector('.live-tracker');
+    const projects = document.querySelector('.active-projects');
+    tracker.scrollTop = Math.min(165, tracker.scrollHeight - tracker.clientHeight);
+    projects.scrollTop = Math.min(110, projects.scrollHeight - projects.clientHeight);
+  })()`);
+  report.pwaScrolled = await inspect(manyPwa.cdp, "pwa-scrolled");
+  assertOverview(report.pwaScrolled, expectedMany);
+  assert.ok(report.pwaScrolled.scroll.trackerTop > 0 && report.pwaScrolled.scroll.projectTop > 0,
+    "both narrow chooser panes were independently scrolled");
+  await manyPwa.cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 640, height: 390, deviceScaleFactor: 2, mobile: true, screenWidth: 640, screenHeight: 390,
+  });
+  report.pwaRotated = await inspect(manyPwa.cdp, "pwa-rotated");
+  assertOverview(report.pwaRotated, expectedMany);
+  await closeChrome(manyPwa);
 
   await writeFile(join(artifacts, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
-  if (!diagnose) {
-    assertRendered(report.desktopSelected);
-    assertRendered(report.desktopOverview, { overview: true });
-    assertRendered(report.desktopScrolled, { overview: true, scrolled: "tracker" });
-    assertRendered(report.desktopResized, { overview: true, scrolled: "tracker" });
-    assertRendered(report.desktopRefiltered);
-    assertRendered(report.desktopLiveUpdate);
-    assertChooserClosed(report.standaloneClosed);
-    assertRendered(report.standaloneSelected, { standalone: true });
-    assertRendered(report.standaloneOverview, { overview: true, standalone: true });
-    assertRendered(report.standaloneScrolled, { overview: true, standalone: true, scrolled: "both" });
-    assertRendered(report.standaloneRotated, { overview: true, standalone: true });
-    assertChooserClosed(report.standaloneClosedAfter);
-  }
   console.log(`sessions rendered proof ${diagnose ? "diagnosed" : "passed"}: ${artifacts}`);
 } catch (error) {
   if (chromeErrors) error.message += `\nChromium: ${chromeErrors.slice(-2000)}`;
   throw error;
 } finally {
-  await new Promise(resolveClose => server.close(resolveClose));
+  await new Promise((resolveClose) => fixture.close(resolveClose));
 }
