@@ -1408,34 +1408,43 @@ function nodeKeys(nodes) {
   });
 }
 
-function keyedIslands(nodes) {
-  const keys = nodeKeys(nodes);
-  return nodes.map((node, index) => {
-    const island = liveConversationIsland(node);
-    if (island.key === keys[index]) return island;
-    const id = `live-node-${safeLiveId(keys[index])}`;
-    return { ...island, key: keys[index], id, html: wrapLiveNode(id, island.inner) };
-  });
+function keyedIsland(node, key) {
+  const island = liveConversationIsland(node);
+  if (island.key === key) return island;
+  const id = `live-node-${safeLiveId(key)}`;
+  return { ...island, key, id, html: wrapLiveNode(id, island.inner) };
+}
+
+function renderKeyedIslands(nodes, keys, selected) {
+  const islands = [];
+  for (let index = 0; index < nodes.length; index += 1) {
+    if (selected(index, keys[index])) islands.push(keyedIsland(nodes[index], keys[index]));
+  }
+  return islands;
 }
 
 /** Serializable cursors for the chronological live suffix. */
 export function liveTranscriptState(snapshot, previous = null) {
   const nodes = sessionNodes(snapshot);
   const allKeys = nodeKeys(nodes);
-  const allIslands = keyedIslands(nodes);
   const { live } = splitTranscriptNodes(nodes);
-  if (!previous) {
-    return { allKeys, nodes: allIslands.slice(nodes.length - live.length), reset: false };
+  const liveStart = nodes.length - live.length;
+  const prefix = previous ? isKeyPrefix(previous.allKeys, allKeys) : true;
+  if (!previous || !prefix) {
+    return {
+      allKeys,
+      nodes: renderKeyedIslands(nodes, allKeys, (index) => index >= liveStart),
+      reset: Boolean(previous),
+    };
   }
 
-  const prefix = isKeyPrefix(previous.allKeys, allKeys);
-  if (!prefix) {
-    return { allKeys, nodes: allIslands.slice(nodes.length - live.length), reset: true };
-  }
-
-  const held = new Set(previous.nodes.map((island) => island.key));
-  for (const key of allKeys.slice(previous.allKeys.length)) held.add(key);
-  return { allKeys, nodes: allIslands.filter((island) => held.has(island.key)), reset: false };
+  const selected = new Set(previous.nodes.map((island) => island.key));
+  for (const key of allKeys.slice(previous.allKeys.length)) selected.add(key);
+  return {
+    allKeys,
+    nodes: renderKeyedIslands(nodes, allKeys, (_index, key) => selected.has(key)),
+    reset: false,
+  };
 }
 
 function liveAppendFrames(previous, state, event = "live") {
@@ -1669,6 +1678,134 @@ function settledNodeKey(node) {
   return `${node.kind ?? "node"}:${node.seq ?? ""}`;
 }
 
+function occurrenceRecords(nodes, baseKey) {
+  const seen = new Map();
+  return nodes.map((node) => {
+    const base = baseKey(node);
+    const occurrence = seen.get(base) ?? 0;
+    seen.set(base, occurrence + 1);
+    return {
+      base,
+      occurrence,
+      key: occurrence === 0 ? base : `${base}-occurrence-${occurrence}`,
+      identity: JSON.stringify([base, occurrence]),
+    };
+  });
+}
+
+const SETTLED_CACHE_MAX_ENTRIES = 384;
+const SETTLED_CACHE_MAX_UTF16_BYTES = 8 * 1024 * 1024;
+const SETTLED_CACHE_MAX_RESULT_UTF16_BYTES = 512 * 1024;
+const SETTLED_CACHEABLE_KINDS = new Set([
+  "user", "steering", "assistant", "tool", "command", "retry", "compaction",
+  "turn-error", "turn-status", "fallback",
+]);
+// Module-local by design: reloading render.mjs starts a new cache generation.
+// Only immutable transcript kinds can enter; context/notice and all other UI
+// surfaces are deliberately outside this allowlist.
+const settledRenderCache = new Map();
+let settledRenderCacheUtf16Bytes = 0;
+
+// A complete canonical protocol value, not a lossy digest. Shapes that could
+// hide renderer-visible state decline caching rather than risk stale HTML.
+function canonicalJsonValue(value, ancestors = new Set()) {
+  if (value === null) return "null";
+  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return null;
+    return Object.is(value, -0) ? "-0" : JSON.stringify(value);
+  }
+  if (typeof value !== "object" || ancestors.has(value)) return null;
+  const prototype = Object.getPrototypeOf(value);
+  if (Array.isArray(value)) {
+    if (prototype !== Array.prototype) return null;
+  } else if (prototype !== Object.prototype && prototype !== null) return null;
+  if (Object.getOwnPropertySymbols(value).length > 0) return null;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  ancestors.add(value);
+  let result;
+  if (Array.isArray(value)) {
+    const names = Object.keys(descriptors).filter((name) => name !== "length");
+    if (names.length !== value.length
+      || names.some((name, index) => name !== String(index))) {
+      result = null;
+    } else {
+      const parts = [];
+      for (let index = 0; index < value.length; index += 1) {
+        const descriptor = descriptors[index];
+        if (!descriptor?.enumerable || !("value" in descriptor)) {
+          result = null;
+          break;
+        }
+        const part = canonicalJsonValue(descriptor.value, ancestors);
+        if (part === null) {
+          result = null;
+          break;
+        }
+        parts.push(part);
+      }
+      if (result !== null) result = `[${parts.join(",")}]`;
+    }
+  } else {
+    const names = Object.keys(descriptors).sort();
+    const parts = [];
+    for (const name of names) {
+      const descriptor = descriptors[name];
+      if (!descriptor.enumerable || !("value" in descriptor)) {
+        result = null;
+        break;
+      }
+      const part = canonicalJsonValue(descriptor.value, ancestors);
+      if (part === null) {
+        result = null;
+        break;
+      }
+      parts.push(`${JSON.stringify(name)}:${part}`);
+    }
+    if (result !== null) result = `{${parts.join(",")}}`;
+  }
+  ancestors.delete(value);
+  return result;
+}
+
+function settledCacheKey(sessionId, identity, node) {
+  if (!sessionId || !SETTLED_CACHEABLE_KINDS.has(node?.kind) || transcriptNodeIsOpen(node)) return null;
+  const fingerprint = canonicalJsonValue(node);
+  if (fingerprint === null) return null;
+  return `${sessionId.length}:${sessionId}${identity.length}:${identity}${fingerprint}`;
+}
+
+function readSettledRenderCache(key) {
+  const entry = settledRenderCache.get(key);
+  if (!entry) return null;
+  settledRenderCache.delete(key);
+  settledRenderCache.set(key, entry);
+  return entry.html;
+}
+
+function writeSettledRenderCache(key, html) {
+  // JavaScript string lengths are UTF-16 code units. Account for both retained
+  // key/fingerprint and HTML, and use that same exact value during eviction.
+  const resultBytes = html.length * 2;
+  const entryBytes = (key.length + html.length) * 2;
+  if (resultBytes > SETTLED_CACHE_MAX_RESULT_UTF16_BYTES
+    || entryBytes > SETTLED_CACHE_MAX_UTF16_BYTES) return;
+  const existing = settledRenderCache.get(key);
+  if (existing) {
+    settledRenderCache.delete(key);
+    settledRenderCacheUtf16Bytes -= existing.bytes;
+  }
+  settledRenderCache.set(key, { html, bytes: entryBytes });
+  settledRenderCacheUtf16Bytes += entryBytes;
+  while (settledRenderCache.size > SETTLED_CACHE_MAX_ENTRIES
+    || settledRenderCacheUtf16Bytes > SETTLED_CACHE_MAX_UTF16_BYTES) {
+    const oldest = settledRenderCache.keys().next().value;
+    const evicted = settledRenderCache.get(oldest);
+    settledRenderCache.delete(oldest);
+    settledRenderCacheUtf16Bytes -= evicted.bytes;
+  }
+}
+
 function sseSwapAttrs(name, enabled, swap = "innerHTML") {
   return enabled ? ` hx-ext="sse" sse-swap="${escapeHtml(name)}" hx-swap="${escapeHtml(swap)}"` : "";
 }
@@ -1711,13 +1848,30 @@ function renderSettledConversationNode(node) {
   return renderConversationNode(node);
 }
 
+function renderCachedSettledConversationNode(sessionId, node, identity) {
+  const key = settledCacheKey(sessionId, identity, node);
+  if (!key) return renderSettledConversationNode(node);
+  const cached = readSettledRenderCache(key);
+  if (cached !== null) return cached;
+  const html = renderSettledConversationNode(node);
+  writeSettledRenderCache(key, html);
+  return html;
+}
+
+function renderSettledNodes(sessionId, nodes, records = occurrenceRecords(nodes, settledNodeKey)) {
+  return nodes.map((node, index) =>
+    renderCachedSettledConversationNode(sessionId, node, records[index].identity))
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function renderTranscriptSettled(snapshot) {
   if (!snapshot?.id) return "";
   const { settled, live } = splitTranscriptNodes(sessionNodes(snapshot));
   if (settled.length === 0 && live.length === 0) {
     return '<p id="transcript-empty" class="empty-transcript">This DSH session has no transcript yet.</p>';
   }
-  return settled.map(renderSettledConversationNode).filter(Boolean).join("\n");
+  return renderSettledNodes(snapshot.id, settled);
 }
 
 function transcriptAnchor() {
@@ -1744,14 +1898,15 @@ function isKeyPrefix(previous, next) {
  */
 export function renderSettledTranscriptAppend(previousKeys, snapshot) {
   const { settled } = splitTranscriptNodes(sessionNodes(snapshot));
-  const keys = settled.map(settledNodeKey);
+  const records = occurrenceRecords(settled, settledNodeKey);
+  const keys = records.map((record) => record.key);
   if (!Array.isArray(previousKeys)) return { keys, html: "", reset: false };
   if (!isKeyPrefix(previousKeys, keys)) {
     return { keys, html: transcriptSettledInner(snapshot), reset: true };
   }
-  const seen = new Set(previousKeys);
-  const added = settled.filter((node) => !seen.has(settledNodeKey(node)));
-  let html = added.map(renderSettledConversationNode).filter(Boolean).join("\n");
+  const added = settled.slice(previousKeys.length);
+  const addedRecords = records.slice(previousKeys.length);
+  let html = renderSettledNodes(snapshot?.id, added, addedRecords);
   if (previousKeys.length === 0 && added.length > 0) {
     html += '<p id="transcript-empty" hx-swap-oob="delete"></p>';
   }
