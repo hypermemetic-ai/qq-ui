@@ -19,7 +19,8 @@ This roadmap does not authorize overlapping SSE connections, service restarts, d
 | C1 — snapshot handoff and critical-first frames | Landed `9832ae7`; merge/reference `f99ed12`; QA passed | Duplicate initial view work and ready-to-presentation ordering | Exact one-shot page handoff plus ordered critical bootstrap; secondary rendered regions follow the ready flush. Gate passed. |
 | C2 — server timing | Landed `6545428`; merge/reference `992926c`; QA passed | Attribution of switch delay across read, listing, sheets, and render phases | Fixed privacy-safe switch timing envelope is emitted and reportable. Gate passed. |
 | D — prompt echo | Landed on main `55a7325` (PR #26); merge/reference `5d4c7fc46b464f95f1c015f06f979a9a8daa54cc`; QA passed | Prompt interaction feedback | Immediate honest pending echo, exact backend message-ID reconciliation, and deterministic failure/switch cleanup. Gate passed. |
-| E — critical sheet policy | Implemented in this change; host commit/merge and QA pending | Multi-second sheet acquisition inside destination `view` and interaction-to-presentation | Live-switch bootstrap loads navigation metadata and safety/composer sheets only. Case, dashboard/usage, and progress reconcile after ready. Gate: full tests and QA, then a fresh server-timed warm-switch run. |
+| E — critical sheet policy | Landed on main `14d044f` (PR #27); merge/reference `459c84964dd013a4150e3775ea54a473f75338ae`; QA passed | Multi-second sheet acquisition inside destination `view` and interaction-to-presentation | Live-switch bootstrap loads navigation metadata and safety/composer sheets only. Case, dashboard/usage, and progress reconcile after ready. Implementation and QA gate passed; fresh server-timed warm-switch measurement remains. |
+| F — stable prompt replacement | Implemented in this change; host commit/merge and QA pending | Prompt geometry and duplicate optimistic/authoritative representations | Optimistic markup has authoritative user geometry and out-of-flow status. Exact safe user or queue identity removes one owned echo in swap/mutation order, including truth-before-response. Gate: focused prompt/session proofs, full tests, and QA. |
 
 ## Evidence before Phase E
 
@@ -56,7 +57,7 @@ Deterministic repository proof covers a controlled unresolved case promise, read
 
 There is not yet a post-E operator field run; the current evidence is deterministic path, ordering, timing-boundary, and call-count proof rather than a claimed production percentile improvement. The fresh warm-switch run below is therefore the next measurement gate.
 
-After host test and QA, run the same warm 15-switch server-timed workflow. Accept Phase E when critical `serverSheetsMs` is normally below 50–100 ms, no secondary multi-second values appear in that field, and warm interaction-to-presentation trends toward the 300–500 ms p50 and sub-1-second preferred/sub-1.5-second hard p95 targets. If `switchToSseOpen - serverView` is still material after that measurement, investigate that gap next; do not infer it from the pre-E run.
+After the Phase E landing and QA, run the same warm 15-switch server-timed workflow. Accept Phase E when critical `serverSheetsMs` is normally below 50–100 ms, no secondary multi-second values appear in that field, and warm interaction-to-presentation trends toward the 300–500 ms p50 and sub-1-second preferred/sub-1.5-second hard p95 targets. If `switchToSseOpen - serverView` is still material after that measurement, investigate that gap next; do not infer it from the pre-E run.
 
 ## Decisions and banked options
 
