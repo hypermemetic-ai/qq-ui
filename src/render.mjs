@@ -1,5 +1,6 @@
 import { orderedProjectPlaces, projectPlaceIdentity } from "./project-order.mjs";
 import { escapeHtml, renderHighlightedCode, renderMarkdownText, renderMessageText } from "./markdown.mjs";
+import { safeMessageId } from "./message-id.mjs";
 
 export { escapeHtml };
 
@@ -376,7 +377,9 @@ function renderConversationNode(node) {
     const steering = node.kind === "steering";
     const label = steering ? "Steering message" : "Your message";
     const accessibleLabel = time ? `${label} at ${time}` : label;
-    return `<article class="message message-user${steering ? " message-steering" : ""}" data-seq="${seq}" aria-label="${escapeHtml(accessibleLabel)}">
+    const messageId = safeMessageId(node.messageId);
+    const messageIdAttr = messageId ? ` data-message-id="${escapeHtml(messageId)}"` : "";
+    return `<article class="message message-user${steering ? " message-steering" : ""}" data-seq="${seq}"${messageIdAttr} aria-label="${escapeHtml(accessibleLabel)}">
       ${contentBlocks(node.content)}
     </article>`;
   }
@@ -1938,7 +1941,8 @@ function renderProviderGapSlot() {
 
 export function renderTranscriptLive(snapshot, paths = {}) {
   if (!snapshot?.id) return "";
-  return `${regionShell("transcript-live-nodes", "transcript-live-nodes", "live", renderLiveNodes(snapshot), true)}${regionShell("session-queue", "session-queue", "queue", renderQueue(snapshot, paths), true)}${renderProviderGapSlot()}`;
+  const echoes = `<div id="prompt-echoes" class="prompt-echoes" data-session-id="${escapeHtml(snapshot.id)}" aria-live="off"></div>`;
+  return `${regionShell("transcript-live-nodes", "transcript-live-nodes", "live", renderLiveNodes(snapshot), true)}${echoes}${regionShell("session-queue", "session-queue", "queue", renderQueue(snapshot, paths), true)}${renderProviderGapSlot()}`;
 }
 
 export function renderTranscript(snapshot, paths = {}) {

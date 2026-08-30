@@ -112,7 +112,7 @@ const STAGE_EVENTS = new Set([
 const STAGE_KINDS = new Set([
   "request-prepared", "network-dispatch", "response-before-swap", "response-after-swap",
   "response-after-settle", "request-complete", "sse-open", "sse-message-before", "sse-message-after",
-  "prompt-admission-pending", "prompt-admitted", "prompt-admission-failed", "prompt-admission-unmatched",
+  "prompt-local-echo", "prompt-admission-pending", "prompt-admitted", "prompt-admission-failed", "prompt-admission-unmatched",
   "session-switch-start", "session-switch-response", "session-switch-ready",
 ]);
 const SSE_CHANNELS = new Set([
