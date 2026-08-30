@@ -2625,13 +2625,14 @@ body.document-page {
 .live-tracker-session:focus-visible .live-tracker-state { color: #999; }
 .live-tracker-activity[data-activity="working"] { color: #b8b8b8; }
 .live-tracker-phase[data-phase="none"] { display: none; }
-.live-tracker-workflow + .live-tracker-phase::before { content: "· "; }
 .live-tracker-elapsed {
   min-width: 2ch;
   color: #777;
   font-variant-numeric: tabular-nums;
 }
+.live-tracker-elapsed[hidden] { display: none; }
 .live-tracker-elapsed:not(:empty)::before { content: "· "; }
+.live-tracker-elapsed[data-solo="true"]::before { content: none; }
 .live-tracker-depth-1 .live-tracker-session { margin-inline-start: .35rem; }
 .live-tracker-depth-2 .live-tracker-session { margin-inline-start: .7rem; }
 .live-tracker-depth-3 .live-tracker-session { margin-inline-start: 1.05rem; }
@@ -3405,7 +3406,8 @@ body.document-page {
 }
 .live-tracker-child-strip .live-tracker-face,
 .live-tracker-child-strip .live-tracker-label,
-.live-tracker-child-strip .live-tracker-activity {
+.live-tracker-child-strip .live-tracker-activity,
+.live-tracker-child-strip .live-tracker-phase {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3414,11 +3416,13 @@ body.document-page {
   font-size: .68rem;
   font-weight: var(--chrome-weight);
 }
-.live-tracker-child-strip .live-tracker-workflow,
-.live-tracker-child-strip .live-tracker-phase,
-.live-tracker-child-strip .live-tracker-elapsed { display: none; }
-.live-tracker-child-strip .live-tracker-label,
-.live-tracker-child-strip .live-tracker-state { color: #555; }
+.live-tracker-child-strip .live-tracker-state {
+  max-width: 55%;
+  flex: none;
+  color: #555;
+}
+.live-tracker-child-strip .live-tracker-label { color: #555; }
+.live-tracker-child-strip .live-tracker-elapsed { flex: none; }
 .live-tracker-child-strip .live-tracker-session-current {
   background: transparent;
   color: #aaa;
