@@ -186,6 +186,13 @@ assert.ok(Buffer.byteLength(JSON.stringify(maximumBatch)) > MAX_LATENCY_BODY_BYT
 
 const validHealth = batch().health;
 assert.deepEqual(sanitizeLatencyBatch(batch()).health, validHealth);
+const privateRouteBatch = batch();
+privateRouteBatch.origins[0].action = "NAVIGATE /qq/project/private/folder/session/local";
+privateRouteBatch.stages[0].action = "POST /qq/project/private/folder/session/local/prompt";
+const normalizedPrivateRoutes = sanitizeLatencyBatch(privateRouteBatch);
+assert.equal(normalizedPrivateRoutes.origins[0].action, "NAVIGATE /qq/project/:project/:folder/session/:id");
+assert.equal(normalizedPrivateRoutes.stages[0].action, "POST /qq/project/:project/:folder/session/:id/prompt",
+  "server-side action sanitation also protects same-version collectors already loaded before route normalization");
 const healthMutation = (mutate) => {
   const candidate = JSON.parse(JSON.stringify(batch()));
   mutate(candidate.health);
@@ -206,6 +213,70 @@ const oldBatch = batch();
 delete oldBatch.health;
 assert.equal(sanitizeLatencyBatch(oldBatch).health, null, "same-version old collectors remain ingestible without metadata");
 
+const extendedBatch = batch();
+extendedBatch.page.navigation = {
+  type: "navigate",
+  startTime: 0,
+  fetchStart: 0,
+  requestStart: 10,
+  responseStart: 1_210,
+  responseEnd: 1_260,
+  domInteractive: null,
+  domContentLoadedEventEnd: null,
+  loadEventEnd: null,
+  duration: null,
+  transferSize: 4_096,
+  encodedBodySize: 3_000,
+  decodedBodySize: 9_000,
+  serverViewDuration: 1_100,
+  serverRenderDuration: 12,
+};
+extendedBatch.page.firstPaint = 1_450;
+extendedBatch.page.firstContentfulPaint = 1_500;
+extendedBatch.visuals[0].sessionSwitchId = "switch-safe";
+extendedBatch.page.navigationIntent = {
+  id: "intent-safe", sourceRunId: "page-source", action: "NAVIGATE /qq/session/:id",
+  target: "a#next", at: 1_699_999_999_950, intentToNavigationMs: 50, intentToCollectorMs: 52,
+};
+extendedBatch.stages[0] = {
+  ...extendedBatch.stages[0],
+  event: "qq:promptAdmission",
+  kind: "prompt-admitted",
+  requestCompleteLatencyMs: 5_000,
+  conversationSequence: 42,
+  channel: null,
+  sessionSwitchId: null,
+};
+const sanitizedExtended = sanitizeLatencyBatch(extendedBatch);
+assert.equal(sanitizedExtended.page.navigation.serverViewDuration, 1_100);
+assert.equal(sanitizedExtended.page.navigationIntent.action, "NAVIGATE /qq/session/:id");
+assert.equal(sanitizedExtended.stages[0].conversationSequence, 42);
+assert.equal(sanitizedExtended.visuals[0].sessionSwitchId, "switch-safe");
+const mutateExtended = (mutate) => {
+  const candidate = structuredClone(extendedBatch);
+  mutate(candidate);
+  return candidate;
+};
+for (const [label, candidate] of [
+  ["unknown navigation field", mutateExtended((value) => { value.page.navigation.url = "https://private.invalid/"; })],
+  ["negative navigation timing", mutateExtended((value) => { value.page.navigation.responseStart = -1; })],
+  ["unsafe navigation timing", mutateExtended((value) => { value.page.navigation.responseStart = 1_000_000_000_001; })],
+  ["invalid navigation type", mutateExtended((value) => { value.page.navigation.type = "restore"; })],
+  ["unsafe handoff id", mutateExtended((value) => { value.page.navigationIntent.id = "intent with spaces"; })],
+  ["unsafe handoff action", mutateExtended((value) => { value.page.navigationIntent.action = "NAVIGATE /safe?prompt=private"; })],
+  ["unnormalized handoff route", mutateExtended((value) => { value.page.navigationIntent.action = "NAVIGATE /qq/session/private-id"; })],
+  ["non-navigation handoff action", mutateExtended((value) => { value.page.navigationIntent.action = "POST /safe"; })],
+  ["negative handoff latency", mutateExtended((value) => { value.page.navigationIntent.intentToCollectorMs = -1; })],
+  ["invalid conversation sequence", mutateExtended((value) => { value.stages[0].conversationSequence = 0; })],
+  ["unsafe conversation sequence", mutateExtended((value) => { value.stages[0].conversationSequence = Number.MAX_SAFE_INTEGER + 1; })],
+  ["unknown SSE channel", mutateExtended((value) => { value.stages[0].channel = "private-channel"; })],
+  ["unsafe visual switch id", mutateExtended((value) => { value.visuals[0].sessionSwitchId = "switch with spaces"; })],
+  ["unknown stage field", mutateExtended((value) => { value.stages[0].prompt = "private"; })],
+]) {
+  assert.throws(() => sanitizeLatencyBatch(candidate), (error) => error?.status === 422,
+    `strict extended schema rejects ${label}`);
+}
+
 const temporary = await mkdtemp(join(tmpdir(), "qq-ui-latency-proof-"));
 const logPath = join(temporary, "state", "qq", "ui-latency.ndjson");
 const handler = createConsoleHandler(backend, {
@@ -223,6 +294,8 @@ const endpoint = `${base}/proof/ui-latency`;
 try {
   const page = await fetch(`${base}/proof/session/${sessionId}`);
   assert.equal(page.status, 200);
+  assert.match(page.headers.get("server-timing") ?? "", /^qq-view;dur=\d+\.\d{3}, qq-render;dur=\d+\.\d{3}$/,
+    "initial session HTML exposes only fixed numeric view/render Server-Timing phases");
   assert.match(await page.text(), /data-latency-endpoint="\/proof\/ui-latency"/,
     "the configured base path is explicitly passed to the browser bundle");
 
@@ -586,6 +659,227 @@ assert.deepEqual(gappedOldSse.sseRows, [],
   "a stage sequence gap invalidates pending SSE correlation instead of fabricating timing");
 assert.equal(gappedOldSse.sampleCounts.sseHandlers, 0);
 assert.equal(gappedOldSse.sampleCounts.sseSwaps, 0);
+
+
+const startupRecords = [{
+  schema: "qq.ui-latency-log/v1",
+  runId: "page-historical-32s",
+  batchId: "historical-32",
+  page: { startedAt: 32_479.4 },
+  origins: [],
+  stages: [{ sequence: 1, at: 32_854.4, kind: "sse-open", requestId: null }],
+  visuals: [{ sequence: 1, at: 32_498.4 }],
+}, {
+  schema: "qq.ui-latency-log/v1",
+  runId: "page-historical-22s",
+  batchId: "historical-22",
+  page: { startedAt: 22_744.7 },
+  origins: [],
+  stages: [{ sequence: 1, at: 23_753.1, kind: "sse-open", requestId: null }],
+  visuals: [{ sequence: 1, at: 22_767.3 }],
+}, {
+  schema: "qq.ui-latency-log/v1",
+  runId: "page-phased-14s",
+  batchId: "phased-early",
+  page: {
+    startedAt: 14_000,
+    firstPaint: 13_000,
+    firstContentfulPaint: 13_050,
+    navigation: {
+      type: "navigate", startTime: 0, fetchStart: 0, requestStart: 100,
+      responseStart: 12_000, responseEnd: 12_200, domInteractive: 0,
+      domContentLoadedEventEnd: 0, domComplete: 0, loadEventEnd: 0,
+      serverViewDuration: 11_500, serverRenderDuration: 20,
+      transferSize: 6_000,
+    },
+    navigationIntent: {
+      id: "intent-phased", sourceRunId: "page-source", action: "NAVIGATE /qq/session/:id",
+      target: "a#next", at: 1_000, intentToNavigationMs: 50, intentToCollectorMs: 14_050,
+    },
+  },
+  origins: [],
+  stages: [
+    { sequence: 1, at: 14_500, kind: "sse-open", requestId: null },
+    { sequence: 2, at: 15_000, kind: "sse-message-before", requestId: null, channel: "switch-meta" },
+    { sequence: 3, at: 15_100, kind: "sse-message-before", requestId: null, channel: "transcript-reset" },
+    { sequence: 4, at: 15_200, kind: "sse-message-before", requestId: null, channel: "live" },
+    { sequence: 5, at: 16_000, kind: "sse-message-before", requestId: null, channel: "switch-ready" },
+  ],
+  visuals: [{ sequence: 1, at: 14_020 }],
+}, {
+  schema: "qq.ui-latency-log/v1",
+  runId: "page-phased-14s",
+  batchId: "phased-late",
+  page: {
+    startedAt: 14_000,
+    firstPaint: 13_000,
+    firstContentfulPaint: 13_050,
+    navigation: {
+      type: "navigate", startTime: 0, fetchStart: 0, requestStart: 100,
+      responseStart: 12_000, responseEnd: 12_200, domInteractive: 13_100,
+      domContentLoadedEventEnd: 13_200, domComplete: 13_500, loadEventEnd: 13_600,
+      serverViewDuration: 11_500, serverRenderDuration: 20,
+      transferSize: 6_000,
+    },
+    navigationIntent: {
+      id: "intent-phased", sourceRunId: "page-source", action: "NAVIGATE /qq/session/:id",
+      target: "a#next", at: 1_000, intentToNavigationMs: 50, intentToCollectorMs: 14_050,
+    },
+  },
+  origins: [], stages: [], visuals: [],
+}];
+const startupReport = analyzeLatencyRecords(startupRecords);
+assert.deepEqual(startupReport.startupRows.map((row) => row.navigationToCollectorMs), [32_479.4, 22_744.7, 14_000],
+  "default startup rows visibly sort multi-second historical and new starts slowest first");
+const historical22 = startupReport.startupRows.find((row) => row.runId === "page-historical-22s");
+assert.equal(historical22.navigationType, "(old/no navigation timing)");
+assert.equal(historical22.navigationToFirstVisualMs, 22_767.3,
+  "historical page.startedAt and first visual remain first-class without page.navigation");
+assert.equal(historical22.collectorToFirstVisualMs, 22.6);
+assert.equal(historical22.collectorToSseOpenMs, 1_008.4);
+const phased = startupReport.startupRows.find((row) => row.runId === "page-phased-14s");
+assert.equal(phased.start, "SLOW");
+assert.equal(phased.fetchToRequestMs, 100);
+assert.equal(phased.requestToResponseStartMs, 11_900);
+assert.equal(phased.responseDownloadMs, 200);
+assert.equal(phased.responseEndToCollectorMs, 1_800);
+assert.equal(phased.collectorToFirstVisualMs, 20);
+assert.equal(phased.collectorToSseOpenMs, 500);
+assert.equal(phased.navigationToSwitchReadyMs, 16_000);
+assert.equal(phased.intentToNavigationMs, 50);
+assert.equal(phased.intentToFirstVisualMs, 14_070);
+assert.equal(phased.intentToSwitchReadyMs, 16_050);
+assert.equal(phased.action, "NAVIGATE /qq/session/:id");
+assert.equal(startupReport.startupByAction.find((group) => group.action === "NAVIGATE /qq/session/:id").runs, 1,
+  "cross-document session starts are grouped by their normalized action");
+assert.equal(phased.loadEventEndMs, 13_600,
+  "later duplicate page metadata fills completed load milestones while initial zero remains incomplete");
+assert.equal(startupReport.startupSummary.navigationToCollector.samples, 3);
+assert.equal(startupReport.startupSummary.navigationToCollector.maxMs, 32_479.4);
+
+const admissionReport = analyzeLatencyRecords([{
+  schema: "qq.ui-latency-log/v1",
+  runId: "page-admission-report",
+  batchId: "admission-report",
+  origins: [],
+  stages: [
+    { sequence: 1, at: 12, kind: "network-dispatch", requestId: "request-1", originLatencyMs: 2,
+      dispatchLatencyMs: 0, action: "POST /qq/session/:id/prompt" },
+    { sequence: 2, at: 1_000, kind: "prompt-admission-pending", requestId: "request-1",
+      action: "POST /qq/session/:id/prompt" },
+    { sequence: 3, at: 8_000, kind: "prompt-admitted", requestId: "request-1", originLatencyMs: 7_990,
+      dispatchLatencyMs: 7_988, requestCompleteLatencyMs: 7_000, conversationSequence: 41,
+      action: "POST /qq/session/:id/prompt" },
+    { sequence: 4, at: 1_100, kind: "prompt-admission-pending", requestId: "request-2",
+      action: "POST /qq/session/:id/prompt" },
+    { sequence: 5, at: 900, kind: "prompt-admission-failed", requestId: "request-3",
+      action: "POST /qq/session/:id/prompt" },
+    { sequence: 6, at: 9_000, kind: "prompt-admission-unmatched", requestId: null, conversationSequence: 42,
+      action: "" },
+    { sequence: 7, at: 500, kind: "response-before-swap", requestId: "request-1",
+      action: "POST /qq/session/:id/prompt" },
+    { sequence: 8, at: 1_000, kind: "request-complete", requestId: "request-1",
+      action: "POST /qq/session/:id/prompt" },
+  ],
+  visuals: [
+    { sequence: 1, at: 18, activeRequestId: "request-1", activeRequestLatencyMs: 8,
+      networkDispatchLatencyMs: 6, sources: ["input"] },
+    { sequence: 2, at: 8_016, activeRequestId: "request-1", activeRequestLatencyMs: 8_006,
+      networkDispatchLatencyMs: 8_004, sources: ["mutation:childList"] },
+  ],
+}]);
+assert.deepEqual(admissionReport.admissionCounts, {
+  admitted: 1, unmatched: 1, failed: 1, presentations: 1, unmatchedNodes: 1,
+});
+assert.equal(admissionReport.feedbackRows[0].interactionToFirstPresentationP50Ms, 8,
+  "composer/pending feedback remains the immediate 3-8ms-style request presentation metric");
+assert.equal(admissionReport.admissionRows[0].interactionToAdmissionP50Ms, 7_990);
+assert.equal(admissionReport.admissionRows[0].responseToAdmissionP50Ms, 7_500);
+assert.equal(admissionReport.admissionRows[0].completeToAdmissionP50Ms, 7_000);
+assert.equal(admissionReport.admissionRows[0].responseToAdmissionPresentationP50Ms, 7_516);
+assert.equal(admissionReport.admissionRows[0].completeToAdmissionPresentationP50Ms, 7_016);
+assert.equal(admissionReport.admissionRows[0].interactionToAdmissionPresentationP50Ms, 8_006,
+  "exact admission presentation is selected only after prompt-admitted, not the earlier composer feedback");
+assert.equal(admissionReport.admissionRows[0].admissionToPresentationP50Ms, 16);
+const admissionOnlyFeedback = analyzeLatencyRecords([{
+  schema: "qq.ui-latency-log/v1", runId: "page-admission-only", batchId: "admission-only", origins: [],
+  stages: [
+    { sequence: 1, at: 1_000, kind: "prompt-admission-pending", requestId: "request-only", action: "POST /qq/prompt" },
+    { sequence: 2, at: 8_000, kind: "prompt-admitted", requestId: "request-only", originLatencyMs: 8_000,
+      dispatchLatencyMs: 7_990, requestCompleteLatencyMs: 7_000, action: "POST /qq/prompt" },
+  ],
+  visuals: [{ sequence: 1, at: 8_016, activeRequestId: "request-only", activeRequestLatencyMs: 8_016,
+    networkDispatchLatencyMs: 8_006 }],
+}]);
+assert.equal(admissionOnlyFeedback.composerFeedbackSamples, 0,
+  "an admission presentation never backfills a missing immediate composer-feedback sample");
+assert.equal(admissionOnlyFeedback.admissionCounts.presentations, 1);
+
+const switchReport = analyzeLatencyRecords([{
+  schema: "qq.ui-latency-log/v1",
+  runId: "page-switch-report",
+  batchId: "switch-report",
+  origins: [],
+  visuals: [{
+    sequence: 1, at: 9_016, sessionSwitchId: "switch-1", sources: ["mutation:attributes"],
+  }],
+  stages: [
+    { sequence: 1, at: 1_000, kind: "session-switch-start", sessionSwitchId: "switch-1",
+      originLatencyMs: 5, action: "NAVIGATE /qq/session/:id" },
+    { sequence: 13, at: 1_500, kind: "session-switch-response", sessionSwitchId: "switch-1" },
+    { sequence: 2, at: 2_000, kind: "sse-open", sessionSwitchId: "switch-1" },
+    { sequence: 3, at: 3_000, kind: "sse-message-before", channel: "switch-meta", sessionSwitchId: "switch-1" },
+    { sequence: 4, at: 5_000, kind: "sse-message-before", channel: "transcript-reset", sessionSwitchId: "switch-1" },
+    { sequence: 5, at: 6_000, kind: "sse-message-before", channel: "live", sessionSwitchId: "switch-1" },
+    { sequence: 6, at: 9_000, kind: "sse-message-before", channel: "switch-ready", sessionSwitchId: "switch-1" },
+    { sequence: 14, at: 9_001, kind: "session-switch-ready", sessionSwitchId: "switch-1" },
+    { sequence: 7, at: 10_000, kind: "session-switch-start", sessionSwitchId: "switch-2",
+      action: "NAVIGATE /qq/session/:id" },
+    { sequence: 8, at: 11_000, kind: "sse-open", sessionSwitchId: "switch-2" },
+    { sequence: 9, at: 12_000, kind: "sse-message-before", channel: "switch-meta", sessionSwitchId: "switch-2" },
+    { sequence: 10, at: 13_000, kind: "sse-message-before", channel: "switch-meta", sessionSwitchId: "switch-3",
+      action: "NAVIGATE /qq/session/:id" },
+    { sequence: 11, at: 14_000, kind: "session-switch-start", sessionSwitchId: "switch-4",
+      action: "NAVIGATE /qq/session/:id" },
+    { sequence: 12, at: 15_000, kind: "session-switch-ready", sessionSwitchId: "switch-4" },
+  ],
+}]);
+assert.equal(switchReport.sessionSwitchSummary.complete, 1);
+assert.equal(switchReport.sessionSwitchSummary.incomplete, 3);
+assert.equal(switchReport.sessionSwitchSummary.readyWithoutPresentation, 1);
+assert.equal(switchReport.sessionSwitchSummary.unmatchedStarts, 1);
+const completeSwitch = switchReport.sessionSwitchRows.find((row) => row.switchId === "switch-1");
+assert.equal(completeSwitch.status, "SLOW");
+assert.equal(completeSwitch.switchToResponseMs, 500);
+assert.equal(completeSwitch.switchToSseOpenMs, 1_000);
+assert.equal(completeSwitch.switchToMetaMs, 2_000);
+assert.equal(completeSwitch.switchToInitialTranscriptMs, 4_000);
+assert.equal(completeSwitch.switchToInitialLiveMs, 5_000);
+assert.equal(completeSwitch.switchToReadyMs, 8_000);
+assert.equal(completeSwitch.switchToFirstPresentationMs, 8_016);
+assert.equal(completeSwitch.readyToFirstPresentationMs, 16);
+assert.equal(completeSwitch.interactionToReadyMs, 8_005);
+assert.equal(completeSwitch.interactionToFirstPresentationMs, 8_021);
+assert.equal(switchReport.sessionSwitchRows.find((row) => row.switchId === "switch-2").status, "INCOMPLETE_READY",
+  "incomplete session loads remain visible rather than disappearing from totals");
+assert.equal(switchReport.sessionSwitchRows.find((row) => row.switchId === "switch-3").status, "UNMATCHED_START",
+  "retained switch milestones without their evicted start remain explicit");
+assert.equal(switchReport.sessionSwitchRows.find((row) => row.switchId === "switch-4").status,
+  "INCOMPLETE_PRESENTATION", "ready without a presentation remains incomplete");
+
+const startupCliPath = join(temporary, "reporter", "startup.ndjson");
+await writeFile(startupCliPath, `${startupRecords.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
+const startupCli = execFileSync(process.execPath, [
+  new URL("./report-ui-latency.mjs", import.meta.url).pathname,
+  startupCliPath,
+], { encoding: "utf8" });
+assert.match(startupCli, /Startup\/session-open timing/);
+assert.match(startupCli, /page-historical-32s/);
+assert.match(startupCli, /32479\.4/);
+assert.match(startupCli, /page-historical-22s/);
+assert.match(startupCli, /22744\.7/);
+assert.match(startupCli, /SLOW/,
+  "default non-JSON CLI surfaces historical multi-second collector starts without requiring new data");
 
 const oldOnly = analyzeLatencyRecords([{
   schema: "qq.ui-latency-log/v1", runId: "page-old", batchId: "old", origins: [], stages: [], visuals: [],

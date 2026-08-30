@@ -23,6 +23,10 @@ const createQQLatencyStudy = Function(`${factoryBody}\nreturn createQQLatencyStu
 assert.equal(typeof createQQLatencyStudy, "function");
 assert.match(browserSource, /window\.qqLatency\s*=\s*qqLatency/, "the browser exposes window.qqLatency");
 assert.match(browserSource, /paintLiveSlice[\s\S]*qqLatency\.markStreamPaint/, "smoothed stream painting has an explicit study hook");
+assert.match(browserSource, /finishLiveSwitch[\s\S]*markSessionSwitchReady\(state\.latencySwitchId, document\.body\)/,
+  "validated live-switch completion commits the session-scoped admission baseline");
+assert.match(browserSource, /maximumKnownUserSequences = 4096[\s\S]*knownUserSequences\.delete/,
+  "session sequence identity has an explicit memory bound");
 
 class FakeEventTarget {
   constructor() {
@@ -61,7 +65,21 @@ class FakeElement extends FakeEventTarget {
     this.form = null;
     this.value = "";
     this.textContent = "";
+    this.children = [];
+    if (parent?.children) parent.children.push(this);
   }
+  get dataset() {
+    return Object.fromEntries(Object.entries(this.attributes)
+      .filter(([name]) => name.startsWith("data-"))
+      .map(([name, value]) => [name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), value]));
+  }
+  set dataset(value) {
+    for (const [name, entry] of Object.entries(value ?? {})) {
+      const attribute = `data-${name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;
+      this.attributes[attribute] = entry;
+    }
+  }
+  get href() { return this.attributes.href ?? ""; }
   getAttribute(name) {
     if (name === "id") return this.id || null;
     if (name === "class") return this.className || null;
@@ -73,9 +91,29 @@ class FakeElement extends FakeEventTarget {
     }
     return false;
   }
+  matches(selector) {
+    if (selector.includes(".message-user[data-seq]")) {
+      return this.classList.includes("message-user") && this.getAttribute("data-seq") !== null;
+    }
+    if (selector.includes("#composer")) return this.id === "composer";
+    if (selector.includes("a[href]")) return this.tagName === "A" && this.getAttribute("href") !== null;
+    return false;
+  }
+  querySelectorAll(selector) {
+    const result = [];
+    const visit = (node) => {
+      for (const child of node.children ?? []) {
+        if (child.matches(selector)) result.push(child);
+        visit(child);
+      }
+    };
+    visit(this);
+    return result;
+  }
   closest(selector) {
     const interactive = /button|a|input|select|textarea|summary|form|\[role/.test(selector);
     for (let current = this; current; current = current.parentElement) {
+      if (selector.includes("a[href]") && current.tagName === "A" && current.getAttribute("href") !== null) return current;
       if (interactive && /^(BUTTON|A|INPUT|SELECT|TEXTAREA|SUMMARY|FORM)$/.test(current.tagName)) return current;
     }
     return null;
@@ -87,10 +125,14 @@ class FakeDocument extends FakeEventTarget {
     super();
     this.currentScript = script;
     this.documentElement = new FakeElement("html");
+    this.userNodes = [];
   }
   querySelector(selector) {
     if (selector.includes("script")) return this.currentScript;
     return null;
+  }
+  querySelectorAll(selector) {
+    return selector === ".message-user[data-seq]" ? [...this.userNodes] : [];
   }
 }
 
@@ -105,9 +147,17 @@ function fixture({
   beaconResult = true,
   userAgent = "qq-proof-browser",
   wireFallback = false,
+  sharedStorage = null,
+  timeOrigin = 1_700_000_000_000,
+  initialNow = 0,
+  href = `https://qq.invalid/session/one${search}`,
+  navigationEntries = [],
+  paintEntries = [],
+  initialUserSequences = [],
+  runId,
 } = {}) {
-  let now = 0;
-  const storage = new Map();
+  let now = initialNow;
+  const storage = sharedStorage ?? new Map();
   if (stored !== null) storage.set("qq:latency", stored);
   const sessionStorage = {
     getItem: (key) => storage.get(key) ?? null,
@@ -121,6 +171,12 @@ function fixture({
     ...(endpoint ? { latencyEndpoint: endpoint } : {}),
   };
   const document = new FakeDocument(script);
+  for (const sequence of initialUserSequences) {
+    document.userNodes.push(new FakeElement("article", {
+      classes: ["message", "message-user"],
+      attributes: { "data-seq": String(sequence) },
+    }));
+  }
   const viewport = new FakeEventTarget();
   Object.assign(viewport, { width: 700, height: 500, scale: 1 });
   let nextFrame = 1;
@@ -149,9 +205,13 @@ function fixture({
   const host = new FakeEventTarget();
   Object.assign(host, {
     document,
-    location: { href: `https://qq.invalid/session/one${search}`, search },
+    location: { href, search, origin: new URL(href).origin },
     sessionStorage,
-    performance: { now: () => now, timeOrigin: 1_700_000_000_000 },
+    performance: {
+      now: () => now,
+      timeOrigin,
+      getEntriesByType: (type) => type === "navigation" ? navigationEntries : type === "paint" ? paintEntries : [],
+    },
     crypto: { randomUUID: () => deterministicRunUuid },
     MutationObserver: FakeMutationObserver,
     requestAnimationFrame(callback) {
@@ -219,6 +279,7 @@ function fixture({
   });
   const api = createQQLatencyStudy(host, {
     ...(limits ? { limits } : {}),
+    ...(runId ? { runId } : {}),
     uploadDebounceMs: 12_000,
   });
   return {
@@ -242,8 +303,10 @@ function fixture({
     maximumConcurrentUploads: () => maximumConcurrentUploads,
     uploads,
     beacons,
-    async fireTimer() {
-      const next = timers.entries().next().value;
+    async fireTimer(delay = null) {
+      const next = delay === null
+        ? timers.entries().next().value
+        : [...timers.entries()].find(([, timer]) => timer.delay === delay);
       if (!next) return false;
       const [id, timer] = next;
       timers.delete(id);
@@ -951,5 +1014,414 @@ assert.equal(study.document.listenerCount() + study.host.listenerCount() + study
 assert.equal(study.observers[0].connected, false, "stop disconnects the observer");
 study.api.start();
 assert.equal(study.api.snapshot().active, true, "API can explicitly restart recording");
+
+
+// Startup metadata refreshes fixed buffered navigation/paint fields without URLs,
+// descriptions, or arbitrary Server-Timing names.
+const navigationEntry = {
+  type: "navigate",
+  startTime: 0,
+  redirectStart: 0,
+  redirectEnd: 0,
+  workerStart: 0,
+  fetchStart: 0,
+  domainLookupStart: 4,
+  domainLookupEnd: 6,
+  connectStart: 6,
+  secureConnectionStart: 7,
+  connectEnd: 9,
+  requestStart: 10,
+  responseStart: 1_210,
+  responseEnd: 1_260,
+  domInteractive: 0,
+  domContentLoadedEventStart: 0,
+  domContentLoadedEventEnd: 0,
+  domComplete: 0,
+  loadEventStart: 0,
+  loadEventEnd: 0,
+  duration: 0,
+  transferSize: 4_096,
+  encodedBodySize: 3_000,
+  decodedBodySize: 9_000,
+  serverTiming: [
+    { name: "qq-view", duration: 1_100, description: "PRIVATE SERVER DETAIL" },
+    { name: "qq-render", duration: 12 },
+    { name: "private-phase", duration: 999 },
+  ],
+};
+const startup = fixture({
+  endpoint: "/qq/ui-latency",
+  initialNow: 14_250,
+  navigationEntries: [navigationEntry],
+  paintEntries: [
+    { name: "first-contentful-paint", startTime: 1_500 },
+    { name: "first-paint", startTime: 1_450 },
+    { name: "private-paint", startTime: 1 },
+  ],
+  userAgent: "proof-浏览器",
+});
+let startupSnapshot = startup.api.snapshot();
+assert.equal(startupSnapshot.startedAt, 14_250, "collector start preserves the full navigation-relative pre-script delay");
+assert.equal(startupSnapshot.navigation.responseStart, 1_210);
+assert.equal(startupSnapshot.navigation.loadEventEnd, null, "zero incomplete load milestones stay missing");
+assert.equal(startupSnapshot.navigation.serverViewDuration, 1_100);
+assert.equal(startupSnapshot.navigation.serverRenderDuration, 12);
+assert.equal(startupSnapshot.firstPaint, 1_450);
+assert.equal(startupSnapshot.firstContentfulPaint, 1_500);
+assert.doesNotMatch(JSON.stringify(startupSnapshot), /PRIVATE SERVER DETAIL|private-phase|private-paint/);
+navigationEntry.domInteractive = 15_000;
+navigationEntry.domContentLoadedEventStart = 15_010;
+navigationEntry.domContentLoadedEventEnd = 15_020;
+navigationEntry.domComplete = 15_100;
+navigationEntry.loadEventStart = 15_110;
+navigationEntry.loadEventEnd = 15_120;
+navigationEntry.duration = 15_120;
+startupSnapshot = startup.api.snapshot();
+assert.equal(startupSnapshot.navigation.loadEventEnd, 15_120,
+  "navigation metadata refreshes so milestones completed after collector installation populate");
+startup.api.markStreamPaint(new FakeElement("div", { id: "startup-proof" }));
+await startup.fireTimer(12_000);
+assert.equal(JSON.parse(startup.uploads[0].options.body).page.navigation.loadEventEnd, 15_120,
+  "upload-batch construction refreshes late navigation milestones for persistence");
+startup.api.stop();
+
+// A same-origin primary activation transfers a strict handoff once. Intercepted,
+// stale, and external activations do not contaminate a later document.
+const transferStorage = new Map();
+const intentSource = fixture({
+  sharedStorage: transferStorage,
+  timeOrigin: 2_000_000,
+  initialNow: 100,
+  runId: "page-intent-source",
+  href: "https://qq.invalid/session/source?private=old",
+});
+const internalLink = new FakeElement("a", {
+  id: "open-session",
+  attributes: { href: "https://qq.invalid/session/destination?private=secret" },
+});
+intentSource.document.dispatch("click", { isTrusted: true, button: 0, target: internalLink });
+const storedIntent = JSON.parse(transferStorage.get("qq:latency-navigation-intent"));
+assert.equal(storedIntent.action, "NAVIGATE /session/:id");
+assert.doesNotMatch(JSON.stringify(storedIntent), /private|secret|destination\?/);
+await intentSource.fireTimer(0);
+assert.equal(transferStorage.has("qq:latency-navigation-intent"), true,
+  "an unprevented native navigation keeps its handoff while a slow response leaves the source document alive");
+const intentDestination = fixture({
+  sharedStorage: transferStorage,
+  timeOrigin: 2_000_150,
+  initialNow: 14_000,
+  runId: "page-intent-destination",
+  href: "https://qq.invalid/session/destination?private=secret",
+});
+assert.deepEqual(intentDestination.api.snapshot().navigationIntent, {
+  id: storedIntent.id,
+  sourceRunId: "page-intent-source",
+  action: "NAVIGATE /session/:id",
+  target: "a#open-session",
+  at: 2_000_100,
+  intentToNavigationMs: 50,
+  intentToCollectorMs: 14_050,
+}, "same-origin handoff includes fixed intent-to-navigation and intent-to-collector timing");
+assert.equal(transferStorage.has("qq:latency-navigation-intent"), false, "handoff is consumed and cleared once");
+const consumeAgain = fixture({ sharedStorage: transferStorage, timeOrigin: 2_020_000, initialNow: 1 });
+assert.equal(consumeAgain.api.snapshot().navigationIntent, null, "the next document cannot consume an old handoff twice");
+consumeAgain.api.stop();
+intentDestination.api.stop();
+intentSource.api.stop();
+
+const interceptedStorage = new Map();
+const intercepted = fixture({ sharedStorage: interceptedStorage, timeOrigin: 3_000_000, initialNow: 10 });
+intercepted.document.addEventListener("click", (event) => { event.defaultPrevented = true; });
+intercepted.document.dispatch("click", { isTrusted: true, button: 0, target: internalLink });
+assert.equal(interceptedStorage.has("qq:latency-navigation-intent"), true);
+await intercepted.fireTimer(0);
+assert.equal(interceptedStorage.has("qq:latency-navigation-intent"), false,
+  "an intercepted click is cleared after event propagation in the surviving document");
+const externalLink = new FakeElement("a", { attributes: { href: "https://external.invalid/private?q=secret" } });
+intercepted.document.dispatch("click", { isTrusted: true, button: 0, target: externalLink });
+assert.equal(interceptedStorage.has("qq:latency-navigation-intent"), false, "external navigation never writes a handoff");
+interceptedStorage.set("qq:latency-navigation-intent", JSON.stringify({
+  id: "intent-stale", sourceRunId: "page-old", action: "NAVIGATE /old", target: "a#old", at: 1,
+}));
+const staleIntent = fixture({ sharedStorage: interceptedStorage, timeOrigin: 4_000_000, initialNow: 1 });
+assert.equal(staleIntent.api.snapshot().navigationIntent, null, "stale handoff is consumed but never recorded");
+assert.equal(interceptedStorage.has("qq:latency-navigation-intent"), false);
+staleIntent.api.stop();
+intercepted.api.stop();
+
+const promptRequest = (targetFixture, xhr, at, { successful = true } = {}) => {
+  const promptForm = new FakeElement("form", {
+    id: "composer",
+    attributes: { action: "/qq/session/local/prompt", method: "post" },
+  });
+  targetFixture.setNow(at);
+  targetFixture.document.dispatch("htmx:beforeRequest", {
+    target: promptForm,
+    detail: { elt: promptForm, xhr, requestConfig: { verb: "post", path: "/qq/session/local/prompt" } },
+  });
+  targetFixture.setNow(at + 1);
+  targetFixture.document.dispatch("htmx:beforeSend", {
+    target: promptForm,
+    detail: { elt: promptForm, xhr, requestConfig: { verb: "post", path: "/qq/session/local/prompt" } },
+  });
+  targetFixture.setNow(at + 100);
+  targetFixture.document.dispatch("htmx:afterRequest", {
+    target: promptForm,
+    detail: { elt: promptForm, xhr, successful, failed: !successful },
+  });
+  return promptForm;
+};
+const userNode = (sequence, parent = null) => new FakeElement("article", {
+  classes: ["message", "message-user"],
+  attributes: { "data-seq": String(sequence) },
+  parent,
+});
+
+const admissionKinds = (targetFixture) => targetFixture.api.snapshot().stages.filter((stage) =>
+  ["prompt-admitted", "prompt-admission-unmatched"].includes(stage.kind));
+const postSwapSse = (targetFixture, type, target, userNodes) => {
+  targetFixture.document.userNodes = userNodes;
+  targetFixture.document.dispatch("htmx:sseMessage", { target, detail: { elt: target, type } });
+};
+
+// The first two composer turns arrive as ordinary live child insertions.
+const foldAdmission = fixture({ initialUserSequences: [1] });
+const transcriptReplacement = new FakeElement("div", { id: "transcript-settled" });
+const knownOne = foldAdmission.document.userNodes[0];
+const liveThree = userNode(3);
+promptRequest(foldAdmission, {}, 10);
+foldAdmission.setNow(200);
+foldAdmission.observers[0].emit([{
+  type: "childList", target: transcriptReplacement, addedNodes: [liveThree],
+}]);
+foldAdmission.frame(216);
+const liveFive = userNode(5);
+promptRequest(foldAdmission, {}, 300);
+foldAdmission.setNow(500);
+foldAdmission.observers[0].emit([{
+  type: "childList", target: transcriptReplacement, addedNodes: [liveFive],
+}]);
+foldAdmission.frame(516);
+let admittedStages = foldAdmission.api.snapshot().stages.filter((stage) => stage.kind === "prompt-admitted");
+assert.deepEqual(admittedStages.map((stage) => [stage.requestId, stage.conversationSequence]), [
+  ["request-1", 3], ["request-2", 5],
+], "the first two live-insert user nodes are FIFO-correlated exactly once");
+assert.deepEqual(foldAdmission.api.snapshot().visuals
+  .filter((visual) => visual.activeRequestId)
+  .map((visual) => visual.activeRequestId), ["request-1", "request-2"],
+"each of the first two admissions owns exactly one presentation context");
+
+// With CONSOLE_PAIRS=2, the third and later user turns commonly arrive inside
+// a post-swap transcript-reset rather than as standalone live insertions.
+const foldedSeven = userNode(7, transcriptReplacement);
+promptRequest(foldAdmission, {}, 600);
+foldAdmission.setNow(800);
+postSwapSse(foldAdmission, "transcript-reset", transcriptReplacement, [liveThree, liveFive, foldedSeven]);
+foldAdmission.observers[0].emit([{
+  type: "childList", target: transcriptReplacement, addedNodes: [liveThree, liveFive, foldedSeven],
+}]);
+foldAdmission.frame(816);
+const foldedNine = userNode(9, transcriptReplacement);
+promptRequest(foldAdmission, {}, 900);
+foldAdmission.setNow(1_100);
+postSwapSse(foldAdmission, "transcript-reset", transcriptReplacement, [liveFive, foldedSeven, foldedNine]);
+foldAdmission.observers[0].emit([{
+  type: "childList", target: transcriptReplacement, addedNodes: [liveFive, foldedSeven, foldedNine],
+}]);
+foldAdmission.frame(1_116);
+admittedStages = foldAdmission.api.snapshot().stages.filter((stage) => stage.kind === "prompt-admitted");
+assert.deepEqual(admittedStages.map((stage) => [stage.requestId, stage.conversationSequence]), [
+  ["request-1", 3], ["request-2", 5], ["request-3", 7], ["request-4", 9],
+], "third and later fold-reset admissions retain FIFO request identity and emit once");
+for (const requestId of ["request-3", "request-4"]) {
+  assert.equal(foldAdmission.api.snapshot().visuals.filter((visual) =>
+    visual.activeRequestId === requestId).length, 1,
+  `${requestId} owns exactly one fold-reset admission presentation`);
+}
+
+// Re-rendering an evicted-but-known sequence proves that a same-session reset
+// neither snapshots only the current fold nor clears historical identity.
+const admissionCountBeforeKnownReset = admissionKinds(foldAdmission).length;
+foldAdmission.setNow(1_200);
+postSwapSse(foldAdmission, "transcript-reset", transcriptReplacement, [knownOne, foldedSeven, foldedNine]);
+foldAdmission.observers[0].emit([{
+  type: "childList", target: transcriptReplacement, addedNodes: [knownOne, foldedSeven, foldedNine],
+}]);
+assert.equal(admissionKinds(foldAdmission).length, admissionCountBeforeKnownReset,
+  "a same-session reset containing only known/re-rendered sequences emits no admission");
+foldAdmission.frame(1_216);
+foldAdmission.api.stop();
+
+const failedAdmission = fixture({ initialUserSequences: [10] });
+promptRequest(failedAdmission, {}, 10, { successful: false });
+assert.equal(failedAdmission.api.snapshot().pendingAdmissions, 0, "failed prompt never remains pending");
+const externalUser = userNode(11);
+failedAdmission.setNow(500);
+failedAdmission.observers[0].emit([{ type: "childList", target: transcriptReplacement, addedNodes: [externalUser] }]);
+const failedStages = failedAdmission.api.snapshot().stages;
+assert.equal(failedStages.filter((stage) => stage.kind === "prompt-admission-failed").length, 1);
+assert.equal(failedStages.filter((stage) => stage.kind === "prompt-admitted").length, 0,
+  "a later external user node is not assigned to the failed request");
+assert.equal(failedStages.find((stage) => stage.kind === "prompt-admission-unmatched")?.requestId, null);
+failedAdmission.api.stop();
+
+// A different-session bootstrap swaps settled then live content before its
+// validated switch-ready boundary. Neither pre-ready observer delivery nor
+// queued delivery after the baseline snapshot may classify historical nodes.
+const bootstrapAdmission = fixture({ initialUserSequences: [9] });
+promptRequest(bootstrapAdmission, {}, 10);
+assert.equal(bootstrapAdmission.api.snapshot().pendingAdmissions, 1);
+const resetStream = new FakeElement("div", { id: "console-stream" });
+bootstrapAdmission.setNow(200);
+const bootstrapSwitchId = bootstrapAdmission.api.markSessionSwitch(
+  "/qq/project/private/folder/session/private-id", resetStream);
+assert.equal(bootstrapAdmission.api.snapshot().pendingAdmissions, 0,
+  "switching away removes outgoing-session prompt candidates from the FIFO");
+// Model an outgoing request whose completion races behind switch activation.
+// It must not be consumed by incoming historical/bootstrap nodes.
+promptRequest(bootstrapAdmission, {}, 210);
+assert.equal(bootstrapAdmission.api.snapshot().pendingAdmissions, 1,
+  "a late successful completion can enter the FIFO while bootstrap is pending");
+const incomingHistorical = userNode(1, transcriptReplacement);
+bootstrapAdmission.setNow(320);
+postSwapSse(bootstrapAdmission, "transcript-reset", transcriptReplacement, [incomingHistorical]);
+bootstrapAdmission.observers[0].emit([{
+  type: "childList", target: transcriptReplacement, addedNodes: [incomingHistorical],
+}]);
+const liveTarget = new FakeElement("div", { id: "transcript-live-nodes" });
+const incomingSteering = new FakeElement("article", {
+  classes: ["message", "message-user", "message-steering"],
+  attributes: { "data-seq": "3" },
+  parent: liveTarget,
+});
+bootstrapAdmission.setNow(400);
+postSwapSse(bootstrapAdmission, "live", liveTarget, [incomingHistorical, incomingSteering]);
+bootstrapAdmission.observers[0].emit([{
+  type: "childList", target: liveTarget, addedNodes: [incomingSteering],
+}]);
+assert.equal(admissionKinds(bootstrapAdmission).length, 0,
+  "incoming user and steering nodes are suppressed until switch-ready");
+bootstrapAdmission.setNow(500);
+bootstrapAdmission.document.dispatch("htmx:sseBeforeMessage", {
+  target: new FakeElement("div", { id: "switch-ready" }),
+  detail: { elt: new FakeElement("div", { id: "switch-ready" }), type: "switch-ready" },
+});
+assert.equal(bootstrapAdmission.api.markSessionSwitchReady(bootstrapSwitchId, resetStream), true);
+bootstrapAdmission.observers[0].emit([{
+  type: "childList", target: transcriptReplacement, addedNodes: [incomingHistorical, incomingSteering],
+}]);
+assert.equal(admissionKinds(bootstrapAdmission).length, 0,
+  "transcript-reset then live then switch-ready snapshots a complete baseline without unmatched/FIFO admission");
+assert.equal(bootstrapAdmission.api.snapshot().pendingAdmissions, 0);
+bootstrapAdmission.frame(516);
+assert.equal(bootstrapAdmission.api.snapshot().stages.find((stage) =>
+  stage.kind === "session-switch-start")?.action, "NAVIGATE /qq/project/:project/:folder/session/:id");
+bootstrapAdmission.api.stop();
+
+const oneAdmission = fixture();
+promptRequest(oneAdmission, {}, 100);
+oneAdmission.setNow(2_000);
+const admittedNode = userNode(1);
+oneAdmission.observers[0].emit([{ type: "childList", target: admittedNode, addedNodes: [admittedNode] }]);
+assert.equal(oneAdmission.api.snapshot().activeRequest, null,
+  "admission after afterRequest does not reactivate the global HTTP request");
+oneAdmission.frame(2_016);
+const admissionPresentation = oneAdmission.api.snapshot().visuals.at(-1);
+assert.equal(admissionPresentation.activeRequestId, "request-1");
+assert.equal(admissionPresentation.networkDispatchLatencyMs, 1_915);
+oneAdmission.setNow(2_100);
+oneAdmission.observers[0].emit([{ type: "attributes", target: admittedNode }]);
+oneAdmission.frame(2_116);
+assert.equal(oneAdmission.api.snapshot().visuals.at(-1).activeRequestId, null,
+  "request context is retained for exactly the admission presentation");
+oneAdmission.api.stop();
+
+const switchStudy = fixture();
+switchStudy.setNow(1_000);
+const streamTarget = new FakeElement("div", { id: "console-stream" });
+const switchId = switchStudy.api.markSessionSwitch("/qq/session/next?secret=value", streamTarget);
+switchStudy.setNow(1_500);
+assert.equal(switchStudy.api.markSessionSwitchResponse(switchId, streamTarget), true);
+switchStudy.setNow(2_000);
+switchStudy.document.dispatch("htmx:sseOpen", { target: streamTarget, detail: { source: {} } });
+for (const [at, type, target] of [
+  [3_000, "switch-meta", new FakeElement("div", { id: "switch-meta" })],
+  [5_000, "transcript-reset", new FakeElement("div", { id: "transcript-settled" })],
+  [6_000, "live", new FakeElement("div", { id: "transcript-live-nodes" })],
+  [9_000, "switch-ready", new FakeElement("div", { id: "switch-ready" })],
+]) {
+  switchStudy.setNow(at);
+  switchStudy.document.dispatch("htmx:sseBeforeMessage", { target, detail: { elt: target, type, data: "PRIVATE SSE PAYLOAD" } });
+}
+assert.equal(switchStudy.api.snapshot().activeSessionSwitch, switchId,
+  "an SSE ready frame alone cannot commit an unvalidated session identity");
+switchStudy.setNow(9_001);
+assert.equal(switchStudy.api.markSessionSwitchReady(switchId, streamTarget), true,
+  "validated live-switch completion commits readiness after bootstrap frames");
+assert.equal(switchStudy.api.markSessionSwitchReady(switchId, streamTarget), false,
+  "the incoming baseline cannot be recommissioned twice");
+const switchStages = switchStudy.api.snapshot().stages.filter((stage) => stage.sessionSwitchId === switchId);
+assert.deepEqual(switchStages.map((stage) => [stage.kind, stage.channel]), [
+  ["session-switch-start", null], ["session-switch-response", null], ["sse-open", null],
+  ["sse-message-before", "switch-meta"],
+  ["sse-message-before", "transcript-reset"], ["sse-message-before", "live"],
+  ["sse-message-before", "switch-ready"], ["session-switch-ready", null],
+], "multi-second session bootstrap records fixed channels and a validated ready boundary");
+assert.doesNotMatch(JSON.stringify(switchStudy.api.snapshot()), /PRIVATE SSE PAYLOAD|secret=value/);
+assert.equal(switchStudy.api.snapshot().activeSessionSwitch, switchId,
+  "validated switch-ready remains correlated until its first presentation opportunity");
+switchStudy.observers[0].emit([{
+  type: "attributes", target: new FakeElement("main", { id: "session-panel" }), addedNodes: [],
+}]);
+switchStudy.frame(9_016);
+assert.equal(switchStudy.api.snapshot().visuals.at(-1).sessionSwitchId, switchId,
+  "the first post-ready visual is explicitly correlated to the session switch");
+assert.equal(switchStudy.api.snapshot().activeSessionSwitch, null,
+  "the first post-ready presentation closes local switch correlation");
+switchStudy.api.stop();
+
+const adoptedSwitch = fixture({ initialUserSequences: [3] });
+adoptedSwitch.setNow(100);
+const adoptedSwitchId = adoptedSwitch.api.markSessionSwitch("/qq/session/private-id", streamTarget);
+adoptedSwitch.setNow(600);
+assert.equal(adoptedSwitch.api.markSessionSwitchResponse(adoptedSwitchId, streamTarget), true);
+adoptedSwitch.setNow(1_000);
+const adoptedHistorical = userNode(1);
+adoptedSwitch.document.userNodes = [adoptedHistorical];
+assert.equal(adoptedSwitch.api.markSessionSwitchReady(adoptedSwitchId, streamTarget), true);
+adoptedSwitch.observers[0].emit([{
+  type: "childList", target: transcriptReplacement, addedNodes: [adoptedHistorical],
+}]);
+assert.equal(adoptedSwitch.api.snapshot().stages.some((stage) => stage.kind === "prompt-admission-unmatched"), false,
+  "full-body adoption primes incoming historical user sequences before queued mutations");
+assert.equal(adoptedSwitch.frameCount(), 1, "full-page adoption explicitly schedules its presentation sample");
+adoptedSwitch.frame(1_016);
+assert.deepEqual(adoptedSwitch.api.snapshot().stages.map((stage) => stage.kind), [
+  "session-switch-start", "session-switch-response", "session-switch-ready",
+]);
+assert.equal(adoptedSwitch.api.snapshot().visuals.at(-1).sessionSwitchId, adoptedSwitchId);
+assert.equal(adoptedSwitch.api.snapshot().activeSessionSwitch, null);
+promptRequest(adoptedSwitch, {}, 1_100);
+adoptedSwitch.setNow(1_300);
+adoptedSwitch.observers[0].emit([{
+  type: "childList", target: transcriptReplacement, addedNodes: [userNode(3)],
+}]);
+assert.equal(adoptedSwitch.api.snapshot().stages.find((stage) => stage.kind === "prompt-admitted")?.conversationSequence, 3,
+  "full-body adoption resets the outgoing session's sequence namespace");
+adoptedSwitch.api.stop();
+
+const fallbackStorage = new Map();
+const fallbackSource = fixture({
+  sharedStorage: fallbackStorage, timeOrigin: 5_000_000, initialNow: 100, runId: "page-fallback-source",
+});
+const fallbackSwitchId = fallbackSource.api.markSessionSwitch("/qq/session/private-id", streamTarget);
+fallbackSource.setNow(5_100);
+fallbackSource.api.markNavigationIntent("https://qq.invalid/qq/session/private-id?secret=yes", null, fallbackSwitchId);
+const fallbackHandoff = JSON.parse(fallbackStorage.get("qq:latency-navigation-intent"));
+assert.equal(fallbackHandoff.at, 5_000_100,
+  "a cross-document fallback retains the original in-document switch start");
+assert.equal(fallbackHandoff.action, "NAVIGATE /qq/session/:id");
+assert.doesNotMatch(JSON.stringify(fallbackHandoff), /private-id|secret/);
+fallbackSource.api.stop();
 
 console.log("visual latency study proof passed");

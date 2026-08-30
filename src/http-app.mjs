@@ -1803,6 +1803,7 @@ export function createConsoleHandler(backend, options = {}) {
           }
         }
         const sessionId = rootPage ? backend.defaultSessionId : selected.sessionId;
+        const serverViewStartedAt = performance.now();
         const snapshot = await view(sessionId);
         if (projectRoute && snapshot.project && snapshot.project !== projectRoute.project) {
           text(res, 404, "DSH session is not in this project", head);
@@ -1818,13 +1819,21 @@ export function createConsoleHandler(backend, options = {}) {
         }
         const paths = routes(basePath, snapshot.id, snapshot.project, snapshot.folder);
         const drawer = await drawerView(snapshot.project, url, false, snapshot.folder);
+        const serverViewDuration = Math.max(0, performance.now() - serverViewStartedAt);
+        const serverRenderStartedAt = performance.now();
         const { renderPage } = await loadRender();
         const body = renderPage(consoleFoldWindow({ ...snapshot, drawer }), paths, pageAssetPaths());
+        const serverRenderDuration = Math.max(0, performance.now() - serverRenderStartedAt);
         if (snapshot.id) lastViewedSessionId = snapshot.id;
         write(
           res,
           200,
-          rememberSessionHeaders(snapshot.id, { "Content-Type": "text/html; charset=utf-8" }),
+          rememberSessionHeaders(snapshot.id, {
+            "Content-Type": "text/html; charset=utf-8",
+            // Fixed privacy-safe phases only: no descriptions, route values, or
+            // session identifiers are exposed through Server-Timing.
+            "Server-Timing": `qq-view;dur=${serverViewDuration.toFixed(3)}, qq-render;dur=${serverRenderDuration.toFixed(3)}`,
+          }),
           body,
           head,
         );
