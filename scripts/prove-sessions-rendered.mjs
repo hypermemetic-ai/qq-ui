@@ -80,7 +80,7 @@ const alphaSessions = [
 const sourceProjects = [
   { key: "p:theta:", name: "theta", label: "Theta", folder: "", folderLabel: "", sessions: [idleRow(20, "theta-arch")] },
   { key: "p:studio:west", name: "studio", label: "Studio", folder: "west", folderLabel: "West", sessions: [idleRow(21, "studio-west")] },
-  { key: "p:beta:", name: "beta", label: "Beta", folder: "", folderLabel: "", sessions: [] },
+  { key: "p:beta:", name: "beta", label: "Beta", folder: "", folderLabel: "", sessions: [idleRow(32, "beta-arch")] },
   { key: "p:alpha:", name: "alpha", label: "Alpha", folder: "", folderLabel: "", sessions: alphaSessions },
   { key: "p:mu:", name: "mu", label: "Mu", folder: "", folderLabel: "", sessions: [idleRow(22, "mu-arch")] },
   { key: "p:studio:east", name: "studio", label: "Studio", folder: "east", folderLabel: "East", sessions: [idleRow(23, "studio-east")] },
@@ -386,11 +386,25 @@ const inspectExpression = `(() => {
     return slice.right - slice.left >= 8 && slice.bottom - slice.top >= meaningfulHeight ? slice : null;
   };
   const groupByIdentity = new Map(groups.map((group) => [identity(group), group]));
-  const visiblePairSequenceFor = (groupClip) => projects.flatMap((project) => {
+  const connectorPairVisible = (project, groupClip) => {
     const group = groupByIdentity.get(identity(project));
-    return !group?.hidden && visibleSlice(project, projectVisibilityClip)
-      && visibleSlice(group, groupClip) ? [identity(project)] : [];
-  });
+    const projectBox = project?.getBoundingClientRect();
+    const groupBox = group?.getBoundingClientRect();
+    const sessionsBox = group?.querySelector('.live-tracker-sessions')?.getBoundingClientRect();
+    const projectSlice = visibleSlice(project, projectVisibilityClip);
+    const groupSlice = visibleSlice(group, groupClip);
+    if (group?.hidden || !projectBox || !groupBox || !sessionsBox || !projectSlice || !groupSlice) return false;
+    const sourceY = (projectBox.top + projectBox.bottom) / 2;
+    const preferredBaseline = groupBox.bottom + 4;
+    const baselineY = Math.abs(preferredBaseline - sourceY) >= 1
+      ? preferredBaseline : preferredBaseline + (preferredBaseline >= sourceY ? 2 : -2);
+    return sourceY >= projectSlice.top - .01 && sourceY <= projectSlice.bottom + .01
+      && baselineY >= groupClip.top + .75 && baselineY <= groupClip.bottom - .75
+      && sessionsBox.right > sessionsBox.left;
+  };
+  const visiblePairSequenceFor = (groupClip) => projects.flatMap((project) => (
+    connectorPairVisible(project, groupClip) ? [identity(project)] : []
+  ));
   const rawVisiblePairSequence = visiblePairSequenceFor(rawGroupVisibilityClip);
   const visiblePairSequence = visiblePairSequenceFor(groupVisibilityClip);
   const composerOccludedPairSequence = rawVisiblePairSequence
@@ -398,59 +412,98 @@ const inspectExpression = `(() => {
   const layer = document.querySelector('#session-connectors');
   const paths = [...document.querySelectorAll('#session-connectors path[data-project][data-folder]')];
   const route = (path) => {
-    const length = path.getTotalLength();
-    const start = path.getPointAtLength(0);
-    const end = path.getPointAtLength(length);
+    const d = path.getAttribute('d') || '';
+    const tokens = d.trim().split(/\\s+/);
+    const values = [tokens[1], tokens[2], tokens[4], tokens[6], tokens[8]].map(Number);
+    const parsed = tokens.length === 9 && tokens[0] === 'M' && tokens[3] === 'H'
+      && tokens[5] === 'V' && tokens[7] === 'H' && values.every(Number.isFinite);
+    const start = parsed ? { x: values[0], y: values[1] } : { x: NaN, y: NaN };
+    const laneX = parsed ? values[2] : NaN;
+    const baselineY = parsed ? values[3] : NaN;
+    const end = parsed ? { x: values[4], y: baselineY } : { x: NaN, y: NaN };
     const style = getComputedStyle(path);
     const project = projects.find((candidate) => identity(candidate) === identity(path));
     const group = groupByIdentity.get(identity(path));
     const projectBox = project?.getBoundingClientRect();
     const groupBox = group?.getBoundingClientRect();
+    const sessionsBox = group?.querySelector('.live-tracker-sessions')?.getBoundingClientRect();
     const projectSlice = visibleSlice(project, projectVisibilityClip);
-    const groupSlice = visibleSlice(group, groupVisibilityClip);
+    const nextGroup = group ? groups[groups.indexOf(group) + 1] : null;
+    const nextGroupBox = nextGroup?.getBoundingClientRect();
+    const segments = parsed ? [
+      { axis: 'h', fixed: start.y, from: start.x, to: laneX, name: 'source' },
+      { axis: 'v', fixed: laneX, from: start.y, to: baselineY, name: 'lane' },
+      { axis: 'h', fixed: baselineY, from: laneX, to: end.x, name: 'underline' },
+    ] : [];
     return {
-      identity: identity(path), d: path.getAttribute('d') || '', length,
-      start: { x: start.x, y: start.y }, end: { x: end.x, y: end.y },
+      identity: identity(path), d, length: path.getTotalLength(), start, end, laneX, baselineY, segments,
       strokeWidth: Number.parseFloat(style.strokeWidth), stroke: style.stroke,
       opacity: Number.parseFloat(style.opacity), display: style.display, visibility: style.visibility,
-      vectorEffect: style.vectorEffect,
-      direct: (path.getAttribute('d')?.match(/[ML]/g) || []).length === 2,
+      vectorEffect: style.vectorEffect, lineJoin: style.strokeLinejoin, lineCap: style.strokeLinecap,
+      orthogonal: Boolean(parsed),
+      bends: Boolean(parsed && Math.abs(laneX - start.x) > .5
+        && Math.abs(baselineY - start.y) > .5 && Math.abs(end.x - laneX) > .5),
       startAttached: Boolean(projectBox && projectSlice)
         && Math.abs(start.x - projectBox.right) <= 2
+        && Math.abs(start.y - ((projectBox.top + projectBox.bottom) / 2)) <= 1
         && start.y >= projectSlice.top - 1 && start.y <= projectSlice.bottom + 1,
-      endAttached: Boolean(groupBox && groupSlice)
-        && Math.abs(end.x - groupBox.left) <= 2
-        && end.y >= groupSlice.top - 1 && end.y <= groupSlice.bottom + 1,
+      laneInChannel: Boolean(sessionsBox) && laneX > start.x && laneX < sessionsBox.left,
+      underlineAttached: Boolean(groupBox && sessionsBox)
+        && baselineY >= groupBox.bottom + 1.9 && baselineY <= groupBox.bottom + 6.1
+        && laneX < groupBox.left
+        && Math.abs(end.x - sessionsBox.right) <= 2,
+      baselineClear: !nextGroupBox || baselineY <= nextGroupBox.top - 2,
+      insideVisibility: Boolean(projectVisibilityClip && groupVisibilityClip && sessionsBox)
+        && start.y >= projectVisibilityClip.top - 1 && start.y <= projectVisibilityClip.bottom + 1
+        && baselineY >= groupVisibilityClip.top - 1 && baselineY <= groupVisibilityClip.bottom + 1
+        && end.x >= groupVisibilityClip.left - 1 && end.x <= groupVisibilityClip.right + 1
+        && (!composerCoversTracker || Math.max(start.y, baselineY) <= composerRect.top + 1),
     };
   };
   const routes = paths.map(route);
-  const cross = (a, b) => {
-    const orient = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-    const a1 = orient(a.start, a.end, b.start);
-    const a2 = orient(a.start, a.end, b.end);
-    const b1 = orient(b.start, b.end, a.start);
-    const b2 = orient(b.start, b.end, a.end);
-    return a1 * a2 < -.01 && b1 * b2 < -.01;
-  };
-  const collinear = (a, b) => {
-    const area = (p) => (a.end.x - a.start.x) * (p.y - a.start.y) - (a.end.y - a.start.y) * (p.x - a.start.x);
-    return Math.abs(area(b.start)) < .01 && Math.abs(area(b.end)) < .01;
+  const range = (segment) => [Math.min(segment.from, segment.to), Math.max(segment.from, segment.to)];
+  const segmentConflict = (left, right) => {
+    if (left.axis === right.axis) {
+      if (Math.abs(left.fixed - right.fixed) > .01) return '';
+      const [leftMin, leftMax] = range(left);
+      const [rightMin, rightMax] = range(right);
+      return Math.min(leftMax, rightMax) >= Math.max(leftMin, rightMin) - .01 ? 'coincident' : '';
+    }
+    const horizontal = left.axis === 'h' ? left : right;
+    const vertical = left.axis === 'v' ? left : right;
+    const [horizontalMin, horizontalMax] = range(horizontal);
+    const [verticalMin, verticalMax] = range(vertical);
+    return vertical.fixed >= horizontalMin - .01 && vertical.fixed <= horizontalMax + .01
+      && horizontal.fixed >= verticalMin - .01 && horizontal.fixed <= verticalMax + .01 ? 'intersection' : '';
   };
   const routeConflicts = [];
   for (let left = 0; left < routes.length; left += 1) {
     for (let right = left + 1; right < routes.length; right += 1) {
-      if (cross(routes[left], routes[right]) || collinear(routes[left], routes[right])) {
-        routeConflicts.push([routes[left].identity, routes[right].identity]);
+      for (const leftSegment of routes[left].segments) {
+        for (const rightSegment of routes[right].segments) {
+          const kind = segmentConflict(leftSegment, rightSegment);
+          if (kind) routeConflicts.push({
+            left: routes[left].identity, leftSegment: leftSegment.name,
+            right: routes[right].identity, rightSegment: rightSegment.name, kind,
+          });
+        }
       }
     }
   }
   const alphaGroup = groups.find((group) => group.dataset.project === 'alpha' && (group.dataset.folder || '') === '');
   const child = alphaGroup?.querySelector('.live-tracker-child-strip .live-tracker-session');
   const childStyle = child ? getComputedStyle(child) : null;
+  const childElbowStyle = child ? getComputedStyle(child, '::before') : null;
   const headingVisibility = visibleGroups.map((group) => {
     const heading = group.querySelector('.live-tracker-project-name');
     const style = heading ? getComputedStyle(heading) : null;
-    return { text: heading?.textContent.trim() || '', position: style?.position || '', width: heading?.getBoundingClientRect().width || 0 };
+    const box = heading?.getBoundingClientRect();
+    return {
+      text: heading?.textContent.trim() || '', id: heading?.id || '',
+      labelled: Boolean(heading?.id && group.getAttribute('aria-labelledby') === heading.id),
+      position: style?.position || '', width: box?.width || 0, height: box?.height || 0,
+      clipPath: style?.clipPath || '', overflow: style?.overflow || '',
+    };
   });
   return {
     standalone: matchMedia('(display-mode: standalone)').matches,
@@ -478,7 +531,6 @@ const inspectExpression = `(() => {
     groupVisualTops: visibleGroups.map((group) => group.offsetTop),
     headingVisibility,
     alphaRows: alphaGroup ? [...alphaGroup.querySelectorAll('.live-tracker-session')].map((row) => ({ id: row.dataset.sessionId, depth: Number(row.dataset.depth) })) : [],
-    emptyGroups: groups.filter((group) => group.querySelector('.live-tracker-project-empty')).map(identity),
     duplicateStudio: groups.filter((group) => group.dataset.project === 'studio').map(identity),
     child: child ? {
       display: childStyle.display,
@@ -490,6 +542,13 @@ const inspectExpression = `(() => {
       elapsed: child.querySelector('.live-tracker-elapsed')?.textContent.trim() || '',
       elapsedOwner: child.querySelectorAll('.live-tracker-elapsed').length,
       fullRowLink: child.parentElement?.tagName === 'LI',
+      elbow: childElbowStyle ? {
+        borderLeftWidth: childElbowStyle.borderLeftWidth,
+        borderLeftStyle: childElbowStyle.borderLeftStyle,
+        borderBottomWidth: childElbowStyle.borderBottomWidth,
+        borderBottomStyle: childElbowStyle.borderBottomStyle,
+        pointerEvents: childElbowStyle.pointerEvents,
+      } : null,
     } : null,
     idleParentElapsedCount: alphaGroup?.querySelector('.live-tracker-session[data-session-id="${architectB}"] .live-tracker-elapsed')?.textContent.trim() ? 1 : 0,
     scroll: {
@@ -543,21 +602,44 @@ function assertOverview(state, expected) {
   assert.ok(state.connectorPaths.length > 0, "overview normally exposes visible relationship routes");
   assert.ok(state.connectorPaths.every((route) => route.display !== "none" && route.visibility === "visible" && route.opacity > 0),
     "every emitted relationship route is normally visible without hover or focus");
-  assert.ok(state.connectorPaths.every((route) => route.strokeWidth > 0 && route.strokeWidth <= 1),
-    "all relationship routes use a restrained hairline no thicker than one CSS pixel");
-  assert.ok(state.connectorPaths.every((route) => route.direct && route.startAttached && route.endAttached),
-    "each independent direct route attaches to its project and matching group surfaces");
-  assert.ok(state.groupVisibilityClip && state.connectorPaths.every((route) =>
-    route.end.y >= state.groupVisibilityClip.top - 1 && route.end.y <= state.groupVisibilityClip.bottom + 1),
-  "right endpoints stay inside the unobscured group surface rather than the composer-covered padding");
-  assert.deepEqual(state.routeConflicts, [], "routes never cross or overlap into shared/heavier geometry");
+  assert.ok(state.connectorPaths.every((route) => route.strokeWidth > 0 && route.strokeWidth <= 1
+    && route.vectorEffect === "non-scaling-stroke" && route.lineJoin === "miter" && route.lineCap === "butt"),
+  "all relationship routes retain square, non-scaling quiet hairline styling");
+  if (diagnose) {
+    const invalid = state.connectorPaths.filter((route) => !route.orthogonal || !route.bends)
+      .map(({ identity, d, orthogonal, bends, start, laneX, baselineY, end }) => (
+        { identity, d, orthogonal, bends, start, laneX, baselineY, end }
+      ));
+    if (invalid.length) console.error("invalid connector bends", invalid);
+  }
+  assert.ok(state.connectorPaths.every((route) => route.orthogonal && route.bends),
+    "every overview relationship has horizontal/vertical bends and no diagonal or curved segment");
+  assert.ok(state.connectorPaths.every((route) => route.startAttached && route.laneInChannel),
+    "each route starts at its matching project center and enters a gutter-only vertical lane");
+  if (diagnose) {
+    const invalid = state.connectorPaths.filter((route) => !route.underlineAttached || !route.baselineClear)
+      .map(({ identity, d, underlineAttached, baselineClear, start, laneX, baselineY, end }) => (
+        { identity, d, underlineAttached, baselineClear, start, laneX, baselineY, end }
+      ));
+    if (invalid.length) console.error("invalid connector underlines", invalid);
+  }
+  assert.ok(state.connectorPaths.every((route) => route.underlineAttached && route.baselineClear),
+    "each final segment is one visible underline immediately below and across its matching session group");
+  assert.ok(state.connectorPaths.every((route) => route.insideVisibility),
+    "routes remain in their project/tracker bands and above actual composer occlusion");
+  assert.equal(new Set(state.connectorPaths.map((route) => route.laneX.toFixed(2))).size, state.connectorPaths.length,
+    "every simultaneously visible route owns a unique vertical lane");
+  assert.deepEqual(state.routeConflicts, [],
+    "routes have no coincident segments or pairwise horizontal/vertical intersections");
   assert.deepEqual(state.projectSequence, expected, "left project identities keep canonical order");
   assert.deepEqual(state.groupSequence, expected, "right group identities exactly match canonical left order");
   assert.deepEqual(state.visibleGroups, expected, "overview exposes every group in reading order");
   assert.ok(ascending(state.projectVisualTops), "left visual top order follows DOM order");
   assert.ok(ascending(state.groupVisualTops), "right visual top order follows DOM order despite uneven heights");
-  assert.ok(state.headingVisibility.every((heading) => heading.position === "static" && heading.width > 1 && heading.text),
-    "every overview group has a visible human heading instead of relying on a line");
+  assert.ok(state.headingVisibility.every((heading) => heading.text && heading.id && heading.labelled
+    && heading.position === "absolute" && heading.width <= 1 && heading.height <= 1
+    && heading.overflow === "hidden" && heading.clipPath !== "none"),
+  "duplicate project headings are visually hidden while retaining labelled accessible text");
 }
 
 
@@ -751,15 +833,32 @@ try {
   ], "architects and their authoritative direct children remain contiguous in browser focus order");
   assert.deepEqual(report.desktopOverview.duplicateStudio, ["studio\neast", "studio\nwest"],
     "duplicate project names remain distinct by authoritative folder identity");
-  assert.deepEqual(report.desktopOverview.emptyGroups, ["beta\n"],
-    "empty groups retain a deliberate canonical position");
   assert.ok(report.desktopOverview.child?.fullRowLink && report.desktopOverview.child?.display === "flex"
     && report.desktopOverview.child?.direction === "row" && report.desktopOverview.child?.justify === "flex-start",
   "compact child metadata remains a full-row, left-biased focus target");
+  const childElbow = report.desktopOverview.child?.elbow;
+  assert.ok(childElbow && childElbow.borderLeftStyle === "solid" && childElbow.borderBottomStyle === "solid"
+    && Number.parseFloat(childElbow.borderLeftWidth) > 0
+    && childElbow.borderLeftWidth === childElbow.borderBottomWidth
+    && childElbow.pointerEvents === "none",
+  "the architect-to-child orthogonal elbow remains intact and non-interactive");
   assert.equal(report.desktopOverview.child?.phase, "implementation", "child keeps its own workflow phase");
   assert.match(report.desktopOverview.child?.elapsed ?? "", /^\d+[mh]$/, "child keeps its own elapsed time");
   assert.equal(report.desktopOverview.child?.elapsedOwner, 1, "elapsed metadata belongs to the child row");
   assert.equal(report.desktopOverview.idleParentElapsedCount, 0, "idle architect does not inherit delegated elapsed time");
+  await desktop.cdp.evaluate(`(() => {
+    const tracker = document.querySelector('.live-tracker');
+    const project = document.querySelector('.active-project-item[data-project="alpha"][data-folder=""]');
+    const group = document.querySelector('.live-tracker-project[data-project="alpha"][data-folder=""]');
+    const projectBox = project.getBoundingClientRect();
+    const groupBox = group.getBoundingClientRect();
+    tracker.scrollTop += groupBox.bottom + 4 - ((projectBox.top + projectBox.bottom) / 2);
+  })()`);
+  report.desktopBaselineAligned = await inspect(desktop.cdp, "desktop-baseline-aligned", { capture: false });
+  assertOverview(report.desktopBaselineAligned, expectedMany);
+  const alignedAlpha = report.desktopBaselineAligned.connectorPaths.find((route) => route.identity === "alpha\n");
+  assert.ok(alignedAlpha && Math.abs(alignedAlpha.baselineY - alignedAlpha.start.y) >= 1.5,
+    "exact source/baseline scroll alignment retains a visible orthogonal bend");
   await desktop.cdp.evaluate(`(() => {
     const tracker = document.querySelector('.live-tracker');
     const projects = document.querySelector('.active-projects');
@@ -802,11 +901,11 @@ try {
   const epsilonRoute = report.pwaSmallOverview.connectorPaths.find((route) => route.identity === "epsilon\n");
   assert.ok(epsilonRoute, "epsilon has its required project-to-group relationship line");
   assert.ok(epsilonRoute.end.y > report.pwaSmallOverview.projectVisibilityClip.bottom,
-    "epsilon right endpoint remains visible below the shorter centered left project list");
+    "epsilon underline remains visible below the shorter centered left project list");
   assert.ok(report.pwaSmallOverview.composerCoversTracker
     && Math.abs(report.pwaSmallOverview.groupVisibilityClip.bottom - report.pwaSmallOverview.composerRect.top) < .01
     && epsilonRoute.end.y < report.pwaSmallOverview.composerRect.top,
-  "small overview clips the right tracker at the actual composer while retaining epsilon above it");
+  "small overview clips the right tracker at the actual composer while retaining epsilon’s underline above it");
   await smallPwa.cdp.evaluate(`document.body.click()`);
   report.smallClosedAfter = await inspect(smallPwa.cdp, "small-closed-after", { capture: false });
   assert.equal(report.smallClosedAfter.connectorPaths.length, 0, "closing narrow navigation suppresses relationship routes");

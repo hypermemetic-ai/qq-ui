@@ -2804,6 +2804,10 @@
   };
   const SESSION_CONNECTOR_ID = "session-connectors";
   const SESSION_CONNECTOR_INSET = 0.75;
+  const SESSION_CONNECTOR_BASELINE_GAP = 4;
+  const SESSION_CONNECTOR_LANE_EDGE_GAP = 2;
+  const SESSION_CONNECTOR_LANE_GAP = 6;
+  const SESSION_CONNECTOR_MIN_LANE_GAP = 1.25;
   const SESSION_CONNECTOR_NS = "http://www.w3.org/2000/svg";
   let sessionConnectorFrame = 0;
   let sessionConnectorResizeObserver = null;
@@ -2869,6 +2873,71 @@
     sessionConnectorObserved = next;
     for (const node of next) sessionConnectorResizeObserver.observe(node);
   };
+  const sessionConnectorBaseline = (groupBottom, sourceY) => {
+    const preferred = groupBottom + SESSION_CONNECTOR_BASELINE_GAP;
+    if (Math.abs(preferred - sourceY) >= 1) return preferred;
+    return preferred + (preferred >= sourceY ? 2 : -2);
+  };
+  const sessionConnectorSegments = (route, lane) => [
+    { axis: "h", fixed: route.start.y, from: route.start.x, to: lane },
+    { axis: "v", fixed: lane, from: route.start.y, to: route.baseline },
+    { axis: "h", fixed: route.baseline, from: lane, to: route.endX },
+  ];
+  const sessionConnectorRangeContains = (value, start, end) => (
+    value >= Math.min(start, end) - 0.01 && value <= Math.max(start, end) + 0.01
+  );
+  const sessionConnectorSegmentsIntersect = (left, right) => {
+    if (left.axis === right.axis) {
+      if (Math.abs(left.fixed - right.fixed) > 0.01) return false;
+      return Math.max(Math.min(left.from, left.to), Math.min(right.from, right.to))
+        <= Math.min(Math.max(left.from, left.to), Math.max(right.from, right.to)) + 0.01;
+    }
+    const horizontal = left.axis === "h" ? left : right;
+    const vertical = left.axis === "v" ? left : right;
+    return sessionConnectorRangeContains(vertical.fixed, horizontal.from, horizontal.to)
+      && sessionConnectorRangeContains(horizontal.fixed, vertical.from, vertical.to);
+  };
+  const sessionConnectorRoutesIntersect = (left, leftLane, right, rightLane) => {
+    const leftSegments = sessionConnectorSegments(left, leftLane);
+    const rightSegments = sessionConnectorSegments(right, rightLane);
+    return leftSegments.some((leftSegment) => rightSegments.some((rightSegment) => (
+      sessionConnectorSegmentsIntersect(leftSegment, rightSegment)
+    )));
+  };
+  const sessionConnectorLaneOrder = (routes, nearLane, farLane) => {
+    const outgoing = routes.map(() => new Set());
+    const incoming = routes.map(() => 0);
+    const precedes = (before, after) => {
+      if (outgoing[before].has(after)) return;
+      outgoing[before].add(after);
+      incoming[after] += 1;
+    };
+    for (let left = 0; left < routes.length; left += 1) {
+      for (let right = left + 1; right < routes.length; right += 1) {
+        const canonicalOrderWorks = !sessionConnectorRoutesIntersect(
+          routes[left], nearLane, routes[right], farLane,
+        );
+        const reverseOrderWorks = !sessionConnectorRoutesIntersect(
+          routes[left], farLane, routes[right], nearLane,
+        );
+        if (!canonicalOrderWorks && !reverseOrderWorks) return null;
+        if (canonicalOrderWorks && !reverseOrderWorks) precedes(left, right);
+        if (!canonicalOrderWorks && reverseOrderWorks) precedes(right, left);
+      }
+    }
+    const order = [];
+    const available = routes.map((_, index) => index).filter((index) => incoming[index] === 0);
+    while (available.length) {
+      available.sort((left, right) => left - right);
+      const current = available.shift();
+      order.push(current);
+      for (const next of outgoing[current]) {
+        incoming[next] -= 1;
+        if (incoming[next] === 0) available.push(next);
+      }
+    }
+    return order.length === routes.length ? order : null;
+  };
   const paintSessionConnectors = () => {
     sessionConnectorFrame = 0;
     const rail = document.querySelector("#project-rail");
@@ -2900,22 +2969,53 @@
       const group = groups.get(key);
       const source = visibleConnectorSurface(project, projectClip);
       const target = visibleConnectorSurface(group, trackerClip);
-      if (!key || !source || !target) continue;
+      const sessions = group?.querySelector?.(".live-tracker-sessions");
+      if (!key || !source || !target || !(sessions instanceof HTMLElement)) continue;
+      const sessionsRect = sessions.getBoundingClientRect();
       const start = {
         x: source.rect.right - SESSION_CONNECTOR_INSET,
-        y: (source.visible.top + source.visible.bottom) / 2,
+        y: (source.rect.top + source.rect.bottom) / 2,
       };
-      const end = {
-        x: target.rect.left + SESSION_CONNECTOR_INSET,
-        y: (target.visible.top + target.visible.bottom) / 2,
-      };
-      if (end.x - start.x < 4) continue;
-      routes.push({ project, group, start, end });
+      const baseline = sessionConnectorBaseline(target.rect.bottom, start.y);
+      const contentLeft = Math.max(target.rect.left, sessionsRect.left);
+      const endX = Math.min(target.rect.right, sessionsRect.right, trackerClip.right) - SESSION_CONNECTOR_INSET;
+      const sourceAnchorVisible = start.y >= source.visible.top - 0.01
+        && start.y <= source.visible.bottom + 0.01;
+      const baselineVisible = baseline >= trackerClip.top + SESSION_CONNECTOR_INSET
+        && baseline <= trackerClip.bottom - SESSION_CONNECTOR_INSET;
+      if (!sourceAnchorVisible || !baselineVisible || contentLeft - start.x < 4 || endX <= contentLeft) continue;
+      routes.push({ project, group, start, baseline, contentLeft, endX });
     }
+    const observe = [rail, projects, tracker, composerShell, ...groups.values()];
     if (routes.length === 0) {
       removeSessionConnectors();
-      observeSessionConnectorSurfaces([rail, projects, tracker, composerShell]);
+      observeSessionConnectorSurfaces(observe);
       return;
+    }
+    const channelStart = Math.max(...routes.map((route) => route.start.x));
+    const channelEnd = Math.min(...routes.map((route) => route.contentLeft));
+    const channelWidth = channelEnd - channelStart;
+    const usableWidth = channelWidth - (2 * SESSION_CONNECTOR_LANE_EDGE_GAP);
+    const maximumLaneSpan = Math.max(0, usableWidth);
+    const laneGap = routes.length > 1
+      ? Math.min(SESSION_CONNECTOR_LANE_GAP, maximumLaneSpan / (routes.length - 1))
+      : SESSION_CONNECTOR_LANE_GAP;
+    if (channelWidth < 4 || (routes.length > 1 && laneGap < SESSION_CONNECTOR_MIN_LANE_GAP)) {
+      removeSessionConnectors();
+      observeSessionConnectorSurfaces(observe);
+      return;
+    }
+    const firstLane = channelStart + SESSION_CONNECTOR_LANE_EDGE_GAP;
+    const lastLane = firstLane + Math.max(laneGap, SESSION_CONNECTOR_MIN_LANE_GAP);
+    const laneOrder = sessionConnectorLaneOrder(routes, firstLane, lastLane);
+    if (!laneOrder) {
+      removeSessionConnectors();
+      observeSessionConnectorSurfaces(observe);
+      return;
+    }
+    const laneRanks = new Map(laneOrder.map((routeIndex, rank) => [routeIndex, rank]));
+    for (let index = 0; index < routes.length; index += 1) {
+      routes[index].lane = firstLane + (laneRanks.get(index) * laneGap);
     }
     let svg = document.getElementById(SESSION_CONNECTOR_ID);
     if (!(svg instanceof SVGElement)) {
@@ -2930,14 +3030,14 @@
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.setAttribute("width", String(width));
     svg.setAttribute("height", String(height));
-    svg.replaceChildren(...routes.map(({ project, start, end }) => {
+    svg.replaceChildren(...routes.map(({ project, start, baseline, lane, endX }) => {
       const path = document.createElementNS(SESSION_CONNECTOR_NS, "path");
       path.dataset.project = project.dataset.project || "";
       path.dataset.folder = project.dataset.folder || "";
-      path.setAttribute("d", `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} L ${end.x.toFixed(2)} ${end.y.toFixed(2)}`);
+      path.setAttribute("d", `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} H ${lane.toFixed(2)} V ${baseline.toFixed(2)} H ${endX.toFixed(2)}`);
       return path;
     }));
-    observeSessionConnectorSurfaces([rail, projects, tracker, composerShell, ...groups.values()]);
+    observeSessionConnectorSurfaces(observe);
   };
   function scheduleSessionConnectors() {
     if (sessionConnectorFrame) return;
