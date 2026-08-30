@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { orderedProjectPlaces, projectPlaceIdentity } from "./project-order.mjs";
+import { safeClientMessageId } from "./client-message-id.mjs";
 import { safeMessageId } from "./message-id.mjs";
 import {
   createLatencyStore,
@@ -2464,6 +2465,18 @@ export function createConsoleHandler(backend, options = {}) {
         await assertChairMutation(selected.sessionId);
         const form = await readForm(req);
         const prompt = String(form.get("prompt") ?? "");
+        const clientMessageValues = form.getAll("clientMessageId");
+        let clientMessageId = "";
+        if (clientMessageValues.length > 0) {
+          clientMessageId = clientMessageValues.length === 1
+            ? safeClientMessageId(clientMessageValues[0])
+            : "";
+          if (!clientMessageId) {
+            const error = new Error("Client message ID must be a canonical random UUID");
+            error.status = 422;
+            throw error;
+          }
+        }
         if (!prompt.trim()) {
           const error = new Error("Message must not be empty");
           error.status = 422;
@@ -2477,7 +2490,13 @@ export function createConsoleHandler(backend, options = {}) {
         const compiling = compilingFindPrompt(prompt, selected.sessionId, inFindMode);
         if (compiling) findWork.set(selected.sessionId, "compile");
         try {
-          const result = await backend.prompt(selected.sessionId, prompt);
+          // Correlation is metadata only. It neither replaces the core-owned
+          // message ID nor adds authorization or idempotency semantics. Calling
+          // with two arguments when absent preserves legacy behavior; backends
+          // predating the optional third argument safely ignore it when present.
+          const result = clientMessageId
+            ? await backend.prompt(selected.sessionId, prompt, { clientMessageId })
+            : await backend.prompt(selected.sessionId, prompt);
           findWork.delete(selected.sessionId);
           if (isNavigateResult(result)) {
             const next = result.action === "close"
