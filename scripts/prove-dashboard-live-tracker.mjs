@@ -184,10 +184,10 @@ const childStrip = alphaGroup.match(new RegExp(`<li class="live-tracker-row live
 assert.match(childStrip, new RegExp(`^<li[\\s\\S]*?<a[^>]*href="/qq/sessions/open\\?session=${encodeURIComponent(childId)}"[\\s\\S]*?<\\/a><\\/li>$`),
   "the whole compact strip remains one focusable session link");
 const architectStrip = alphaGroup.match(new RegExp(`<li class="live-tracker-row live-tracker-depth-0"><a class="live-tracker-session[^\"]*"[^>]*data-session-id="${rootId}"[\\s\\S]*?<\\/a><\\/li>`))?.[0] ?? "";
-assert.match(architectStrip, /data-activity="working"[^>]*>working</,
-  "the architect strip exposes its own current activity");
-assert.doesNotMatch(architectStrip, /class="live-tracker-(?:workflow|phase)"/,
-  "the architect strip does not duplicate workflow or delegated phase state");
+assert.match(architectStrip, /class="live-tracker-phase" data-phase="planning">planning</,
+  "the architect strip exposes its own authoritative current phase");
+assert.doesNotMatch(architectStrip, /data-activity="working"[^>]*>working</,
+  "authoritative architect phase replaces redundant generic working text");
 assert.match(childStrip, /class="live-tracker-phase" data-phase="implementation">implementation</,
   "the child strip uses status space for its authoritative workflow role");
 assert.doesNotMatch(childStrip, /data-activity="working"[^>]*>working</,
@@ -483,6 +483,10 @@ assert.deepEqual({ ...chooserBehavior }, {
 const connectorSource = browser.match(/const paintSessionConnectors = \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
 assert.match(connectorSource, /for \(const group of liveTrackerGroups\(tracker\)\)[\s\S]*?createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "path"\)/,
   "connector geometry creates at most one path for each project group");
+assert.match(connectorSource, /removeAttribute\("hidden"\)/,
+  "a painted SVG removes the real hidden attribute rather than assigning an SVG expando");
+assert.doesNotMatch(connectorSource, /svg\.hidden\s*=/,
+  "connector visibility never relies on non-reflecting SVGElement.hidden assignment");
 assert.match(connectorSource, /projectItem\?\.closest\("\.active-projects"\)[\s\S]*?connectorOverflowClientRect\(projectOverflow\)[\s\S]*?connectorOverflowClientRect\(tracker\)/,
   "connector endpoints are clipped to the project and session overflow clients");
 const connectorGeometrySource = browser.match(/  const connectorOverflowClientRect = [\s\S]*?(?=  const connectorProjectItem)/)?.[0] ?? "";
@@ -512,10 +516,10 @@ assert.equal(geometry.intersectConnectorRect(
 ), null, "a viewport-visible row clipped above its overflow client paints no connector");
 assert.match(connectorGeometrySource, /projectRect\.top \+ projectRect\.height \/ 2[\s\S]*?groupRect\.top \+ groupRect\.height \/ 2/,
   "both ends use deliberate vertical centering after clipping");
-assert.match(connectorGeometrySource, /if \(!narrow\)[\s\S]*?H \$\{elbowX\} V \$\{endY\} H \$\{endX\}/,
-  "desktop uses one restrained orthogonal cross-column connector");
-assert.match(connectorGeometrySource, /branchInset = Math\.min\(12, groupRect\.width \/ 2\)[\s\S]*?H \$\{branchX\} V \$\{endY\} H \$\{endX\}/,
-  "narrow geometry turns inside the session group instead of tracing the 50/50 divider");
+assert.match(connectorGeometrySource, /projectRect\.right - projectInset[\s\S]*?groupRect\.left \+ groupInset/,
+  "connector endpoints visibly lead out of and into their related surfaces");
+assert.match(connectorGeometrySource, /laneX = connectorCoordinate\(\(projectRect\.right \+ groupRect\.left\) \/ 2\)[\s\S]*?H \$\{laneX\} V \$\{endY\} H \$\{endX\}/,
+  "both responsive layouts use one restrained orthogonal route through the clear inter-pane lane");
 assert.match(connectorSource, /connectorPathData\(projectRect, groupRect, !desktopChair\(\)\)/,
   "connector painting selects geometry from the live responsive layout");
 assert.doesNotMatch(connectorSource, /!desktopChair\(\)[\s\S]{0,40}!navMode\(\)/,
@@ -530,7 +534,7 @@ const clippedDesktopPath = geometry.connectorPathData(
   false,
 );
 assert.deepEqual({ ...clippedDesktopPath }, {
-  d: "M 80.5 31.5 H 100.5 V 80.5 H 120.5",
+  d: "M 72.5 31.5 H 100.5 V 80.5 H 128.5",
   layout: "desktop",
 }, "desktop connector geometry remains centered and orthogonal");
 const clippedNarrowPath = geometry.connectorPathData(
@@ -539,9 +543,9 @@ const clippedNarrowPath = geometry.connectorPathData(
   true,
 );
 assert.deepEqual({ ...clippedNarrowPath }, {
-  d: "M 180.5 31.5 H 223.5 V 80.5 H 211.5",
+  d: "M 172.5 31.5 H 195.5 V 80.5 H 219.5",
   layout: "narrow",
-}, "narrow connector geometry has a visible target bracket inside the session group");
+}, "narrow connector geometry visibly enters both related surfaces");
 const connectorPaint = runInNewContext(`(() => {
 class Element {}
 class HTMLElement extends Element {
@@ -558,8 +562,10 @@ class HTMLElement extends Element {
   getBoundingClientRect() { return this.rect; }
 }
 class SVGElement extends Element {
-  constructor() { super(); this.attributes = {}; this.children = []; this.hidden = true; }
+  constructor() { super(); this.attributes = { hidden: "" }; this.children = []; }
   setAttribute(name, value) { this.attributes[name] = value; }
+  removeAttribute(name) { delete this.attributes[name]; }
+  hasAttribute(name) { return Object.hasOwn(this.attributes, name); }
   replaceChildren(fragment) { this.children = [...fragment.children]; }
 }
 class PathElement extends Element {
@@ -610,7 +616,7 @@ ${connectorGeometrySource}
 ${connectorSource}
 const snapshot = () => ({
   count: svg.children.length,
-  hidden: svg.hidden,
+  hidden: svg.hasAttribute("hidden"),
   d: svg.children[0]?.attributes.d,
   layout: svg.children[0]?.dataset.layout,
   layouts: svg.children.map((child) => child.dataset.layout),
@@ -658,7 +664,7 @@ return { desktopFocus, desktopOverview, narrowFocus, narrowOverview, narrowOrien
 assert.deepEqual({ ...connectorPaint.desktopFocus, layouts: [...connectorPaint.desktopFocus.layouts] }, {
   count: 1,
   hidden: false,
-  d: "M 145.5 56.5 H 172.5 V 160.5 H 200.5",
+  d: "M 137.5 56.5 H 172.5 V 160.5 H 208.5",
   layout: "desktop",
   layouts: ["desktop"],
   vectorEffect: "non-scaling-stroke",
@@ -674,7 +680,7 @@ assert.deepEqual([...connectorPaint.desktopOverview.layouts], ["desktop", "deskt
 assert.deepEqual({ ...connectorPaint.narrowFocus, layouts: [...connectorPaint.narrowFocus.layouts] }, {
   count: 1,
   hidden: false,
-  d: "M 180.5 56.5 H 223.5 V 165.5 H 211.5",
+  d: "M 172.5 56.5 H 195.5 V 165.5 H 219.5",
   layout: "narrow",
   layouts: ["narrow"],
   vectorEffect: "non-scaling-stroke",
@@ -682,7 +688,7 @@ assert.deepEqual({ ...connectorPaint.narrowFocus, layouts: [...connectorPaint.na
   viewBox: "0 0 390 700",
   width: "390",
   height: "700",
-}, "filtered mobile focus paints one target bracket inside the right pane");
+}, "filtered mobile focus paints one route that enters both chooser surfaces");
 assert.equal(connectorPaint.narrowOverview.count, 2,
   "mobile overview paints one narrow connector for every visible project group");
 assert.deepEqual([...connectorPaint.narrowOverview.layouts], ["narrow", "narrow"],
@@ -694,7 +700,7 @@ assert.deepEqual({
   width: connectorPaint.narrowOrientation.width,
   height: connectorPaint.narrowOrientation.height,
 }, {
-  d: "M 305.5 40.5 H 348.5 V 112.5 H 336.5",
+  d: "M 297.5 40.5 H 320.5 V 112.5 H 344.5",
   layout: "narrow",
   viewBox: "0 0 640 390",
   width: "640",
@@ -718,8 +724,8 @@ assertOnScreen(connectorPaint.desktopFocus, 1000, 700);
 const narrowCoordinates = assertOnScreen(connectorPaint.narrowFocus, 390, 700);
 assert.ok(narrowCoordinates.startX < 195 && narrowCoordinates.endX > 195,
   "mobile connector crosses from the visible left project pane to the visible right group");
-assert.ok(narrowCoordinates.branchX > narrowCoordinates.endX && narrowCoordinates.branchX < 376,
-  "mobile vertical branch sits inside session content rather than on the 50/50 pane border");
+assert.ok(narrowCoordinates.branchX > narrowCoordinates.startX && narrowCoordinates.branchX < narrowCoordinates.endX,
+  "mobile vertical route stays in the clear lane between the two endpoint surfaces");
 assertOnScreen(connectorPaint.narrowOrientation, 640, 390);
 assert.match(browser, /new ResizeObserver\(scheduleSessionConnectors\)/,
   "connectors track project and session count geometry changes");
@@ -783,8 +789,8 @@ assert.match(connectorStyle, /fill:\s*none/,
   "connectors are unfilled lines rather than decorative shapes");
 const connectorStroke = connectorStyle.match(/stroke:\s*(#[0-9a-f]{6})/i)?.[1] ?? "";
 const connectorStrokeWidth = Number(connectorStyle.match(/stroke-width:\s*([\d.]+)/)?.[1] ?? NaN);
-assert.equal(connectorStrokeWidth, 1,
-  "connectors use one crisp CSS pixel rather than a disappearing antialiased subpixel");
+assert.equal(connectorStrokeWidth, 1.25,
+  "connectors use a restrained but durable stroke in desktop and high-density PWA paint");
 assert.doesNotMatch(connectorStyle, /opacity\s*:/,
   "connector contrast is not reduced again through path opacity");
 const rgb = (hex) => [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16));
@@ -824,10 +830,14 @@ assert.match(hierarchyStyle, /flex-direction:\s*column[\s\S]*?align-items:\s*str
 const childStripStyle = css.match(/\.live-tracker-child-strip \.live-tracker-session \{([^}]*)\}/)?.[1] ?? "";
 assert.match(childStripStyle, /min-height:\s*1\.65rem[\s\S]*?flex-direction:\s*row/,
   "direct children collapse to compact one-line execution strips");
-assert.match(css, /\.live-tracker-child-strip \.live-tracker-session::before \{[^}]*border-bottom:\s*\.625px solid[^}]*border-left:\s*\.625px solid/,
-  "each direct child has one thin orthogonal relationship branch");
-assert.match(css, /\.live-tracker-child-strip \.live-tracker-state \{[^}]*max-width:\s*55%[^}]*flex:\s*none/,
-  "child role and active time stay compact without displacing identity");
+assert.match(css, /\.live-tracker-child-strip \.live-tracker-session::before \{[^}]*border-bottom:\s*\.75px solid[^}]*border-left:\s*\.75px solid/,
+  "each direct child has one restrained orthogonal dependency branch");
+assert.match(childStripStyle, /justify-content:\s*flex-start[\s\S]*?gap:\s*\.4rem/,
+  "child identity and work metadata form one compact left-biased cluster");
+assert.doesNotMatch(childStripStyle, /justify-content:\s*space-between/,
+  "child state is never stranded at the far edge of an empty strip");
+assert.match(css, /\.live-tracker-child-strip \.live-tracker-state \{[^}]*max-width:\s*none/,
+  "child phase and own elapsed time can use reclaimed row space");
 assert.doesNotMatch(css, /\.live-tracker-child-strip \.live-tracker-(?:phase|elapsed)[^}]*display:\s*none/,
   "child workflow role and active-work time remain visible");
 assert.match(css, /\.live-tracker-elapsed\[hidden\] \{ display:\s*none; \}/,

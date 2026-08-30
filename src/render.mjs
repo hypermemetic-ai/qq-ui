@@ -736,23 +736,23 @@ function trackerActiveStartedAt(row) {
     : null;
 }
 
-function trackerChildPhase(row) {
+function trackerActivePhase(row, child) {
   const phase = typeof row?.phase === "string" ? row.phase.trim() : "";
-  if (phase && phase !== "none" && phase !== "unknown" && phase !== "work") return phase;
-  return typeof row?.workflow === "string" ? row.workflow.trim() : "";
+  if (phase && phase !== "none" && phase !== "unknown" && (!child || phase !== "work")) return phase;
+  return child && typeof row?.workflow === "string" ? row.workflow.trim() : "";
 }
 
 function renderLiveTrackerRow(row, paths, selectedId) {
   const current = row.sessionId === selectedId;
   const face = trackerSessionFace(row);
   const child = row.depth === 1;
-  const childPhase = child && row.activity === "working" ? trackerChildPhase(row) : "";
-  const secondary = row.alias && row.label !== row.alias && row.label !== childPhase ? row.label : "";
+  const activePhase = row.activity === "working" ? trackerActivePhase(row, child) : "";
+  const secondary = row.alias && row.label !== row.alias && row.label !== activePhase ? row.label : "";
   const depthClass = ` live-tracker-depth-${Math.min(row.depth, 8)}`;
   const childClass = child ? " live-tracker-child-strip" : "";
-  const state = childPhase && childPhase !== face
-    ? `<span class="live-tracker-phase" data-phase="${escapeHtml(childPhase)}">${escapeHtml(childPhase)}</span>`
-    : childPhase ? "" : `<span class="live-tracker-activity" data-activity="${escapeHtml(row.activity)}">${escapeHtml(row.activity)}</span>`;
+  const state = activePhase && activePhase !== face
+    ? `<span class="live-tracker-phase" data-phase="${escapeHtml(activePhase)}">${escapeHtml(activePhase)}</span>`
+    : activePhase ? "" : `<span class="live-tracker-activity" data-activity="${escapeHtml(row.activity)}">${escapeHtml(row.activity)}</span>`;
   const startedAt = trackerActiveStartedAt(row);
   const elapsed = startedAt === null
     ? ""

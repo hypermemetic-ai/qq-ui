@@ -3356,10 +3356,10 @@ body.document-page {
 .session-connectors[hidden] { display: none !important; }
 .session-connectors path {
   fill: none;
-  stroke: #686868;
-  stroke-width: 1;
-  stroke-linecap: square;
-  stroke-linejoin: miter;
+  stroke: #747474;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   pointer-events: none;
 }
 
@@ -3384,8 +3384,8 @@ body.document-page {
   overflow: hidden;
   flex-direction: row;
   align-items: center;
-  justify-content: space-between;
-  gap: .55rem;
+  justify-content: flex-start;
+  gap: .4rem;
   color: #686868;
 }
 .live-tracker-child-strip .live-tracker-session::before {
@@ -3395,13 +3395,14 @@ body.document-page {
   bottom: 50%;
   left: 0;
   width: .42rem;
-  border-bottom: .625px solid #303030;
-  border-left: .625px solid #303030;
+  border-bottom: .75px solid #404040;
+  border-left: .75px solid #404040;
   pointer-events: none;
 }
 .live-tracker-child-strip .live-tracker-identity,
 .live-tracker-child-strip .live-tracker-state {
   min-width: 0;
+  flex: 0 1 auto;
   flex-wrap: nowrap;
 }
 .live-tracker-child-strip .live-tracker-face,
@@ -3417,9 +3418,8 @@ body.document-page {
   font-weight: var(--chrome-weight);
 }
 .live-tracker-child-strip .live-tracker-state {
-  max-width: 55%;
-  flex: none;
-  color: #555;
+  max-width: none;
+  color: #666;
 }
 .live-tracker-child-strip .live-tracker-label { color: #555; }
 .live-tracker-child-strip .live-tracker-elapsed { flex: none; }
