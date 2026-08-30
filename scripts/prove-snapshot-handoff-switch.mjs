@@ -316,10 +316,10 @@ async function instrumentedHttpApp() {
       return bundledRenderSessionRegion(...args);
     },
 `);
-  const watchNeedle = "      }, { initialSnapshot: snapshot });\n";
+  const watchNeedle = "      }, { initialSnapshot: snapshot, deferSheets: bootstrapSession });\n";
   assert.ok(source.includes(watchNeedle), "proof seam finds the watch baseline");
   source = source.replace(watchNeedle,
-    "      }, { initialSnapshot: (globalThis.__qqProofWatchInitialSnapshot = snapshot) });\n");
+    "      }, { initialSnapshot: (globalThis.__qqProofWatchInitialSnapshot = snapshot), deferSheets: bootstrapSession });\n");
   const temporaryUrl = new URL(`../src/.prove-http-c1-${process.pid}.mjs`, import.meta.url);
   await writeFile(temporaryUrl, source);
   try {

@@ -44,6 +44,16 @@ const DASHBOARD_UUID_TEXT = /(?:session-)?[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{
 const DASHBOARD_PHASES = new Set(["planning", "plan", "work", "none", "unknown"]);
 const DASHBOARD_USAGE_STATES = new Set(["ready", "estimated", "stale", "unavailable"]);
 
+// Snapshot enrichment is an explicit latency/safety policy. Ordinary pages,
+// mutations, and ordinary SSE keep the complete historical projection. Only a
+// live-switch bootstrap may select the critical policy; its watcher later loads
+// and reconciles the complete set on the same destination stream.
+const SHEET_ENRICHMENT_POLICIES = Object.freeze({
+  FULL: Object.freeze({ name: "full", secondary: true }),
+  LIVE_SWITCH_CRITICAL: Object.freeze({ name: "live-switch-critical", secondary: false }),
+});
+const SECONDARY_SHEET_KEYS = Object.freeze(["caseFile", "dashboard", "progress"]);
+
 function normalizedHandoffBinding(binding) {
   return {
     sessionId: String(binding?.sessionId ?? ""),
@@ -1056,10 +1066,13 @@ export function createConsoleHandler(backend, options = {}) {
   let lastViewedSessionId = "";
   const readOffer = typeof options.offerFor === "function" ? options.offerFor : null;
   const chooseOffer = typeof options.chooseOffer === "function" ? options.chooseOffer : null;
-  const readCase = typeof options.caseFor === "function" ? options.caseFor : null;
+  const readModernCaseFile = typeof options.caseFileFor === "function" ? options.caseFileFor : null;
+  const readLegacyCaseFile = typeof options.caseFor === "function" ? options.caseFor : null;
+  // Select one case API per handler. Modern is authoritative when both are
+  // present; legacy remains a construction-time fallback for older integrators.
+  const readCaseFile = readModernCaseFile ?? readLegacyCaseFile;
   const readApproval = typeof options.approvalFor === "function" ? options.approvalFor : null;
   const decideApproval = typeof options.decideApproval === "function" ? options.decideApproval : null;
-  const readCaseFile = typeof options.caseFileFor === "function" ? options.caseFileFor : null;
   const readLoginSheet = typeof options.loginSheetFor === "function" ? options.loginSheetFor : null;
   const readOverlay = typeof options.overlayFor === "function" ? options.overlayFor : null;
   const chooseOverlay = typeof options.chooseOverlay === "function" ? options.chooseOverlay : null;
@@ -1070,99 +1083,91 @@ export function createConsoleHandler(backend, options = {}) {
   const completeWorkflows = typeof options.completeWorkflows === "function" ? options.completeWorkflows : null;
   const readDashboard = typeof options.dashboardFor === "function" ? options.dashboardFor : null;
 
-  async function withSheets(snapshot) {
-    const nextBase = { ...snapshot };
-    delete nextBase.dashboard;
-    let next = nextBase;
+  async function settledOptionalSheets(readers) {
+    const outcomes = await Promise.allSettled(readers.map(({ read }) =>
+      Promise.resolve().then(read)));
+    return readers.flatMap((reader, index) => {
+      const outcome = outcomes[index];
+      return outcome.status === "fulfilled" ? [[reader, outcome.value]] : [];
+    });
+  }
+
+  async function withCriticalSheets(snapshot) {
+    let next = { ...snapshot };
     if (typeof backend.list === "function") {
       try {
+        // This live-only metadata prevents destination navigation/chrome from
+        // blanking. Keep the core read controlled and outside provider fan-out.
         next = { ...next, activeProjects: await backend.list() };
       } catch {
         /* live project list is optional */
       }
     }
-    if (readDashboard) {
-      try {
-        const dashboard = validatedDashboardSnapshot(readDashboard());
-        if (dashboard) next = { ...next, dashboard };
-      } catch {
-        /* optional live tracking renders its unavailable state on provider failure */
+    if (snapshot.origin === "subagent") return next;
+
+    const readers = [];
+    if (readOffer) readers.push({ key: "offer", read: () => readOffer(snapshot.id) });
+    if (readApproval) readers.push({ key: "approval", read: () => readApproval(snapshot.id) });
+    if (readLoginSheet) readers.push({ key: "loginSheet", read: () => readLoginSheet(snapshot.id) });
+    if (readOverlay) readers.push({ key: "overlay", read: () => readOverlay(snapshot.id) });
+    if (sessionModeFor || inFindMode) {
+      readers.push({
+        key: "sessionMode",
+        read: () => sessionModeFor?.(snapshot.id) ?? (inFindMode?.(snapshot.id) ? "find" : null),
+      });
+    }
+    if (workflowsFor) readers.push({ key: "workflows", read: () => workflowsFor(snapshot.id) });
+
+    // These optional facades are independent. allSettled isolates failure while
+    // descriptor order keeps the resulting snapshot merge deterministic.
+    for (const [reader, value] of await settledOptionalSheets(readers)) {
+      if (reader.key === "workflows") {
+        if (Array.isArray(value) && value.length > 0) next = { ...next, workflows: value };
+      } else if (value) {
+        next = { ...next, [reader.key]: value };
       }
     }
-    if (snapshot.origin === "subagent") {
-      if (readProgress) {
-        try {
-          const progress = await readProgress(snapshot.id);
-          if (progress) next = { ...next, progress };
-        } catch {
-          /* passive child progress is optional */
-        }
-      }
-      return next;
-    }
-    if (readCaseFile) {
-      try {
-        const caseFile = await readCaseFile(snapshot.id);
-        if (caseFile) next = { ...next, caseFile };
-      } catch {
-        /* working memory casefile is optional */
-      }
-    }
-    if (readOffer) {
-      try {
-        const offer = await readOffer(snapshot.id);
-        if (offer) next = { ...next, offer };
-      } catch {
-        /* leftover offer is optional */
-      }
-    }
-    if (readCase) {
-      try {
-        const caseFile = await readCase(snapshot.id);
-        if (caseFile) next = { ...next, caseFile };
-      } catch {
-        /* architect case file is optional */
-      }
-    }
-    if (readApproval) {
-      try {
-        const approval = await readApproval(snapshot.id);
-        if (approval) next = { ...next, approval };
-      } catch {
-        /* pending approval is optional */
-      }
-    }
-    if (readLoginSheet) {
-      try {
-        const loginSheet = await readLoginSheet(snapshot.id);
-        if (loginSheet) next = { ...next, loginSheet };
-      } catch {
-        /* login sheet is optional */
-      }
-    }
-    if (readOverlay) {
-      try {
-        const overlay = await readOverlay(snapshot.id);
-        if (overlay) next = { ...next, overlay };
-      } catch {
-        /* session overlay is optional */
-      }
-    }
-    if (readProgress) {
-      try {
-        const progress = await readProgress(snapshot.id);
-        if (progress) next = { ...next, progress };
-      } catch {
-        /* download chip is optional */
-      }
-    }
-    const mode = sessionModeFor?.(snapshot.id) ?? (inFindMode?.(snapshot.id) ? "find" : null);
-    if (mode) next = { ...next, sessionMode: mode };
-    const listed = workflowsFor?.(snapshot.id);
-    if (Array.isArray(listed) && listed.length > 0) next = { ...next, workflows: listed };
     const work = findWork.get(snapshot.id);
     if (work) next = { ...next, findWork: work };
     return next;
+  }
+
+  async function withSecondarySheets(snapshot) {
+    const nextBase = { ...snapshot };
+    // Dashboard snapshots are cache-like provider projections. Never retain a
+    // previous cycle when the provider is absent, invalid, or unavailable.
+    delete nextBase.dashboard;
+    let next = nextBase;
+    const readers = [];
+    if (readDashboard) readers.push({ key: "dashboard", read: () => readDashboard() });
+    if (snapshot.origin !== "subagent" && readCaseFile) {
+      readers.push({ key: "caseFile", read: () => readCaseFile(snapshot.id) });
+    }
+    if (readProgress) readers.push({ key: "progress", read: () => readProgress(snapshot.id) });
+
+    for (const [reader, value] of await settledOptionalSheets(readers)) {
+      if (reader.key === "dashboard") {
+        const dashboard = validatedDashboardSnapshot(value);
+        if (dashboard) next = { ...next, dashboard };
+      } else if (value) {
+        next = { ...next, [reader.key]: value };
+      }
+    }
+    return next;
+  }
+
+  async function withSheets(snapshot, policy = SHEET_ENRICHMENT_POLICIES.FULL) {
+    if (policy !== SHEET_ENRICHMENT_POLICIES.FULL
+      && policy !== SHEET_ENRICHMENT_POLICIES.LIVE_SWITCH_CRITICAL) {
+      throw new Error("qq-ui: unknown sheet enrichment policy");
+    }
+    const base = { ...snapshot };
+    if (!policy.secondary) {
+      // Enforce omission even if a backend/fixture happens to carry UI fields.
+      for (const key of SECONDARY_SHEET_KEYS) delete base[key];
+    }
+    const critical = await withCriticalSheets(base);
+    return policy.secondary ? withSecondarySheets(critical) : critical;
   }
 
   async function projectsSessions(snapshot, serverTimings = null) {
@@ -1199,7 +1204,7 @@ export function createConsoleHandler(backend, options = {}) {
     }
   }
 
-  async function view(sessionId, serverTimings = null) {
+  async function view(sessionId, serverTimings = null, enrichmentPolicy = SHEET_ENRICHMENT_POLICIES.FULL) {
     const readStartedAt = timingNow();
     const snapshot = await backend.read(sessionId);
     if (serverTimings) {
@@ -1227,7 +1232,9 @@ export function createConsoleHandler(backend, options = {}) {
       });
     }
     const sheetsStartedAt = timingNow();
-    const enriched = await withSheets({ ...snapshot, sessions: available });
+    const enriched = await withSheets({ ...snapshot, sessions: available }, enrichmentPolicy);
+    // On session-switch-ready this field is critical enrichment time only; full
+    // secondary reconciliation is deliberately outside the readiness envelope.
     if (serverTimings) serverTimings.serverSheetsMs = timingDuration(sheetsStartedAt);
     return enriched;
   }
@@ -1380,12 +1387,12 @@ export function createConsoleHandler(backend, options = {}) {
     if (typeof backend.observe !== "function") {
       throw new Error("qq-ui: qq service observe() is required");
     }
-    const { initialSnapshot = null, ...observeOptions } = extra;
+    const { initialSnapshot = null, deferSheets = false, ...observeOptions } = extra;
     const intervalMs = observeOptions.intervalMs ?? ssePollMs;
     const hasSheets = Boolean(
       typeof backend.list === "function"
       || readCaseFile || readOffer || readOverlay || readProgress || readApproval || readLoginSheet
-      || inFindMode || sessionModeFor || workflowsFor || readCase || readDashboard,
+      || inFindMode || sessionModeFor || workflowsFor || readDashboard,
     );
     let cancelled = false;
     let sheets = sheetFields(initialSnapshot);
@@ -1424,12 +1431,20 @@ export function createConsoleHandler(backend, options = {}) {
       timer = setTimeout(tickSheets, intervalMs);
       timer.unref?.();
     };
-    if (hasSheets) void tickSheets();
-    return () => {
+    let sheetReconciliationStarted = false;
+    const startSheetReconciliation = () => {
+      if (cancelled || !hasSheets || sheetReconciliationStarted) return;
+      sheetReconciliationStarted = true;
+      void tickSheets();
+    };
+    if (!deferSheets) startSheetReconciliation();
+    const stopWatching = () => {
       cancelled = true;
       clearTimeout(timer);
       try { stopObserve?.(); } catch {}
     };
+    stopWatching.startSheetReconciliation = startSheetReconciliation;
+    return stopWatching;
   }
 
   function navigationResponse(req, res, location, head = false) {
@@ -2095,7 +2110,13 @@ export function createConsoleHandler(backend, options = {}) {
         }
         if (!snapshot) {
           const viewStartedAt = timingNow();
-          snapshot = await view(selected.sessionId, serverTimings);
+          snapshot = await view(
+            selected.sessionId,
+            serverTimings,
+            bootstrapSession
+              ? SHEET_ENRICHMENT_POLICIES.LIVE_SWITCH_CRITICAL
+              : SHEET_ENRICHMENT_POLICIES.FULL,
+          );
           if (serverTimings) serverTimings.serverViewMs = timingDuration(viewStartedAt);
         }
         if (projectRoute && snapshot.project && snapshot.project !== projectRoute.project) {
@@ -2239,7 +2260,7 @@ export function createConsoleHandler(backend, options = {}) {
           return;
         }
         writeObservation(error, next);
-      }, { initialSnapshot: snapshot });
+      }, { initialSnapshot: snapshot, deferSheets: bootstrapSession });
       if (bootstrapSession) {
         tick = tick.then(async () => {
           if (closed || res.destroyed || res.writableEnded) return;
@@ -2358,6 +2379,10 @@ export function createConsoleHandler(backend, options = {}) {
           const buffered = bufferedObservation;
           bufferedObservation = null;
           if (buffered) writeObservation(buffered.error, buffered.next);
+          // Secondary acquisition starts only after ready was emitted, flushed,
+          // and the bootstrap's bounded secondary placeholders were delivered.
+          // Poll results re-enter normal destination-bound reconciliation.
+          stop?.startSheetReconciliation?.();
         }).catch((error) => {
           // Failures outside the isolated secondary render loop indicate a
           // broken stream/reconciliation path, not an optional region failure.
@@ -2804,6 +2829,7 @@ export const internals = Object.freeze({
   SECURITY_HEADERS,
   LIVE_ASSET_FILES,
   SERVICE_WORKER_NAMES: [...SERVICE_WORKER_NAMES],
+  SHEET_ENRICHMENT_POLICIES,
   assetNames: Object.keys(bundledAssets),
   file: fileURLToPath(import.meta.url),
   compilingFindPrompt,
