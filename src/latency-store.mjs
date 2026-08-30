@@ -13,6 +13,15 @@ import {
 export const LATENCY_BATCH_SCHEMA = "qq.visual-latency-batch/v1";
 export const LATENCY_LOG_SCHEMA = "qq.ui-latency-log/v1";
 export const MAX_LATENCY_BODY_BYTES = 256 * 1024;
+// Ten minutes admits the observed 159-second pre-open outlier while rejecting
+// implausible/unbounded payload numbers at both browser and persistence edges.
+export const MAX_SESSION_SWITCH_SERVER_TIMING_MS = 600_000;
+export const SESSION_SWITCH_SERVER_TIMING_FIELDS = Object.freeze([
+  "serverViewMs", "serverReadMs", "serverSessionsMs", "serverSheetsMs",
+  "serverRenderLoadMs", "serverSurfaceMs", "serverLiveStateMs", "serverFingerprintsMs",
+  "serverChromeRenderMs", "serverTranscriptRenderMs", "serverLiveRenderMs", "serverQueueRenderMs",
+  "serverPopupsRenderMs", "serverComposerRenderMs", "serverCriticalRenderMs",
+]);
 export const DEFAULT_LATENCY_LOG_MAX_BYTES = 16 * 1024 * 1024;
 // Per-array protocol candidate limits. The aggregate HTTP body cap remains the
 // final bound; the browser byte-packs prefixes of these candidates below its
@@ -165,13 +174,30 @@ function sanitizeStage(candidate, index) {
   const value = plainObject(candidate, label, new Set([
     "sequence", "at", "event", "kind", "requestId", "originId", "originLatencyMs",
     "dispatchLatencyMs", "requestCompleteLatencyMs", "conversationSequence", "channel",
-    "sessionSwitchId", "target", "action",
+    "sessionSwitchId", "target", "action", ...SESSION_SWITCH_SERVER_TIMING_FIELDS,
   ]));
+  const kind = oneOf(text(value.kind, `${label}.kind`, 64, { empty: false }), `${label}.kind`, STAGE_KINDS);
+  const presentServerTimingFields = SESSION_SWITCH_SERVER_TIMING_FIELDS.filter((field) => Object.hasOwn(value, field));
+  if (presentServerTimingFields.length > 0
+    && presentServerTimingFields.length !== SESSION_SWITCH_SERVER_TIMING_FIELDS.length) {
+    throw schemaError(`${label} server timings must be complete or absent`);
+  }
+  const serverTimings = {};
+  for (const field of SESSION_SWITCH_SERVER_TIMING_FIELDS) {
+    if (!Object.hasOwn(value, field)) continue;
+    if (kind !== "session-switch-ready") {
+      throw schemaError(`${label}.${field} is only allowed on session-switch-ready`);
+    }
+    serverTimings[field] = number(value[field], `${label}.${field}`, {
+      minimum: 0,
+      maximum: MAX_SESSION_SWITCH_SERVER_TIMING_MS,
+    });
+  }
   return {
     sequence: sequence(value.sequence, `${label}.sequence`),
     at: number(value.at, `${label}.at`, { minimum: 0 }),
     event: oneOf(text(value.event, `${label}.event`, 64, { empty: false }), `${label}.event`, STAGE_EVENTS),
-    kind: oneOf(text(value.kind, `${label}.kind`, 64, { empty: false }), `${label}.kind`, STAGE_KINDS),
+    kind,
     requestId: idOrNull(value.requestId, `${label}.requestId`),
     originId: idOrNull(value.originId, `${label}.originId`),
     originLatencyMs: optionalNumber(value.originLatencyMs, `${label}.originLatencyMs`, { minimum: 0 }),
@@ -186,6 +212,7 @@ function sanitizeStage(candidate, index) {
     sessionSwitchId: idOrNull(value.sessionSwitchId ?? null, `${label}.sessionSwitchId`),
     target: targetLabel(value.target, `${label}.target`),
     action: actionLabel(value.action, `${label}.action`),
+    ...serverTimings,
   };
 }
 

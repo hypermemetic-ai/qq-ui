@@ -7,6 +7,7 @@ import {
   createLatencyStore,
   MAX_LATENCY_BODY_BYTES,
   sanitizeLatencyBatch,
+  SESSION_SWITCH_SERVER_TIMING_FIELDS,
 } from "./latency-store.mjs";
 import {
   codeDispatchNodes as bundledCodeDispatchNodes,
@@ -987,6 +988,27 @@ export function createConsoleHandler(backend, options = {}) {
   const basePath = normalizeBasePath(options.basePath);
   const ssePollMs = positiveInteger(options.ssePollMs, DEFAULT_SSE_POLL_MS, "ssePollMs");
   const liveAssets = options.liveAssets === true;
+  // Production always uses the monotonic Performance API. The option is a
+  // narrow proof seam so phase boundaries can be deterministic without sleeps.
+  const performanceNow = typeof options.performanceNow === "function"
+    ? options.performanceNow
+    : () => performance.now();
+  const timingNow = () => {
+    const value = Number(performanceNow());
+    return Number.isFinite(value) ? value : 0;
+  };
+  const roundedTiming = (value) => {
+    const finite = Number.isFinite(value) ? Math.max(0, value) : 0;
+    return Number(finite.toFixed(3));
+  };
+  const timingDuration = (startedAt) => roundedTiming(timingNow() - startedAt);
+  const addTimingDuration = (left, right) => {
+    const total = left + right;
+    return Number.isFinite(total) ? roundedTiming(total) : Number.MAX_VALUE;
+  };
+  const emptySwitchServerTimings = () => Object.fromEntries(
+    SESSION_SWITCH_SERVER_TIMING_FIELDS.map((field) => [field, 0]),
+  );
   const latencyPersistence = options.latencyPersistence !== false;
   const latencyPath = `${basePath}/ui-latency`;
   const latencyStore = latencyPersistence
@@ -1134,7 +1156,7 @@ export function createConsoleHandler(backend, options = {}) {
     return next;
   }
 
-  async function projectsSessions(snapshot) {
+  async function projectsSessions(snapshot, serverTimings = null) {
     if (snapshot?.origin !== "subagent") {
       return [{
         id: snapshot.id,
@@ -1145,6 +1167,7 @@ export function createConsoleHandler(backend, options = {}) {
       }];
     }
     if (!snapshot.parent) return [];
+    const readStartedAt = timingNow();
     try {
       const parent = await backend.read(snapshot.parent);
       if (parent?.origin === "subagent" || parent?.scope !== "projects") return [];
@@ -1157,16 +1180,32 @@ export function createConsoleHandler(backend, options = {}) {
       }];
     } catch {
       return [];
+    } finally {
+      if (serverTimings) {
+        serverTimings.serverReadMs = addTimingDuration(
+          serverTimings.serverReadMs,
+          timingDuration(readStartedAt),
+        );
+      }
     }
   }
 
-  async function view(sessionId) {
+  async function view(sessionId, serverTimings = null) {
+    const readStartedAt = timingNow();
     const snapshot = await backend.read(sessionId);
+    if (serverTimings) {
+      serverTimings.serverReadMs = addTimingDuration(
+        serverTimings.serverReadMs,
+        timingDuration(readStartedAt),
+      );
+    }
+    const sessionsStartedAt = timingNow();
     const available = snapshot.scope === "home" && typeof backend.listHome === "function"
       ? await backend.listHome()
       : snapshot.scope === "projects"
-        ? await projectsSessions(snapshot)
+        ? await projectsSessions(snapshot, serverTimings)
         : await backend.list(snapshot.project, snapshot.folder ?? "");
+    if (serverTimings) serverTimings.serverSessionsMs = timingDuration(sessionsStartedAt);
     if (snapshot.id
       && snapshot.origin !== "subagent"
       && !available.some((session) => session.id === snapshot.id)) {
@@ -1178,7 +1217,10 @@ export function createConsoleHandler(backend, options = {}) {
         ...(snapshot.folder ? { folder: snapshot.folder } : {}),
       });
     }
-    return withSheets({ ...snapshot, sessions: available });
+    const sheetsStartedAt = timingNow();
+    const enriched = await withSheets({ ...snapshot, sessions: available });
+    if (serverTimings) serverTimings.serverSheetsMs = timingDuration(sheetsStartedAt);
+    return enriched;
   }
 
   async function assertChairMutation(sessionId) {
@@ -2015,6 +2057,7 @@ export function createConsoleHandler(backend, options = {}) {
         ? Number(switchValue)
         : switchValue;
       let snapshot;
+      const serverTimings = bootstrapSession ? emptySwitchServerTimings() : null;
       let handedOffSnapshot = false;
       let handoffRender = null;
       try {
@@ -2027,7 +2070,11 @@ export function createConsoleHandler(backend, options = {}) {
           );
           handedOffSnapshot = snapshot !== null;
         }
-        if (!snapshot) snapshot = await view(selected.sessionId);
+        if (!snapshot) {
+          const viewStartedAt = timingNow();
+          snapshot = await view(selected.sessionId, serverTimings);
+          if (serverTimings) serverTimings.serverViewMs = timingDuration(viewStartedAt);
+        }
         if (projectRoute && snapshot.project && snapshot.project !== projectRoute.project) {
           text(res, 404, "DSH session is not in this project");
           return;
@@ -2053,6 +2100,9 @@ export function createConsoleHandler(backend, options = {}) {
         : streamHeaders);
       res.flushHeaders?.();
       res.socket?.setNoDelay?.(true);
+      // Authoritative post-open wall phase starts at the first server work after
+      // headers and includes observer/bootstrap setup through ready creation.
+      const serverCriticalStartedAt = bootstrapSession ? timingNow() : null;
       if (bootstrapSession && snapshot.id) lastViewedSessionId = snapshot.id;
       let closed = false;
       let keepalive;
@@ -2173,12 +2223,23 @@ export function createConsoleHandler(backend, options = {}) {
           let render;
           let surface;
           try {
+            let phaseStartedAt = timingNow();
             render = await loadRender();
+            serverTimings.serverRenderLoadMs = timingDuration(phaseStartedAt);
+
+            phaseStartedAt = timingNow();
             surface = consoleFoldWindow(snapshot);
-            const append = render.renderSettledTranscriptAppend(null, surface);
+            serverTimings.serverSurfaceMs = timingDuration(phaseStartedAt);
+
+            phaseStartedAt = timingNow();
             liveState = render.liveTranscriptUpdate(null, surface).state;
+            serverTimings.serverLiveStateMs = timingDuration(phaseStartedAt);
+
+            phaseStartedAt = timingNow();
+            const append = render.renderSettledTranscriptAppend(null, surface);
             fingerprints = render.regionFingerprints(surface);
             settledKeys = append.keys;
+            serverTimings.serverFingerprintsMs = timingDuration(phaseStartedAt);
             initialized = true;
             const meta = {
               id: snapshot.id,
@@ -2194,16 +2255,44 @@ export function createConsoleHandler(backend, options = {}) {
             // batch. Baseline commitment precedes ready, so the browser can
             // safely adopt the transcript/live sequence namespace at ready.
             res.write(sseEvent("switch-meta", JSON.stringify(meta)));
-            res.write(sseEvent("chrome", render.renderSessionRegion("chrome", surface, paths)));
-            res.write(sseEvent("transcript-reset", render.transcriptSettledInner(surface)));
-            res.write(sseEvent("live", render.renderLiveNodes(surface)));
-            res.write(sseEvent("queue", render.renderSessionRegion("queue", surface, paths)));
-            res.write(sseEvent("popups", render.renderSessionRegion("popups", surface, paths)));
-            res.write(sseEvent("composer-shell", render.renderComposer(surface, paths)));
-            res.write(sseEvent("switch-ready", JSON.stringify({
-              id: snapshot.id,
-              generation: switchGeneration,
-            })));
+
+            phaseStartedAt = timingNow();
+            const chromeHtml = render.renderSessionRegion("chrome", surface, paths);
+            serverTimings.serverChromeRenderMs = timingDuration(phaseStartedAt);
+            res.write(sseEvent("chrome", chromeHtml));
+
+            phaseStartedAt = timingNow();
+            const transcriptHtml = render.transcriptSettledInner(surface);
+            serverTimings.serverTranscriptRenderMs = timingDuration(phaseStartedAt);
+            res.write(sseEvent("transcript-reset", transcriptHtml));
+
+            phaseStartedAt = timingNow();
+            const liveHtml = render.renderLiveNodes(surface);
+            serverTimings.serverLiveRenderMs = timingDuration(phaseStartedAt);
+            res.write(sseEvent("live", liveHtml));
+
+            phaseStartedAt = timingNow();
+            const queueHtml = render.renderSessionRegion("queue", surface, paths);
+            serverTimings.serverQueueRenderMs = timingDuration(phaseStartedAt);
+            res.write(sseEvent("queue", queueHtml));
+
+            phaseStartedAt = timingNow();
+            const popupsHtml = render.renderSessionRegion("popups", surface, paths);
+            serverTimings.serverPopupsRenderMs = timingDuration(phaseStartedAt);
+            res.write(sseEvent("popups", popupsHtml));
+
+            phaseStartedAt = timingNow();
+            const composerHtml = render.renderComposer(surface, paths);
+            serverTimings.serverComposerRenderMs = timingDuration(phaseStartedAt);
+            res.write(sseEvent("composer-shell", composerHtml));
+
+            // Serialize once before closing the authoritative total so payload
+            // object creation is inside the measured critical computation. The
+            // final serialization only replaces the total's initial zero.
+            const readyPayload = { id: snapshot.id, generation: switchGeneration, timings: serverTimings };
+            JSON.stringify(readyPayload);
+            serverTimings.serverCriticalRenderMs = timingDuration(serverCriticalStartedAt);
+            res.write(sseEvent("switch-ready", JSON.stringify(readyPayload)));
             // Flush readiness before even rendering secondary regions. A plain
             // Node response has no flush(), so also yield one event-loop turn to
             // let its writes reach the socket before secondary HTML is computed.

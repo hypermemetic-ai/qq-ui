@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 import { readFile, unlink } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { defaultLatencyLogPath } from "../src/latency-store.mjs";
+import {
+  defaultLatencyLogPath,
+  MAX_SESSION_SWITCH_SERVER_TIMING_MS,
+  SESSION_SWITCH_SERVER_TIMING_FIELDS,
+} from "../src/latency-store.mjs";
 
 const ENTRY_KINDS = ["origins", "stages", "visuals"];
 const REQUEST_METRICS = [
@@ -502,10 +506,23 @@ function admissionTimingRows(stages, visuals) {
   };
 }
 
-const SWITCH_METRICS = [
+const SWITCH_CLIENT_METRICS = [
   "switchToResponse", "switchToSseOpen", "switchToMeta", "switchToInitialTranscript", "switchToInitialLive", "switchToReady",
   "switchToFirstPresentation", "readyToFirstPresentation", "interactionToReady", "interactionToFirstPresentation",
 ];
+const switchServerMetricName = (field) => field.slice(0, -2);
+const SWITCH_SERVER_METRICS = SESSION_SWITCH_SERVER_TIMING_FIELDS.map(switchServerMetricName);
+const SWITCH_METRICS = [...SWITCH_CLIENT_METRICS, ...SWITCH_SERVER_METRICS];
+const validSwitchServerTimings = (stage) => {
+  if (!stage || SESSION_SWITCH_SERVER_TIMING_FIELDS.some((field) => !Object.hasOwn(stage, field))) return null;
+  const result = {};
+  for (const field of SESSION_SWITCH_SERVER_TIMING_FIELDS) {
+    const value = finite(stage[field]);
+    if (value === null || value < 0 || value > MAX_SESSION_SWITCH_SERVER_TIMING_MS) return null;
+    result[field] = value;
+  }
+  return result;
+};
 
 function sessionSwitchTimingRows(stages, visuals) {
   const switches = new Map();
@@ -543,6 +560,10 @@ function sessionSwitchTimingRows(stages, visuals) {
     const transcript = at((entry) => ["transcript", "transcript-reset"].includes(fixedStageChannel(entry)));
     const live = at((entry) => fixedStageChannel(entry) === "live");
     const ready = at((entry) => entry.kind === "session-switch-ready" || fixedStageChannel(entry) === "switch-ready");
+    // Server phases are accepted only from the exact correlated ready record.
+    // Never infer them from client intervals or an unvalidated switch-ready SSE stage.
+    const readyStage = state.stages.find(({ entry }) => entry.kind === "session-switch-ready")?.entry ?? null;
+    const serverTimings = validSwitchServerTimings(readyStage);
     state.visuals.sort(ordered);
     const presentation = ready === null ? null
       : state.visuals.find(({ entry }) => nonnegative(entry.at) !== null && entry.at >= ready)?.entry ?? null;
@@ -560,6 +581,9 @@ function sessionSwitchTimingRows(stages, visuals) {
         : rounded(start.originLatencyMs + (ready - start.at)),
       interactionToFirstPresentation: nonnegative(start?.originLatencyMs) === null || presentationAt === null ? null
         : rounded(start.originLatencyMs + (presentationAt - start.at)),
+      ...Object.fromEntries(SESSION_SWITCH_SERVER_TIMING_FIELDS.map((field) => [
+        switchServerMetricName(field), serverTimings?.[field] ?? null,
+      ])),
     };
     if (!start || ready === null || presentationAt === null) {
       incomplete += 1;

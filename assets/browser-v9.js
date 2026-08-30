@@ -70,6 +70,26 @@
       "switch-meta", "chrome", "usage", "transcript-reset", "transcript", "live", "queue", "children",
       "popups", "case", "composer-shell", "switch-ready", "ui", "live-append", "live-tool-append",
     ]);
+    const sessionSwitchServerTimingFields = [
+      "serverViewMs", "serverReadMs", "serverSessionsMs", "serverSheetsMs",
+      "serverRenderLoadMs", "serverSurfaceMs", "serverLiveStateMs", "serverFingerprintsMs",
+      "serverChromeRenderMs", "serverTranscriptRenderMs", "serverLiveRenderMs", "serverQueueRenderMs",
+      "serverPopupsRenderMs", "serverComposerRenderMs", "serverCriticalRenderMs",
+    ];
+    const maximumSessionSwitchServerTimingMs = 600_000;
+    const normalizeSessionSwitchServerTimings = (value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)
+        || Object.keys(value).length !== sessionSwitchServerTimingFields.length
+        || Object.keys(value).some((field) => !sessionSwitchServerTimingFields.includes(field))) return null;
+      const result = {};
+      for (const field of sessionSwitchServerTimingFields) {
+        const duration = value[field];
+        if (typeof duration !== "number" || !Number.isFinite(duration)
+          || duration < 0 || duration > maximumSessionSwitchServerTimingMs) return null;
+        result[field] = round(duration);
+      }
+      return result;
+    };
     const timingFields = [
       "startTime", "redirectStart", "redirectEnd", "workerStart", "fetchStart", "domainLookupStart",
       "domainLookupEnd", "connectStart", "secureConnectionStart", "connectEnd", "requestStart", "responseStart",
@@ -1145,6 +1165,7 @@
         origin: latestInteraction && at - latestInteraction.at <= 2_000 ? latestInteraction : null,
         readyAt: null,
         baselineCommitted: false,
+        serverTimings: null,
       };
       // A pending prompt from the outgoing transcript cannot safely be matched
       // against historical nodes in the incoming session.
@@ -1167,11 +1188,20 @@
       });
       return sessionSwitch.id;
     };
-    const markSessionSwitchMilestone = (sessionSwitchId, kind, target = null) => {
+    const markSessionSwitchServerTimings = (sessionSwitchId, value) => {
+      if (!active || !sessionSwitchId || activeSessionSwitch?.id !== sessionSwitchId
+        || activeSessionSwitch.baselineCommitted) return false;
+      activeSessionSwitch.serverTimings = normalizeSessionSwitchServerTimings(value);
+      return activeSessionSwitch.serverTimings !== null;
+    };
+    const markSessionSwitchMilestone = (sessionSwitchId, kind, target = null, serverTimings = null) => {
       if (!active || !sessionSwitchId || activeSessionSwitch?.id !== sessionSwitchId
         || !["session-switch-response", "session-switch-ready"].includes(kind)
         || (kind === "session-switch-ready" && activeSessionSwitch.baselineCommitted)) return false;
       const at = now();
+      const acceptedServerTimings = kind === "session-switch-ready"
+        ? normalizeSessionSwitchServerTimings(serverTimings ?? activeSessionSwitch.serverTimings)
+        : null;
       appendBounded("stages", {
         at: round(at),
         event: "qq:sessionSwitch",
@@ -1186,6 +1216,7 @@
         sessionSwitchId,
         target: safeTargetLabel(target) ?? activeSessionSwitch.target,
         action: activeSessionSwitch.action,
+        ...(acceptedServerTimings ?? {}),
       });
       if (kind === "session-switch-ready") {
         activeSessionSwitch.readyAt = at;
@@ -1292,8 +1323,9 @@
       start, stop, clear, snapshot, summary, report, markStreamPaint, markNavigationIntent, markSessionSwitch,
       markSessionSwitchResponse: (sessionSwitchId, target) =>
         markSessionSwitchMilestone(sessionSwitchId, "session-switch-response", target),
-      markSessionSwitchReady: (sessionSwitchId, target) =>
-        markSessionSwitchMilestone(sessionSwitchId, "session-switch-ready", target),
+      markSessionSwitchReady: (sessionSwitchId, target, serverTimings = null) =>
+        markSessionSwitchMilestone(sessionSwitchId, "session-switch-ready", target, serverTimings),
+      normalizeSessionSwitchServerTimings, markSessionSwitchServerTimings,
     });
 
     let querySetting = null;
@@ -2885,7 +2917,10 @@
     // switch-ready is intentionally cancelled before htmx's no-op swap, so it
     // has no htmx:sseMessage callback. Commit the incoming sequence namespace
     // here, after every transcript/live bootstrap frame and payload validation.
-    if (state.latencySwitchId) qqLatency.markSessionSwitchReady(state.latencySwitchId, document.body);
+    if (state.latencySwitchId) {
+      qqLatency.markSessionSwitchServerTimings(state.latencySwitchId, payload.timings);
+      qqLatency.markSessionSwitchReady(state.latencySwitchId, document.body);
+    }
     if (state.history === "push" && normalizedCanonical(meta.canonical)) {
       const canonical = normalizedCanonical(meta.canonical);
       history.replaceState(sessionHistoryState(liveSessionId, canonical), "", canonical);
@@ -4568,7 +4603,17 @@
         state.meta = payload;
         return;
       }
-      finishLiveSwitch(payload);
+      const readyKeys = payload && typeof payload === "object" && !Array.isArray(payload)
+        ? Object.keys(payload) : [];
+      const timingEnvelopeIsFixed = readyKeys.every((key) => ["id", "generation", "timings"].includes(key));
+      if (!timingEnvelopeIsFixed) return;
+      finishLiveSwitch({
+        id: state.id,
+        generation: state.generation,
+        timings: timingEnvelopeIsFixed
+          ? qqLatency.normalizeSessionSwitchServerTimings(payload.timings)
+          : null,
+      });
       return;
     }
     if (elt instanceof HTMLElement && elt.id === "ui-generation") {
