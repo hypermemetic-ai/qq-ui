@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { orderedProjectPlaces, projectPlaceIdentity } from "./project-order.mjs";
@@ -30,6 +31,9 @@ import {
 
 const MAX_FORM_BYTES = 524_288;
 const DEFAULT_SSE_POLL_MS = 100;
+const INITIAL_SNAPSHOT_HANDOFF_MAX_ENTRIES = 32;
+const INITIAL_SNAPSHOT_HANDOFF_TTL_MS = 8_000;
+const INITIAL_SNAPSHOT_HANDOFF_PARAMETER = "handoff";
 const LAST_SESSION_COOKIE = "qq-last-session";
 const LAST_SESSION_ID = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DASHBOARD_SCHEMA = "qq.dashboard/v1";
@@ -37,6 +41,106 @@ const DASHBOARD_SESSION_ID = LAST_SESSION_ID;
 const DASHBOARD_UUID_TEXT = /(?:session-)?[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
 const DASHBOARD_PHASES = new Set(["planning", "plan", "work", "none", "unknown"]);
 const DASHBOARD_USAGE_STATES = new Set(["ready", "estimated", "stale", "unavailable"]);
+
+function normalizedHandoffBinding(binding) {
+  return {
+    sessionId: String(binding?.sessionId ?? ""),
+    project: binding?.project === null || binding?.project === undefined
+      ? null
+      : String(binding.project),
+    folder: binding?.folder === null || binding?.folder === undefined
+      ? null
+      : String(binding.folder),
+  };
+}
+
+function sameHandoffBinding(left, right) {
+  return left.sessionId === right.sessionId
+    && left.project === right.project
+    && left.folder === right.folder;
+}
+
+/**
+ * Short-lived one-shot bridge between a rendered page and only that page's
+ * initial EventSource. This is deliberately not a reusable snapshot cache.
+ */
+export function createInitialSnapshotHandoffStore({
+  maxEntries = INITIAL_SNAPSHOT_HANDOFF_MAX_ENTRIES,
+  ttlMs = INITIAL_SNAPSHOT_HANDOFF_TTL_MS,
+  now = Date.now,
+  createToken = () => randomBytes(24).toString("base64url"),
+} = {}) {
+  if (!Number.isSafeInteger(maxEntries) || maxEntries < 1) {
+    throw new Error("qq-ui: initial snapshot handoff maxEntries must be a positive integer");
+  }
+  if (!Number.isSafeInteger(ttlMs) || ttlMs < 1) {
+    throw new Error("qq-ui: initial snapshot handoff ttlMs must be a positive integer");
+  }
+  if (typeof now !== "function" || typeof createToken !== "function") {
+    throw new Error("qq-ui: initial snapshot handoff clock and token factory are required");
+  }
+  const entries = new Map();
+  const prune = (at = now()) => {
+    for (const [token, entry] of entries) {
+      if (entry.expiresAt <= at) entries.delete(token);
+    }
+  };
+  const issue = (binding, snapshot) => {
+    const at = now();
+    prune(at);
+    let token = "";
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      token = String(createToken());
+      if (/^[A-Za-z0-9_-]{24,128}$/.test(token) && !entries.has(token)) break;
+      token = "";
+    }
+    if (!token) throw new Error("qq-ui: could not allocate an opaque initial snapshot handoff");
+    while (entries.size >= maxEntries) entries.delete(entries.keys().next().value);
+    entries.set(token, {
+      binding: normalizedHandoffBinding(binding),
+      snapshot,
+      expiresAt: at + ttlMs,
+    });
+    return token;
+  };
+  const consume = (token, binding) => {
+    const at = now();
+    prune(at);
+    if (typeof token !== "string" || !/^[A-Za-z0-9_-]{24,128}$/.test(token)) return null;
+    const entry = entries.get(token);
+    if (!entry) return null;
+    // Delete before checking identity: both successful use and probing mismatch
+    // are terminal, so a copied token can never be replayed against another route.
+    entries.delete(token);
+    if (entry.expiresAt <= at
+      || !sameHandoffBinding(entry.binding, normalizedHandoffBinding(binding))) return null;
+    return entry.snapshot;
+  };
+  const discard = (token) => entries.delete(String(token ?? ""));
+  const clear = () => entries.clear();
+  return Object.freeze({
+    issue,
+    consume,
+    discard,
+    clear,
+    get size() {
+      prune();
+      return entries.size;
+    },
+  });
+}
+
+function snapshotHandoffBinding(sessionId, project, folder) {
+  return normalizedHandoffBinding({
+    sessionId,
+    project: project ? project : null,
+    folder: project && folder ? folder : null,
+  });
+}
+
+function eventsWithSnapshotHandoff(events, token) {
+  return `${events}${events.includes("?") ? "&" : "?"}${INITIAL_SNAPSHOT_HANDOFF_PARAMETER}=${encodeURIComponent(token)}`;
+}
 
 function dashboardText(value, { empty = false, display = false } = {}) {
   if (typeof value !== "string") return null;
@@ -908,6 +1012,15 @@ export function createConsoleHandler(backend, options = {}) {
     uiRevision: liveAssets ? formatUiRevision(readUiRevision()) : BOOT_REVISION_LABEL,
   });
   const streams = new Set();
+  const initialSnapshotHandoffs = options.initialSnapshotHandoffs
+    ?? createInitialSnapshotHandoffStore();
+  if (!initialSnapshotHandoffs
+    || typeof initialSnapshotHandoffs.issue !== "function"
+    || typeof initialSnapshotHandoffs.consume !== "function"
+    || typeof initialSnapshotHandoffs.discard !== "function"
+    || typeof initialSnapshotHandoffs.clear !== "function") {
+    throw new Error("qq-ui: invalid initial snapshot handoff store");
+  }
   const findWork = new Map();
   let lastViewedSessionId = "";
   const readOffer = typeof options.offerFor === "function" ? options.offerFor : null;
@@ -1836,24 +1949,46 @@ export function createConsoleHandler(backend, options = {}) {
         }
         const paths = routes(basePath, snapshot.id, snapshot.project, snapshot.folder);
         const drawer = await drawerView(snapshot.project, url, false, snapshot.folder);
+        const pageSnapshot = consoleFoldWindow({ ...snapshot, drawer });
         const serverViewDuration = Math.max(0, performance.now() - serverViewStartedAt);
         const serverRenderStartedAt = performance.now();
         const { renderPage } = await loadRender();
-        const body = renderPage(consoleFoldWindow({ ...snapshot, drawer }), paths, pageAssetPaths());
+        let handoffToken = "";
+        if (!head && snapshot.id && paths.events) {
+          handoffToken = initialSnapshotHandoffs.issue(
+            snapshotHandoffBinding(snapshot.id, snapshot.project, snapshot.folder),
+            pageSnapshot,
+          );
+        }
+        const pagePaths = handoffToken
+          ? Object.freeze({ ...paths, events: eventsWithSnapshotHandoff(paths.events, handoffToken) })
+          : paths;
+        let body;
+        try {
+          body = renderPage(pageSnapshot, pagePaths, pageAssetPaths());
+        } catch (error) {
+          if (handoffToken) initialSnapshotHandoffs.discard(handoffToken);
+          throw error;
+        }
         const serverRenderDuration = Math.max(0, performance.now() - serverRenderStartedAt);
         if (snapshot.id) lastViewedSessionId = snapshot.id;
-        write(
-          res,
-          200,
-          rememberSessionHeaders(snapshot.id, {
-            "Content-Type": "text/html; charset=utf-8",
-            // Fixed privacy-safe phases only: no descriptions, route values, or
-            // session identifiers are exposed through Server-Timing.
-            "Server-Timing": `qq-view;dur=${serverViewDuration.toFixed(3)}, qq-render;dur=${serverRenderDuration.toFixed(3)}`,
-          }),
-          body,
-          head,
-        );
+        try {
+          write(
+            res,
+            200,
+            rememberSessionHeaders(snapshot.id, {
+              "Content-Type": "text/html; charset=utf-8",
+              // Fixed privacy-safe phases only: no descriptions, route values, or
+              // session identifiers are exposed through Server-Timing.
+              "Server-Timing": `qq-view;dur=${serverViewDuration.toFixed(3)}, qq-render;dur=${serverRenderDuration.toFixed(3)}`,
+            }),
+            body,
+            head,
+          );
+        } catch (error) {
+          if (handoffToken) initialSnapshotHandoffs.discard(handoffToken);
+          throw error;
+        }
       } catch (error) {
         if (await fallbackProjectsResponse(req, res, head, url)) return;
         if (projectRoute?.project && isMissingSession(error)) {
@@ -1880,8 +2015,19 @@ export function createConsoleHandler(backend, options = {}) {
         ? Number(switchValue)
         : switchValue;
       let snapshot;
+      let handedOffSnapshot = false;
+      let handoffRender = null;
       try {
-        snapshot = await view(selected.sessionId);
+        // A live-switch bootstrap always proves fresh destination truth. Only a
+        // page's ordinary initial EventSource may consume its one-shot handoff.
+        if (!bootstrapSession) {
+          snapshot = initialSnapshotHandoffs.consume(
+            url.searchParams.get(INITIAL_SNAPSHOT_HANDOFF_PARAMETER),
+            snapshotHandoffBinding(selected.sessionId, projectRoute?.project, projectRoute?.folder),
+          );
+          handedOffSnapshot = snapshot !== null;
+        }
+        if (!snapshot) snapshot = await view(selected.sessionId);
         if (projectRoute && snapshot.project && snapshot.project !== projectRoute.project) {
           text(res, 404, "DSH session is not in this project");
           return;
@@ -1890,6 +2036,7 @@ export function createConsoleHandler(backend, options = {}) {
           text(res, 404, "DSH session is not in this project");
           return;
         }
+        if (handedOffSnapshot) handoffRender = await loadRender();
       } catch (error) {
         text(res, errorStatus(error), `DSH session unavailable: ${errorMessage(error)}`);
         return;
@@ -1931,6 +2078,16 @@ export function createConsoleHandler(backend, options = {}) {
       let tick = Promise.resolve();
       let bootstrapping = bootstrapSession;
       let bufferedObservation = null;
+      if (handedOffSnapshot) {
+        // Commit the exact object rendered into the page as this stream's
+        // baseline. The immediately attached observer can now reconcile only
+        // later truth instead of repainting the page or calling view() again.
+        const append = handoffRender.renderSettledTranscriptAppend(null, snapshot);
+        liveState = handoffRender.liveTranscriptUpdate(null, snapshot).state;
+        fingerprints = handoffRender.regionFingerprints(snapshot);
+        settledKeys = append.keys;
+        initialized = true;
+      }
       if (!bootstrapSession) res.write(sseEvent("ui", lastUiGeneration));
       const writeLiveFrames = (next) => {
         if (closed || res.destroyed || res.writableEnded) return;
@@ -2014,52 +2171,86 @@ export function createConsoleHandler(backend, options = {}) {
         tick = tick.then(async () => {
           if (closed || res.destroyed || res.writableEnded) return;
           let render;
+          let surface;
           try {
             render = await loadRender();
+            surface = consoleFoldWindow(snapshot);
+            const append = render.renderSettledTranscriptAppend(null, surface);
+            liveState = render.liveTranscriptUpdate(null, surface).state;
+            fingerprints = render.regionFingerprints(surface);
+            settledKeys = append.keys;
+            initialized = true;
+            const meta = {
+              id: snapshot.id,
+              generation: switchGeneration,
+              canonical: paths.canonical,
+              project: snapshot.project ?? "",
+              folder: snapshot.folder ?? "",
+              scope: snapshot.scope ?? "",
+              origin: snapshot.origin ?? "",
+              parent: snapshot.parent ?? "",
+            };
+            // Critical destination truth and interaction arrive as one ordered
+            // batch. Baseline commitment precedes ready, so the browser can
+            // safely adopt the transcript/live sequence namespace at ready.
+            res.write(sseEvent("switch-meta", JSON.stringify(meta)));
+            res.write(sseEvent("chrome", render.renderSessionRegion("chrome", surface, paths)));
+            res.write(sseEvent("transcript-reset", render.transcriptSettledInner(surface)));
+            res.write(sseEvent("live", render.renderLiveNodes(surface)));
+            res.write(sseEvent("queue", render.renderSessionRegion("queue", surface, paths)));
+            res.write(sseEvent("popups", render.renderSessionRegion("popups", surface, paths)));
+            res.write(sseEvent("composer-shell", render.renderComposer(surface, paths)));
+            res.write(sseEvent("switch-ready", JSON.stringify({
+              id: snapshot.id,
+              generation: switchGeneration,
+            })));
+            // Flush readiness before even rendering secondary regions. A plain
+            // Node response has no flush(), so also yield one event-loop turn to
+            // let its writes reach the socket before secondary HTML is computed.
+            if (typeof res.flush === "function") res.flush();
+            await new Promise((resolve) => setImmediate(resolve));
           } catch (error) {
-            res.write(sseEvent("console-error", errorMessage(error)));
+            if (!closed && !res.destroyed && !res.writableEnded) {
+              res.write(sseEvent("console-error", errorMessage(error)));
+            }
             close();
             return;
           }
-          const surface = consoleFoldWindow(snapshot);
-          const append = render.renderSettledTranscriptAppend(null, surface);
-          liveState = render.liveTranscriptUpdate(null, surface).state;
-          fingerprints = render.regionFingerprints(surface);
-          settledKeys = append.keys;
-          initialized = true;
-          const meta = {
-            id: snapshot.id,
-            generation: switchGeneration,
-            canonical: paths.canonical,
-            project: snapshot.project ?? "",
-            folder: snapshot.folder ?? "",
-            scope: snapshot.scope ?? "",
-            origin: snapshot.origin ?? "",
-            parent: snapshot.parent ?? "",
-          };
-          res.write(sseEvent("switch-meta", JSON.stringify(meta)));
-          res.write(sseEvent("chrome", render.renderSessionRegion("chrome", surface, paths)));
-          res.write(sseEvent("usage", render.renderSessionRegion("usage", surface, paths)));
-          res.write(sseEvent("transcript-reset", render.transcriptSettledInner(surface)));
-          res.write(sseEvent("live", render.renderLiveNodes(surface)));
-          res.write(sseEvent("queue", render.renderSessionRegion("queue", surface, paths)));
-          res.write(sseEvent("children", render.renderSessionRegion("children", surface, paths)));
-          res.write(sseEvent("popups", render.renderSessionRegion("popups", surface, paths)));
-          res.write(sseEvent("case", render.renderSessionRegion("case", surface, paths)));
-          res.write(sseEvent("composer-shell", render.renderComposer(surface, paths)));
-          res.write(sseEvent("switch-ready", JSON.stringify({
-            id: snapshot.id,
-            generation: switchGeneration,
-          })));
-          res.write(sseEvent("ui", lastUiGeneration));
-          if (typeof res.flush === "function") res.flush();
+
+          // Keep observations buffered through this bounded batch. Ready has
+          // already been flushed, so secondary work cannot delay critical
+          // presentation or race newer truth ahead of bootstrap ordering.
+          const secondaryErrors = [];
+          for (const name of ["usage", "children", "case"]) {
+            if (closed || res.destroyed || res.writableEnded) return;
+            let html;
+            try {
+              html = render.renderSessionRegion(name, surface, paths);
+            } catch (error) {
+              // Ensure the next observation retries a region that did not make
+              // it into this bootstrap, without invalidating critical readiness.
+              delete fingerprints[name];
+              secondaryErrors.push(error);
+              continue;
+            }
+            res.write(sseEvent(name, html));
+          }
+          if (!closed && !res.destroyed && !res.writableEnded) {
+            res.write(sseEvent("ui", lastUiGeneration));
+            if (secondaryErrors.length > 0) {
+              res.write(sseEvent("console-error", "Secondary session regions could not be rendered"));
+            }
+            if (typeof res.flush === "function") res.flush();
+          }
           bootstrapping = false;
           const buffered = bufferedObservation;
           bufferedObservation = null;
           if (buffered) writeObservation(buffered.error, buffered.next);
         }).catch((error) => {
+          // Failures outside the isolated secondary render loop indicate a
+          // broken stream/reconciliation path, not an optional region failure.
           if (closed || res.destroyed || res.writableEnded) return;
-          res.write(sseEvent("console-error", errorMessage(error)));
+          try { res.write(sseEvent("console-error", errorMessage(error))); } catch {}
           close();
         });
       }
@@ -2482,6 +2673,7 @@ export function createConsoleHandler(backend, options = {}) {
       try { stream.destroy(); } catch {}
     }
     streams.clear();
+    initialSnapshotHandoffs.clear();
   };
   return consoleHandler;
 }
