@@ -1618,7 +1618,7 @@
   const hideSessionConnectors = () => {
     const svg = sessionConnectors();
     if (!(svg instanceof SVGElement)) return;
-    svg.hidden = true;
+    svg.setAttribute("hidden", "");
     svg.replaceChildren();
   };
   const connectorOverflowClientRect = (element) => {
@@ -1642,25 +1642,19 @@
   };
   const connectorCoordinate = (value) => Math.floor(value) + .5;
   const connectorPathData = (projectRect, groupRect, narrow) => {
-    const startX = connectorCoordinate(projectRect.right);
+    // Let the route visibly lead out of and back into the related surfaces.
+    // Edge-only endpoints disappear into the PWA pane divider and can look
+    // detached on desktop even when the SVG itself is painting correctly.
+    const projectInset = Math.min(8, projectRect.width / 3);
+    const groupInset = Math.min(8, groupRect.width / 3);
+    const startX = connectorCoordinate(projectRect.right - projectInset);
     const startY = connectorCoordinate(projectRect.top + projectRect.height / 2);
-    const endX = connectorCoordinate(groupRect.left);
+    const endX = connectorCoordinate(groupRect.left + groupInset);
     const endY = connectorCoordinate(groupRect.top + groupRect.height / 2);
-    if (!narrow) {
-      const elbowX = connectorCoordinate((projectRect.right + groupRect.left) / 2);
-      return {
-        d: `M ${startX} ${startY} H ${elbowX} V ${endY} H ${endX}`,
-        layout: "desktop",
-      };
-    }
-    // In the mobile 50/50 chooser, turning on the pane divider reads as part
-    // of the split rather than as a relationship. Carry the line briefly
-    // inside the visible session group, then return to its left boundary.
-    const branchInset = Math.min(12, groupRect.width / 2);
-    const branchX = connectorCoordinate(groupRect.left + branchInset);
+    const laneX = connectorCoordinate((projectRect.right + groupRect.left) / 2);
     return {
-      d: `M ${startX} ${startY} H ${branchX} V ${endY} H ${endX}`,
-      layout: "narrow",
+      d: `M ${startX} ${startY} H ${laneX} V ${endY} H ${endX}`,
+      layout: narrow ? "narrow" : "desktop",
     };
   };
   const connectorProjectItem = (group) => {
@@ -1706,7 +1700,8 @@
     svg.setAttribute("width", String(width));
     svg.setAttribute("height", String(height));
     svg.replaceChildren(paths);
-    svg.hidden = count === 0;
+    if (count === 0) svg.setAttribute("hidden", "");
+    else svg.removeAttribute("hidden");
   };
   const scheduleSessionConnectors = () => {
     if (sessionConnectorFrame) return;
