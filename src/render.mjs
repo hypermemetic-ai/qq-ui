@@ -1913,8 +1913,8 @@ function isKeyPrefix(previous, next) {
 
 /**
  * HTML for newly settled nodes only. `#transcript-settled` is append-only after
- * first paint unless a surface replace drops nodes, in which case the cell is
- * recommissioned.
+ * first paint unless an authoritative projected replacement drops nodes, in
+ * which case the cell is recommissioned.
  */
 export function renderSettledTranscriptAppend(previousKeys, snapshot) {
   const { settled } = splitTranscriptNodes(sessionNodes(snapshot));

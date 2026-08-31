@@ -1185,72 +1185,72 @@ const postSwapSse = (targetFixture, type, target, userNodes) => {
 };
 
 // The first two composer turns arrive as ordinary live child insertions.
-const foldAdmission = fixture({ initialUserSequences: [1] });
+const replacementAdmission = fixture({ initialUserSequences: [1] });
 const transcriptReplacement = new FakeElement("div", { id: "transcript-settled" });
-const knownOne = foldAdmission.document.userNodes[0];
+const knownOne = replacementAdmission.document.userNodes[0];
 const liveThree = userNode(3);
-promptRequest(foldAdmission, {}, 10);
-foldAdmission.setNow(200);
-foldAdmission.observers[0].emit([{
+promptRequest(replacementAdmission, {}, 10);
+replacementAdmission.setNow(200);
+replacementAdmission.observers[0].emit([{
   type: "childList", target: transcriptReplacement, addedNodes: [liveThree],
 }]);
-foldAdmission.frame(216);
+replacementAdmission.frame(216);
 const liveFive = userNode(5);
-promptRequest(foldAdmission, {}, 300);
-foldAdmission.setNow(500);
-foldAdmission.observers[0].emit([{
+promptRequest(replacementAdmission, {}, 300);
+replacementAdmission.setNow(500);
+replacementAdmission.observers[0].emit([{
   type: "childList", target: transcriptReplacement, addedNodes: [liveFive],
 }]);
-foldAdmission.frame(516);
-let admittedStages = foldAdmission.api.snapshot().stages.filter((stage) => stage.kind === "prompt-admitted");
+replacementAdmission.frame(516);
+let admittedStages = replacementAdmission.api.snapshot().stages.filter((stage) => stage.kind === "prompt-admitted");
 assert.deepEqual(admittedStages.map((stage) => [stage.requestId, stage.conversationSequence]), [
   ["request-1", 3], ["request-2", 5],
 ], "the first two live-insert user nodes are FIFO-correlated exactly once");
-assert.deepEqual(foldAdmission.api.snapshot().visuals
+assert.deepEqual(replacementAdmission.api.snapshot().visuals
   .filter((visual) => visual.activeRequestId)
   .map((visual) => visual.activeRequestId), ["request-1", "request-2"],
 "each of the first two admissions owns exactly one presentation context");
 
-// With CONSOLE_PAIRS=2, the third and later user turns commonly arrive inside
+// Authoritative projected replacements can deliver newly admitted turns inside
 // a post-swap transcript-reset rather than as standalone live insertions.
-const foldedSeven = userNode(7, transcriptReplacement);
-promptRequest(foldAdmission, {}, 600);
-foldAdmission.setNow(800);
-postSwapSse(foldAdmission, "transcript-reset", transcriptReplacement, [liveThree, liveFive, foldedSeven]);
-foldAdmission.observers[0].emit([{
-  type: "childList", target: transcriptReplacement, addedNodes: [liveThree, liveFive, foldedSeven],
+const resetSeven = userNode(7, transcriptReplacement);
+promptRequest(replacementAdmission, {}, 600);
+replacementAdmission.setNow(800);
+postSwapSse(replacementAdmission, "transcript-reset", transcriptReplacement, [liveThree, liveFive, resetSeven]);
+replacementAdmission.observers[0].emit([{
+  type: "childList", target: transcriptReplacement, addedNodes: [liveThree, liveFive, resetSeven],
 }]);
-foldAdmission.frame(816);
-const foldedNine = userNode(9, transcriptReplacement);
-promptRequest(foldAdmission, {}, 900);
-foldAdmission.setNow(1_100);
-postSwapSse(foldAdmission, "transcript-reset", transcriptReplacement, [liveFive, foldedSeven, foldedNine]);
-foldAdmission.observers[0].emit([{
-  type: "childList", target: transcriptReplacement, addedNodes: [liveFive, foldedSeven, foldedNine],
+replacementAdmission.frame(816);
+const resetNine = userNode(9, transcriptReplacement);
+promptRequest(replacementAdmission, {}, 900);
+replacementAdmission.setNow(1_100);
+postSwapSse(replacementAdmission, "transcript-reset", transcriptReplacement, [liveFive, resetSeven, resetNine]);
+replacementAdmission.observers[0].emit([{
+  type: "childList", target: transcriptReplacement, addedNodes: [liveFive, resetSeven, resetNine],
 }]);
-foldAdmission.frame(1_116);
-admittedStages = foldAdmission.api.snapshot().stages.filter((stage) => stage.kind === "prompt-admitted");
+replacementAdmission.frame(1_116);
+admittedStages = replacementAdmission.api.snapshot().stages.filter((stage) => stage.kind === "prompt-admitted");
 assert.deepEqual(admittedStages.map((stage) => [stage.requestId, stage.conversationSequence]), [
   ["request-1", 3], ["request-2", 5], ["request-3", 7], ["request-4", 9],
-], "third and later fold-reset admissions retain FIFO request identity and emit once");
+], "projected-replacement admissions retain FIFO request identity and emit once");
 for (const requestId of ["request-3", "request-4"]) {
-  assert.equal(foldAdmission.api.snapshot().visuals.filter((visual) =>
+  assert.equal(replacementAdmission.api.snapshot().visuals.filter((visual) =>
     visual.activeRequestId === requestId).length, 1,
-  `${requestId} owns exactly one fold-reset admission presentation`);
+  `${requestId} owns exactly one projected-replacement admission presentation`);
 }
 
-// Re-rendering an evicted-but-known sequence proves that a same-session reset
-// neither snapshots only the current fold nor clears historical identity.
-const admissionCountBeforeKnownReset = admissionKinds(foldAdmission).length;
-foldAdmission.setNow(1_200);
-postSwapSse(foldAdmission, "transcript-reset", transcriptReplacement, [knownOne, foldedSeven, foldedNine]);
-foldAdmission.observers[0].emit([{
-  type: "childList", target: transcriptReplacement, addedNodes: [knownOne, foldedSeven, foldedNine],
+// Re-rendering a sequence evicted by an authoritative cut proves that a
+// same-session reset does not clear historical admission identity.
+const admissionCountBeforeKnownReset = admissionKinds(replacementAdmission).length;
+replacementAdmission.setNow(1_200);
+postSwapSse(replacementAdmission, "transcript-reset", transcriptReplacement, [knownOne, resetSeven, resetNine]);
+replacementAdmission.observers[0].emit([{
+  type: "childList", target: transcriptReplacement, addedNodes: [knownOne, resetSeven, resetNine],
 }]);
-assert.equal(admissionKinds(foldAdmission).length, admissionCountBeforeKnownReset,
+assert.equal(admissionKinds(replacementAdmission).length, admissionCountBeforeKnownReset,
   "a same-session reset containing only known/re-rendered sequences emits no admission");
-foldAdmission.frame(1_216);
-foldAdmission.api.stop();
+replacementAdmission.frame(1_216);
+replacementAdmission.api.stop();
 
 const failedAdmission = fixture({ initialUserSequences: [10] });
 promptRequest(failedAdmission, {}, 10, { successful: false });

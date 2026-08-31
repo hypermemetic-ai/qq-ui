@@ -328,27 +328,6 @@ export function validatedDashboardSnapshot(candidate) {
     return null;
   }
 }
-/** Console chat is the architect fold floor: current operator pair plus previous. */
-export const CONSOLE_PAIRS = 2;
-
-export function consoleFoldWindow(snapshot) {
-  const nodes = Array.isArray(snapshot?.conversation?.nodes) ? snapshot.conversation.nodes : [];
-  const operatorStarts = [];
-  for (let index = 0; index < nodes.length; index += 1) {
-    if (nodes[index]?.kind !== "user") continue;
-    operatorStarts.push(index);
-  }
-  const start = operatorStarts.length > CONSOLE_PAIRS ? operatorStarts.at(-CONSOLE_PAIRS) : 0;
-  if (start === 0) return snapshot;
-  return {
-    ...snapshot,
-    conversation: {
-      ...(snapshot.conversation ?? {}),
-      nodes: nodes.slice(start),
-    },
-  };
-}
-
 const SECURITY_HEADERS = Object.freeze({
   "Cache-Control": "no-store",
   "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; media-src 'self' data:; connect-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
@@ -1961,7 +1940,7 @@ export function createConsoleHandler(backend, options = {}) {
           const paths = routes(basePath, "", projectRoute.project, projectRoute.folder);
           const drawer = await drawerView(projectRoute.project, url, false, projectRoute.folder);
           const { renderPage } = await loadRender();
-          const body = renderPage(consoleFoldWindow({ ...snapshot, drawer }), paths, pageAssetPaths());
+          const body = renderPage({ ...snapshot, drawer }, paths, pageAssetPaths());
           write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, body, head);
         } catch (error) {
           text(res, errorStatus(error), errorMessage(error), head);
@@ -2030,7 +2009,7 @@ export function createConsoleHandler(backend, options = {}) {
         }
         const paths = routes(basePath, snapshot.id, snapshot.project, snapshot.folder);
         const drawer = await drawerView(snapshot.project, url, false, snapshot.folder);
-        const pageSnapshot = consoleFoldWindow({ ...snapshot, drawer });
+        const pageSnapshot = { ...snapshot, drawer };
         const serverViewDuration = Math.max(0, performance.now() - serverViewStartedAt);
         const serverRenderStartedAt = performance.now();
         const { renderPage } = await loadRender();
@@ -2205,10 +2184,9 @@ export function createConsoleHandler(backend, options = {}) {
           return;
         }
         // Token frames must not wait behind loadRender or chrome HTML. The
-        // observe callback is the session/event hot path. Console sees the
-        // same two-pair window as first paint.
-        const surface = consoleFoldWindow(next);
-        writeLiveFrames(surface);
+        // observe callback is the session/event hot path. First paint and the
+        // live stream both consume the same authoritative core projection.
+        writeLiveFrames(next);
         tick = tick.then(async () => {
           if (closed || res.destroyed || res.writableEnded) {
             close();
@@ -2220,15 +2198,16 @@ export function createConsoleHandler(backend, options = {}) {
           } catch {
             return;
           }
-          const nextFp = render.regionFingerprints(surface);
+          const nextFp = render.regionFingerprints(next);
           const append = typeof render.renderSettledTranscriptAppend === "function"
-            ? render.renderSettledTranscriptAppend(settledKeys, surface)
+            ? render.renderSettledTranscriptAppend(settledKeys, next)
             : { keys: settledKeys, html: "" };
           const initial = !initialized;
           const changed = render.SSE_REGION_NAMES.filter((name) =>
             name !== "live" && name !== "transcript" && nextFp[name] !== fingerprints[name]);
           // Ordinary growth is already painted node-by-node by writeLiveFrames.
-          // Only a surface replace recommissions the settled prefix.
+          // Only an authoritative projected replacement recommissions the
+          // settled prefix.
           const transcriptHtml = !initial && append.reset ? append.html : "";
           const generation = readUiGeneration(liveAssets);
           const uiChanged = generation !== lastUiGeneration;
@@ -2244,13 +2223,13 @@ export function createConsoleHandler(backend, options = {}) {
           // identity is continuously represented when the queue region swaps.
           for (const name of changed) {
             if (name === "queue") continue;
-            res.write(sseEvent(name, renderSessionRegion(name, surface, paths)));
+            res.write(sseEvent(name, renderSessionRegion(name, next, paths)));
           }
           if (transcriptHtml) {
             res.write(sseEvent(append.reset ? "transcript-reset" : "transcript", transcriptHtml));
           }
           if (changed.includes("queue")) {
-            res.write(sseEvent("queue", renderSessionRegion("queue", surface, paths)));
+            res.write(sseEvent("queue", renderSessionRegion("queue", next, paths)));
           }
           if (uiChanged) {
             res.write(sseEvent("ui", generation));
@@ -2280,7 +2259,10 @@ export function createConsoleHandler(backend, options = {}) {
             serverTimings.serverRenderLoadMs = timingDuration(phaseStartedAt);
 
             phaseStartedAt = timingNow();
-            surface = consoleFoldWindow(snapshot);
+            // The core projection already owns conversation replacement cuts.
+            // Keep this timing phase for schema compatibility while selecting
+            // the destination snapshot unchanged.
+            surface = snapshot;
             serverTimings.serverSurfaceMs = timingDuration(phaseStartedAt);
 
             phaseStartedAt = timingNow();
