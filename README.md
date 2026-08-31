@@ -1,16 +1,16 @@
-# `@hypermemetic-ai/qq-ui`
+# @hypermemetic-ai/qq-ui
 
-Private ES-module package providing the server-rendered Cordis plugin for the qq operator console. The package root exports [`src/plugin.mjs`](src/plugin.mjs); additional public entry points expose the [HTTP app](src/http-app.mjs), [renderer](src/render.mjs), and [Markdown support](src/markdown.mjs).
+Private, server-rendered Cordis plugin for the qq operator console. The package is ESM; its main entry point and root export are [`src/plugin.mjs`](src/plugin.mjs).
 
 ## Setup and commands
 
-The package declares `@hypermemetic-ai/qq-core` as `file:../qq-core`, so dependency setup expects that sibling package at the stated relative path. No start script is defined in `package.json`; runtime integration begins at the plugin or one of the exported entry points above.
+[`package.json`](package.json) does not prescribe a package manager or declare a `start` script. It depends on `@hypermemetic-ai/qq-core` through `file:../qq-core`, so installation requires that sibling layout.
 
 ```sh
 npm test
 ```
 
-`npm test` performs syntax checks and runs the repository's established proof scripts. Focused package scripts are also available:
+The test script syntax-checks [`src/plugin.mjs`](src/plugin.mjs) and [`assets/browser-v9.js`](assets/browser-v9.js), then runs the repository's proof scripts. Useful declared subsets and reports are:
 
 ```sh
 npm run prove:sessions-rendered
@@ -20,36 +20,25 @@ npm run prove:prompt-geometry
 npm run latency:report
 ```
 
-## Console menu contributions
+Run `npm test` before handing off a change; the targeted commands are narrower feedback loops, not replacements for the full suite.
 
-The plugin provides a scoped Cordis service named `qq-ui`. Optional sibling plugins can dynamically inject that service and register a navigation entry without making qq-ui depend on the sibling:
+## System map
 
-```js
-const off = ui.consoleMenu.register({
-  kind: "navigation",
-  id: "example-plugin",
-  label: "Example",
-  href: "/example",
-  order: 100,
-});
-```
+| Boundary | Start here |
+| --- | --- |
+| Cordis package integration | [`src/plugin.mjs`](src/plugin.mjs), the package main and root export |
+| HTTP application | [`src/http-app.mjs`](src/http-app.mjs), also exported as `./http` |
+| Server rendering | [`src/render.mjs`](src/render.mjs), also exported as `./render` |
+| Markdown | [`src/markdown.mjs`](src/markdown.mjs), also exported as `./markdown` |
+| Browser behavior and presentation | [`assets/browser-v9.js`](assets/browser-v9.js) and [`assets/console.css`](assets/console.css) |
 
-`register()` accepts navigation descriptors only and returns an idempotent unregister function. Labels are rendered as escaped text, `href` must be a safe same-origin absolute path, duplicate IDs are rejected, and entries are ordered by `order`, label, then ID. Contributed links use native full-document navigation so the sibling owns its document, styles, scripts, and fragment handling. Bind the disposer to the contributor's Cordis effect so plugin reloads cannot leave stale entries.
+`src/http-app.mjs` and `src/render.mjs` have the highest relative-module fan-in, and both are frequent change points. Treat them as central boundaries: check their callers and run the full suite when changing them.
 
-## Repository map
+## Route a change
 
-- [`src/plugin.mjs`](src/plugin.mjs) — package root and Cordis plugin entry point.
-- [`src/http-app.mjs`](src/http-app.mjs) — exported HTTP boundary and the most-imported internal module.
-- [`src/render.mjs`](src/render.mjs) — exported rendering boundary and a frequent change surface.
-- [`src/markdown.mjs`](src/markdown.mjs) — exported Markdown boundary.
-- [`assets/browser-v9.js`](assets/browser-v9.js) and [`assets/console.css`](assets/console.css) — current high-change browser and styling surfaces. Versioned browser, service-worker, and offline assets are retained alongside them; do not assume similarly named older files are disposable without further evidence.
-- [`scripts/`](scripts/prove-sessions-rendered.mjs) — executable proofs and latency reporting. The full suite and exact order are defined by the `test` script in [`package.json`](package.json).
-- [`vendor/`](vendor/htmx-2.0.10.min.js) and [`vendor-pins.json`](vendor-pins.json) — tracked vendored files, licenses, and pin data.
+- **Package entry points or integration:** begin with [`src/plugin.mjs`](src/plugin.mjs) and the exports in [`package.json`](package.json).
+- **HTTP or rendered output:** begin with [`src/http-app.mjs`](src/http-app.mjs) and [`src/render.mjs`](src/render.mjs); related proof coverage includes [`scripts/prove-root-routing.mjs`](scripts/prove-root-routing.mjs), [`scripts/prove-selective-render-cache.mjs`](scripts/prove-selective-render-cache.mjs), and [`scripts/prove-sessions-rendered.mjs`](scripts/prove-sessions-rendered.mjs).
+- **Browser interaction or geometry:** begin with [`assets/browser-v9.js`](assets/browser-v9.js) and [`assets/console.css`](assets/console.css); use the declared prompt correlation and geometry commands above for focused checks.
+- **Latency instrumentation or reporting:** begin with [`src/latency-store.mjs`](src/latency-store.mjs) and [`scripts/report-ui-latency.mjs`](scripts/report-ui-latency.mjs); see [`wiki/latency-roadmap.md`](wiki/latency-roadmap.md).
 
-For a change to an exported boundary, start with its mapped `src` entry point and run `npm test`. For session rendering, prompt echo/correlation/geometry, or latency work, use the matching focused command above while iterating, then run the full suite.
-
-## Further orientation
-
-- [Operator console notes](wiki/operator-console.md)
-- [Latency roadmap](wiki/latency-roadmap.md)
-- [Wiki index](wiki/index.md)
+For repository-maintained context, continue with the [`wiki` index](wiki/index.md) and the [operator-console notes](wiki/operator-console.md).
