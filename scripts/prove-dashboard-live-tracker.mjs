@@ -586,16 +586,20 @@ assert.doesNotMatch(connectorSource, /targetVerticalScrollport|visibleConnectorS
   "right endpoint visibility never proxies through or requires overlap with the left project list");
 assert.match(connectorSource, /sessionConnectorLaneOrder[\s\S]*?canonicalOrderWorks[\s\S]*?reverseOrderWorks[\s\S]*?incoming/,
   "mixed vertical intervals produce deterministic pairwise constraints with canonical tie-breaking");
-assert.match(connectorSource, /SESSION_CONNECTOR_LANE_EDGE_GAP = 2[\s\S]*?SESSION_CONNECTOR_LANE_GAP = 6[\s\S]*?SESSION_CONNECTOR_MIN_LANE_GAP = 1\.25/,
-  "lanes retain defined project-edge, preferred, and minimum separation");
+assert.match(connectorSource, /SESSION_CONNECTOR_SPINE_GAP = 4[\s\S]*?SESSION_CONNECTOR_LANE_EDGE_GAP = 2[\s\S]*?SESSION_CONNECTOR_LANE_GAP = 6[\s\S]*?SESSION_CONNECTOR_MIN_LANE_GAP = 1\.25/,
+  "spines retain a quiet row-side gap while lanes keep defined project-edge, preferred, and minimum separation");
 assert.doesNotMatch(connectorSource, /SESSION_CONNECTOR_LANE_BUNDLE_RATIO|channelMidpoint|laneSpan/,
   "lane allocation contains no midpoint-derived bundle behavior");
-assert.match(connectorSource, /sessionConnectorBaseline[\s\S]*?Math\.abs\(preferred - sourceY\) >= 1[\s\S]*?preferred >= sourceY \? 2 : -2/,
-  "an exact source/baseline alignment selects another clear below-group baseline instead of collapsing its bend");
+assert.match(connectorSource, /sessionConnectorJoin[\s\S]*?preferred = \(spineTop \+ spineBottom\) \/ 2[\s\S]*?Math\.abs\(preferred - sourceY\) >= 1[\s\S]*?preferred >= sourceY \? 2 : -2/,
+  "the project route joins the spine at its stable midpoint and keeps an angular bend on exact source alignment");
+assert.match(connectorSource, /spineX = contentLeft - SESSION_CONNECTOR_SPINE_GAP[\s\S]*?spineTop = Math\.max\(target\.visible\.top, sessionsRect\.top\) \+ SESSION_CONNECTOR_INSET[\s\S]*?spineBottom = Math\.min\(target\.visible\.bottom, sessionsRect\.bottom\) - SESSION_CONNECTOR_INSET/,
+  "each endpoint is a clipped vertical spine immediately left of the matching session rows");
 assert.match(connectorSource, /channelStart = projectClip\.right - SESSION_CONNECTOR_INSET[\s\S]*?channelEnd[\s\S]*?Math\.min\(SESSION_CONNECTOR_LANE_GAP, maximumLaneSpan \/ \(routes\.length - 1\)\)[\s\S]*?firstLane = channelStart \+ SESSION_CONNECTOR_LANE_EDGE_GAP[\s\S]*?laneRanks[\s\S]*?routes\[index\]\.lane/,
   "every eligible route receives a unique adaptive lane beginning at the stable project-side gutter edge");
-assert.match(connectorSource, /setAttribute\("d", `M \${start\.x[^`]* H \${lane[^`]* V \${baseline[^`]* H \${endX/,
-  "every relationship is one continuous M/H/V/H path ending in its group underline");
+assert.match(connectorSource, /setAttribute\("d", `M \${start\.x[^`]* H \${lane[^`]* V \${joinY[^`]* H \${spineX[^`]* M \${spineX[^`]* \${spineTop[^`]* V \${spineBottom/,
+  "each relationship is one path element whose angular lead touches one vertical group spine");
+assert.doesNotMatch(connectorSource, /SESSION_CONNECTOR_BASELINE_GAP|sessionConnectorBaseline|endX|route\.baseline/,
+  "connector geometry contains no below-group baseline or underline endpoint");
 assert.doesNotMatch(connectorSource, /setAttribute\("d",[^\n]*[LQCSTA] \${/,
   "relationship path emission contains no diagonal, curved, or arc command");
 assert.match(browser, /const showLiveTrackerOverview[\s\S]*?scheduleSessionConnectors\(\)[\s\S]*?const showLiveTrackerProject[\s\S]*?suppressSessionConnectors\(\)/,
@@ -659,7 +663,7 @@ assert.match(css, /\.nav-mode \.project-rail \{[^}]*width:\s*50%[^}]*border-righ
 assert.match(css, /body:has\(\.live-tracker\[data-overview="true"\]\) \.project-rail \.active-project-item\[data-project\] \{[^}]*width:\s*calc\(100% - clamp\(2rem, 8vw, 3\.5rem\)\)/,
   "only overview project entries shorten their semantic attachment extent to lengthen source arms");
 assert.match(css, /@media \(max-width: 42rem\) \{[\s\S]*?\.nav-mode \.live-tracker\[data-overview="true"\] \.live-tracker-project \{[^}]*width:\s*min\(calc\(100% - 2rem\), 10rem\)/,
-  "narrow overview groups use a shorter full-group underline extent");
+  "narrow overview groups preserve compact row extents beside their vertical spines");
 assert.match(css, /@media \(min-width: 42\.01rem\) \{[\s\S]*?\.live-tracker\[data-overview="true"\] \{[^}]*position:\s*relative[^}]*inset-inline-end:\s*clamp\(2\.5rem, 5vw, 4rem\)[^}]*width:\s*12\.125rem[\s\S]*?\.live-tracker\[data-overview="true"\] \.live-tracker-project \{[^}]*width:\s*9rem/,
   "desktop overview shifts and constrains session content while leaving vertical lane allocation untouched");
 assert.doesNotMatch(css, /\.nav-mode \.project-rail \{[^}]*width:\s*42%|\.nav-mode \.session-traversal \{[^}]*width:\s*58%/,
@@ -694,7 +698,7 @@ assert.doesNotMatch(connectorPathStyle, /filter|animation|marker|drop-shadow|rou
   "relationship lines add no glow, animation, arrows, dots, or heavy rounding");
 const overviewStyle = css.match(/\.live-tracker\[data-overview="true"\] \{([^}]*)\}/)?.[1] ?? "";
 assert.match(overviewStyle, /flex-direction:\s*column[\s\S]*?gap:\s*\.9rem/,
-  "overview preserves project order and reserves clear below-group baseline space");
+  "overview preserves project order and quiet separation between adjacent group spines");
 assert.doesNotMatch(overviewStyle, /background|gradient|border|box-shadow/i,
   "overview grouping adds spacing only, not ornamental chrome");
 const overviewHeadingStyle = css.match(/\.live-tracker\[data-overview="true"\] \.live-tracker-project-name \{([^}]*)\}/)?.[1] ?? "";

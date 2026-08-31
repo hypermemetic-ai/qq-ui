@@ -2967,7 +2967,7 @@
   };
   const SESSION_CONNECTOR_ID = "session-connectors";
   const SESSION_CONNECTOR_INSET = 0.75;
-  const SESSION_CONNECTOR_BASELINE_GAP = 4;
+  const SESSION_CONNECTOR_SPINE_GAP = 4;
   const SESSION_CONNECTOR_LANE_EDGE_GAP = 2;
   const SESSION_CONNECTOR_LANE_GAP = 6;
   const SESSION_CONNECTOR_MIN_LANE_GAP = 1.25;
@@ -3036,15 +3036,19 @@
     sessionConnectorObserved = next;
     for (const node of next) sessionConnectorResizeObserver.observe(node);
   };
-  const sessionConnectorBaseline = (groupBottom, sourceY) => {
-    const preferred = groupBottom + SESSION_CONNECTOR_BASELINE_GAP;
+  const sessionConnectorJoin = (spineTop, spineBottom, sourceY) => {
+    const preferred = (spineTop + spineBottom) / 2;
     if (Math.abs(preferred - sourceY) >= 1) return preferred;
-    return preferred + (preferred >= sourceY ? 2 : -2);
+    return Math.min(spineBottom, Math.max(
+      spineTop,
+      preferred + (preferred >= sourceY ? 2 : -2),
+    ));
   };
   const sessionConnectorSegments = (route, lane) => [
     { axis: "h", fixed: route.start.y, from: route.start.x, to: lane },
-    { axis: "v", fixed: lane, from: route.start.y, to: route.baseline },
-    { axis: "h", fixed: route.baseline, from: lane, to: route.endX },
+    { axis: "v", fixed: lane, from: route.start.y, to: route.joinY },
+    { axis: "h", fixed: route.joinY, from: lane, to: route.spineX },
+    { axis: "v", fixed: route.spineX, from: route.spineTop, to: route.spineBottom },
   ];
   const sessionConnectorRangeContains = (value, start, end) => (
     value >= Math.min(start, end) - 0.01 && value <= Math.max(start, end) + 0.01
@@ -3139,15 +3143,17 @@
         x: source.rect.right - SESSION_CONNECTOR_INSET,
         y: (source.rect.top + source.rect.bottom) / 2,
       };
-      const baseline = sessionConnectorBaseline(target.rect.bottom, start.y);
       const contentLeft = Math.max(target.rect.left, sessionsRect.left);
-      const endX = Math.min(target.rect.right, sessionsRect.right, trackerClip.right) - SESSION_CONNECTOR_INSET;
+      const spineX = contentLeft - SESSION_CONNECTOR_SPINE_GAP;
+      const spineTop = Math.max(target.visible.top, sessionsRect.top) + SESSION_CONNECTOR_INSET;
+      const spineBottom = Math.min(target.visible.bottom, sessionsRect.bottom) - SESSION_CONNECTOR_INSET;
+      const joinY = sessionConnectorJoin(spineTop, spineBottom, start.y);
       const sourceAnchorVisible = start.y >= source.visible.top - 0.01
         && start.y <= source.visible.bottom + 0.01;
-      const baselineVisible = baseline >= trackerClip.top + SESSION_CONNECTOR_INSET
-        && baseline <= trackerClip.bottom - SESSION_CONNECTOR_INSET;
-      if (!sourceAnchorVisible || !baselineVisible || contentLeft - start.x < 4 || endX <= contentLeft) continue;
-      routes.push({ project, group, start, baseline, contentLeft, endX });
+      const spineVisible = spineBottom - spineTop >= 4
+        && spineTop >= trackerClip.top && spineBottom <= trackerClip.bottom;
+      if (!sourceAnchorVisible || !spineVisible || spineX - start.x < 4) continue;
+      routes.push({ project, group, start, joinY, contentLeft, spineX, spineTop, spineBottom });
     }
     const observe = [rail, projects, tracker, composerShell, ...groups.values()];
     if (routes.length === 0) {
@@ -3159,7 +3165,7 @@
     // allowed to rebalance the two horizontal runs; it must not drag this
     // independently routed vertical channel toward the gap midpoint.
     const channelStart = projectClip.right - SESSION_CONNECTOR_INSET;
-    const channelEnd = Math.min(...routes.map((route) => route.contentLeft));
+    const channelEnd = Math.min(...routes.map((route) => route.spineX));
     const channelWidth = channelEnd - channelStart;
     const usableWidth = channelWidth - (2 * SESSION_CONNECTOR_LANE_EDGE_GAP);
     const maximumLaneSpan = Math.max(0, usableWidth);
@@ -3196,11 +3202,13 @@
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.setAttribute("width", String(width));
     svg.setAttribute("height", String(height));
-    svg.replaceChildren(...routes.map(({ project, start, baseline, lane, endX }) => {
+    svg.replaceChildren(...routes.map(({
+      project, start, joinY, lane, spineX, spineTop, spineBottom,
+    }) => {
       const path = document.createElementNS(SESSION_CONNECTOR_NS, "path");
       path.dataset.project = project.dataset.project || "";
       path.dataset.folder = project.dataset.folder || "";
-      path.setAttribute("d", `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} H ${lane.toFixed(2)} V ${baseline.toFixed(2)} H ${endX.toFixed(2)}`);
+      path.setAttribute("d", `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} H ${lane.toFixed(2)} V ${joinY.toFixed(2)} H ${spineX.toFixed(2)} M ${spineX.toFixed(2)} ${spineTop.toFixed(2)} V ${spineBottom.toFixed(2)}`);
       return path;
     }));
     observeSessionConnectorSurfaces(observe);
