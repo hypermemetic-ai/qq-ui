@@ -141,11 +141,14 @@ const fixtureHtml = `<!doctype html>
 <header class="site-header"><span>geometry proof</span></header>
 <main><section id="session-panel" class="session-panel">
   <div id="transcript" class="transcript">
-    <div id="transcript-live" class="transcript-live">
-      <div id="transcript-live-nodes" class="transcript-live-nodes"></div>
-      <div id="session-queue" class="session-queue"></div>
-      <ol id="prompt-echoes" class="prompt-echoes" data-session-id="session-a" aria-live="off"></ol>
-      <div id="provider-gap" class="provider-gap" data-state="idle" aria-hidden="true"></div>
+    <div id="transcript-log" class="transcript-log">
+      <div id="transcript-settled" class="transcript-settled"></div>
+      <div id="transcript-live" class="transcript-live">
+        <div id="transcript-live-nodes" class="transcript-live-nodes"></div>
+        <div id="session-queue" class="session-queue"></div>
+        <ol id="prompt-echoes" class="prompt-echoes" data-session-id="session-a" aria-live="off"></ol>
+        <div id="provider-gap" class="provider-gap" data-state="idle" aria-hidden="true"></div>
+      </div>
     </div>
   </div>
 </section></main>
@@ -154,6 +157,7 @@ const fixtureHtml = `<!doctype html>
 const input = document.querySelector("textarea[name='prompt']");
 const form = document.querySelector("#composer");
 const transcript = document.querySelector("#transcript");
+const settledNodes = document.querySelector("#transcript-settled");
 const live = document.querySelector("#transcript-live");
 const liveNodes = document.querySelector("#transcript-live-nodes");
 const queue = document.querySelector("#session-queue");
@@ -227,6 +231,7 @@ const contentGeometry = (node, selector) => {
   };
 };
 const clearTranscript = async () => {
+  settledNodes.replaceChildren();
   liveNodes.replaceChildren();
   queue.replaceChildren();
   echoes.replaceChildren();
@@ -240,10 +245,11 @@ const startPrompt = async (text) => {
   const xhr = { status: 200, getResponseHeader: () => null };
   if (!controller.beforeRequest({ detail: { requestConfig, xhr } })) throw new Error("beforeRequest rejected geometry fixture");
   trackedIds.add(id);
+  const frameStart = frames.length;
   await settle();
   const echo = [...echoes.children].find((node) => node.getAttribute("data-client-message-id") === id);
   if (!echo) throw new Error("provisional echo missing");
-  return { id, xhr, echo, composerCleared: input.value === "" };
+  return { id, xhr, echo, composerCleared: input.value === "", frameStart };
 };
 const queueRow = ({ id, text, steering = false, editable = false }) => {
   const row = document.createElement("li");
@@ -315,8 +321,17 @@ const admittedNode = ({ id, text, steering = false }) => {
   return article;
 };
 
-const runLifecycle = async ({ name, text, steering = false }) => {
+const runLifecycle = async ({ name, text, steering = false, settled = false }) => {
   await clearTranscript();
+  if (settled) {
+    const prior = document.createElement("article");
+    prior.className = "message message-assistant";
+    const priorText = document.createElement("div");
+    priorText.className = "message-text";
+    priorText.textContent = "Earlier settled transcript content";
+    prior.append(priorText);
+    settledNodes.append(prior);
+  }
   const request = await startPrompt(text);
   const provisional = geometry(request.echo);
   const provisionalControlDisabled = request.echo.querySelector(".queue-remove button")?.disabled === true;
@@ -327,16 +342,33 @@ const runLifecycle = async ({ name, text, steering = false }) => {
   const authority = geometry(authorityNode);
   const authorityCount = identityCount(request.id);
   const authorityControlEnabled = authorityMarkup.button.disabled === false;
-  queue.replaceChildren();
+
+  // Model normal observation precisely: transcript authority arrives first and
+  // the queue-empty SSE is intentionally late. The production observer must
+  // retire the exact queue row in the insertion microtask, before any paint.
   const admittedMarkup = admittedNode({ id: request.id, text, steering });
-  liveNodes.replaceChildren(admittedMarkup);
+  if (settled) settledNodes.append(admittedMarkup);
+  else liveNodes.replaceChildren(admittedMarkup);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const delayedQueueRetired = queue.querySelector(".queue-item") === null;
+  queue.replaceChildren();
   await settle();
+
+  // A delayed/stale queue payload can race after transcript admission too. It
+  // must remove itself by exact identity in that same mutation microtask.
+  const staleAuthority = queueRow({ id: request.id, text, steering });
+  queue.replaceChildren(staleAuthority.section);
+  await settle();
+  const staleQueueRetired = queue.querySelector(".queue-item") === null;
   const admitted = geometry(admittedMarkup);
   const admittedCount = identityCount(request.id);
+  const handoffFrames = frames.slice(request.frameStart);
+  trackedIds.delete(request.id);
   return {
-    name, id: request.id, text, steering, provisional, authority, admitted,
+    name, id: request.id, text, steering, settled, provisional, authority, admitted,
     composerCleared: request.composerCleared,
     provisionalControlDisabled, authorityControlEnabled, authorityCount, admittedCount,
+    delayedQueueRetired, staleQueueRetired, handoffFrames,
   };
 };
 
@@ -406,6 +438,7 @@ const runEditorProbe = async () => {
     name: "steering-multiline",
     text: "Steering stays aligned across explicit lines.\\nA deliberately long continuation also wraps consistently on Android-sized viewports.",
     steering: true,
+    settled: true,
   });
   const rapid = await runRapidIdentical();
   const editor = await runEditorProbe();
@@ -520,6 +553,13 @@ const assertResult = (result, expected, name) => {
     assert.equal(scenario.authorityControlEnabled, true, `${label} authoritative controls are enabled`);
     assert.equal(scenario.authorityCount, 1, `${label} queue replacement leaves one identity`);
     assert.equal(scenario.admittedCount, 1, `${label} admission leaves one identity`);
+    assert.equal(scenario.delayedQueueRetired, true,
+      `${label} transcript authority retires the exact row before delayed queue-empty`);
+    assert.equal(scenario.staleQueueRetired, true,
+      `${label} a stale matching queue insertion self-retires before paint`);
+    assert.ok(scenario.handoffFrames.length >= 4, `${label} samples the handoff across several real frames`);
+    assert.equal(scenario.handoffFrames.every((frame) => frame[scenario.id] === 1), true,
+      `${label} exact identity count is one at every provisional → queue → admitted frame`);
     for (const [stage, geometry] of Object.entries({
       provisional: scenario.provisional,
       authority: scenario.authority,

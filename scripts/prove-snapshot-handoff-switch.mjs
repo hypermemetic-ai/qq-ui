@@ -442,6 +442,85 @@ async function proveFailureBoundaries() {
   delete globalThis.__qqProofWatchInitialSnapshot;
 }
 
+async function proveNormalAdmissionOrder() {
+  const clientMessageId = "710ec58a-a0f2-4ac4-8393-c866d813b8d7";
+  const baseSnapshot = snapshot();
+  const initial = {
+    ...baseSnapshot,
+    conversation: {
+      nodes: [{
+        key: "user:before", seq: 1, kind: "user", messageId: "before-core",
+        content: [{ type: "text", text: "before replacement" }],
+      }],
+      pending: [{
+        id: "admitted-core", placement: "queued", text: "exact admission", editable: true,
+        message: { source: { kind: "user", clientMessageId } },
+      }],
+    },
+  };
+  const admitted = {
+    ...baseSnapshot,
+    conversation: {
+      // A different first key proves an authoritative settled-prefix reset, not
+      // ordinary append-only growth, while this observation also empties queue.
+      nodes: [{
+        key: "user:admitted", seq: 2, kind: "user", messageId: "admitted-core", clientMessageId,
+        content: [{ type: "text", text: "exact admission" }],
+      }],
+      pending: [],
+    },
+  };
+  let observer = null;
+  const backend = {
+    defaultProject: "alpha",
+    defaultFolder: "",
+    listProjects: () => [{ name: "alpha", label: "alpha" }],
+    read: async () => structuredClone(initial),
+    list: async () => structuredClone(initial.sessions),
+    observe(_id, listener) {
+      observer = listener;
+      listener(null, structuredClone(initial));
+      return () => { observer = null; };
+    },
+    create: async () => structuredClone(initial),
+    prompt: async () => structuredClone(initial),
+    interrupt: async () => structuredClone(initial),
+    close: async () => ({ id: "", project: "alpha" }),
+  };
+  const handler = createConsoleHandler(backend, { basePath: "/qq", ssePollMs: 10_000 });
+  const req = new EventEmitter();
+  Object.assign(req, {
+    method: "GET",
+    url: `/qq/project/alpha/session/${sessionId}/events`,
+    headers: {},
+  });
+  const res = new FakeResponse();
+  await handler(req, res);
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (res.log.some((entry) => entry.type === "flush")) break;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const baselineEnd = res.log.length;
+  assert.equal(typeof observer, "function",
+    `normal stream retains its core observer after baseline: status=${res.status} body=${res.body} log=${JSON.stringify(res.log)}`);
+  observer(null, structuredClone(admitted));
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (res.log.slice(baselineEnd).some((entry) => entry.type === "event" && entry.event === "queue")) break;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const events = res.log.slice(baselineEnd)
+    .filter((entry) => entry.type === "event")
+    .map((entry) => entry.event);
+  const transcriptAt = events.indexOf("transcript-reset");
+  const queueAt = events.indexOf("queue");
+  assert.ok(transcriptAt >= 0,
+    `normal replacement emits settled transcript reset: events=${events.join(",")} log=${JSON.stringify(res.log.slice(baselineEnd))}`);
+  assert.ok(queueAt > transcriptAt,
+    `normal observation emits admitted transcript before queue removal: ${events.join(",")}`);
+  req.emit("close");
+  handler.dispose();
+}
+
 async function proveSwitchOrder() {
   const fixture = backendFixture({ bufferedChange: true });
   const handler = createConsoleHandler(fixture.backend, { ssePollMs: 10_000 });
@@ -479,5 +558,6 @@ async function proveSwitchOrder() {
 }
 
 await proveFailureBoundaries();
+await proveNormalAdmissionOrder();
 await proveSwitchOrder();
 console.log("prove-snapshot-handoff-switch: pass");

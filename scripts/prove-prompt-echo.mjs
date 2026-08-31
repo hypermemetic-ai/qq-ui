@@ -457,6 +457,57 @@ assert.equal(queueFirst.queue.children.length, 1, "queue-before-response immedia
 queueFirst.complete(queueFirstRequest);
 assert.equal(queueFirst.echoes.children.length, 0, "late durable completion cannot recreate a removed provisional");
 
+// Core authority handoff is continuous in either SSE order. A user node retires
+// only its exact server queue row; if an old queue payload arrives afterwards it
+// retires itself in the same observer turn.
+const admittedHandoff = browserFixture();
+const admittedRequest = admittedHandoff.submit("queue to admitted", new FakeXhr("admitted-core"));
+const admittedQueue = admittedHandoff.queued("admitted-core", "queue to admitted", {
+  clientMessageId: admittedRequest.clientMessageId,
+});
+const unrelatedQueue = admittedHandoff.queued("unrelated-core", "same text is irrelevant", {
+  clientMessageId: "00000000-0000-4000-8000-999999999991",
+});
+admittedHandoff.queue.append(admittedQueue, unrelatedQueue);
+admittedHandoff.observer.emit([{ type: "childList", target: admittedHandoff.queue, addedNodes: [admittedQueue, unrelatedQueue] }]);
+assert.equal(admittedHandoff.echoes.children.length, 0);
+const admittedUser = admittedHandoff.authoritative("admitted-core", {
+  clientMessageId: admittedRequest.clientMessageId,
+  text: "queue to admitted",
+});
+admittedHandoff.liveNodes.append(admittedUser);
+admittedHandoff.observer.emit([{ type: "childList", target: admittedHandoff.liveNodes, addedNodes: [admittedUser] }]);
+assert.deepEqual(admittedHandoff.queue.children, [unrelatedQueue],
+  "admitted user authority retires only its exact server queue row");
+assert.equal(admittedUser.parentElement, admittedHandoff.liveNodes,
+  "the admitted transcript user remains authoritative");
+const staleAdmittedQueue = admittedHandoff.queued("admitted-core", "queue to admitted", {
+  clientMessageId: admittedRequest.clientMessageId,
+});
+admittedHandoff.queue.append(staleAdmittedQueue);
+admittedHandoff.observer.emit([{ type: "childList", target: admittedHandoff.queue, addedNodes: [staleAdmittedQueue] }]);
+assert.deepEqual(admittedHandoff.queue.children, [unrelatedQueue],
+  "a stale exact queue insertion self-retires when its user already exists");
+
+const durableHandoff = browserFixture();
+const durableQueue = durableHandoff.queued("durable-handoff", "old projection queue");
+durableHandoff.queue.append(durableQueue);
+const correlatedUser = durableHandoff.authoritative("durable-handoff", {
+  clientMessageId: "00000000-0000-4000-8000-999999999992",
+  text: "old projection queue",
+});
+durableHandoff.liveNodes.append(correlatedUser);
+durableHandoff.observer.emit([{ type: "childList", target: durableHandoff.liveNodes, addedNodes: [correlatedUser] }]);
+assert.equal(durableHandoff.queue.children.length, 0,
+  "exact durable ID bridges a handoff when one old projection omits correlation");
+const conflictingQueue = durableHandoff.queued("durable-handoff", "conflicting correlation", {
+  clientMessageId: "00000000-0000-4000-8000-999999999993",
+});
+durableHandoff.queue.append(conflictingQueue);
+durableHandoff.observer.emit([{ type: "childList", target: durableHandoff.queue, addedNodes: [conflictingQueue] }]);
+assert.equal(conflictingQueue.parentElement, durableHandoff.queue,
+  "conflicting client identities never collapse through durable fallback");
+
 const liveInsert = browserFixture();
 const liveRequest = liveInsert.submit("live exact", new FakeXhr("live-core"));
 const liveTruth = liveInsert.authoritative("live-core", {
@@ -588,7 +639,10 @@ cleanupBrowser.windowListeners.get("pagehide")?.();
 assert.equal(cleanupBrowser.echoes.children.length, 0, "page cleanup removes all in-memory and DOM provisionals");
 assert.equal(cleanupBrowser.echoes.replaceChildrenCalls, 0);
 
-for (const fixture of [browser, queueFirst, liveInsert, resetInsert, unmatched, ordered, oldCore, cleanupBrowser]) {
+for (const fixture of [
+  browser, queueFirst, admittedHandoff, durableHandoff, liveInsert, resetInsert,
+  unmatched, ordered, oldCore, cleanupBrowser,
+]) {
   fixture.controller.dispose();
 }
 const nonAdmitting = browserFixture();
