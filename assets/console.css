@@ -3745,7 +3745,7 @@ body:has(.live-tracker[data-overview="true"]) .project-rail .active-project-item
   outline-offset: -1px;
 }
 
-/* Each project → session-group route bends in its own orthogonal channel. */
+/* Each project route bends into a quiet vertical spine beside its session group. */
 .session-connectors {
   position: fixed;
   z-index: 6;

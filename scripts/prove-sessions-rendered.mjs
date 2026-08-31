@@ -411,12 +411,14 @@ const inspectExpression = `(() => {
     const projectSlice = visibleSlice(project, projectVisibilityClip);
     const groupSlice = visibleSlice(group, groupClip);
     if (group?.hidden || !projectBox || !groupBox || !sessionsBox || !projectSlice || !groupSlice) return false;
+    const sourceX = projectBox.right - .75;
     const sourceY = (projectBox.top + projectBox.bottom) / 2;
-    const preferredBaseline = groupBox.bottom + 4;
-    const baselineY = Math.abs(preferredBaseline - sourceY) >= 1
-      ? preferredBaseline : preferredBaseline + (preferredBaseline >= sourceY ? 2 : -2);
+    const contentLeft = Math.max(groupBox.left, sessionsBox.left);
+    const spineX = contentLeft - 4;
+    const spineTop = Math.max(groupSlice.top, sessionsBox.top) + .75;
+    const spineBottom = Math.min(groupSlice.bottom, sessionsBox.bottom) - .75;
     return sourceY >= projectSlice.top - .01 && sourceY <= projectSlice.bottom + .01
-      && baselineY >= groupClip.top + .75 && baselineY <= groupClip.bottom - .75
+      && spineBottom - spineTop >= 4 && spineX - sourceX >= 4
       && sessionsBox.right > sessionsBox.left;
   };
   const visiblePairSequenceFor = (groupClip) => projects.flatMap((project) => (
@@ -431,13 +433,18 @@ const inspectExpression = `(() => {
   const route = (path) => {
     const d = path.getAttribute('d') || '';
     const tokens = d.trim().split(/\\s+/);
-    const values = [tokens[1], tokens[2], tokens[4], tokens[6], tokens[8]].map(Number);
-    const parsed = tokens.length === 9 && tokens[0] === 'M' && tokens[3] === 'H'
-      && tokens[5] === 'V' && tokens[7] === 'H' && values.every(Number.isFinite);
+    const values = [tokens[1], tokens[2], tokens[4], tokens[6], tokens[8], tokens[10], tokens[11], tokens[13]].map(Number);
+    const parsed = tokens.length === 14 && tokens[0] === 'M' && tokens[3] === 'H'
+      && tokens[5] === 'V' && tokens[7] === 'H' && tokens[9] === 'M'
+      && tokens[12] === 'V' && values.every(Number.isFinite);
     const start = parsed ? { x: values[0], y: values[1] } : { x: NaN, y: NaN };
     const laneX = parsed ? values[2] : NaN;
-    const baselineY = parsed ? values[3] : NaN;
-    const end = parsed ? { x: values[4], y: baselineY } : { x: NaN, y: NaN };
+    const joinY = parsed ? values[3] : NaN;
+    const spineX = parsed ? values[4] : NaN;
+    const spineRepeatX = parsed ? values[5] : NaN;
+    const spineTop = parsed ? values[6] : NaN;
+    const spineBottom = parsed ? values[7] : NaN;
+    const end = { x: spineX, y: spineBottom };
     const style = getComputedStyle(path);
     const project = projects.find((candidate) => identity(candidate) === identity(path));
     const group = groupByIdentity.get(identity(path));
@@ -447,45 +454,51 @@ const inspectExpression = `(() => {
     const contentLeft = groupBox && sessionsBox ? Math.max(groupBox.left, sessionsBox.left) : NaN;
     const openGap = contentLeft - start.x;
     const sourceRun = laneX - start.x;
-    const underlineRun = end.x - laneX;
-    const horizontalRunRatio = sourceRun > 0 ? underlineRun / sourceRun : Infinity;
+    const joinRun = spineX - laneX;
+    const spineHeight = spineBottom - spineTop;
     const projectPaneRight = projectVisibilityClip?.right ?? NaN;
-    const trackerPaneRight = groupVisibilityClip?.right ?? NaN;
     const projectEntryInset = projectPaneRight - start.x;
-    const trackerEndInset = trackerPaneRight - end.x;
     const projectSlice = visibleSlice(project, projectVisibilityClip);
-    const nextGroup = group ? groups[groups.indexOf(group) + 1] : null;
-    const nextGroupBox = nextGroup?.getBoundingClientRect();
+    const expectedSpineTop = sessionsBox && groupVisibilityClip
+      ? Math.max(sessionsBox.top, groupVisibilityClip.top) + .75 : NaN;
+    const expectedSpineBottom = sessionsBox && groupVisibilityClip
+      ? Math.min(sessionsBox.bottom, groupVisibilityClip.bottom) - .75 : NaN;
     const segments = parsed ? [
       { axis: 'h', fixed: start.y, from: start.x, to: laneX, name: 'source' },
-      { axis: 'v', fixed: laneX, from: start.y, to: baselineY, name: 'lane' },
-      { axis: 'h', fixed: baselineY, from: laneX, to: end.x, name: 'underline' },
+      { axis: 'v', fixed: laneX, from: start.y, to: joinY, name: 'lane' },
+      { axis: 'h', fixed: joinY, from: laneX, to: spineX, name: 'join' },
+      { axis: 'v', fixed: spineX, from: spineTop, to: spineBottom, name: 'spine' },
     ] : [];
     return {
-      identity: identity(path), d, length: path.getTotalLength(), start, end, laneX, baselineY, segments,
-      contentLeft, openGap, sourceRun, underlineRun, horizontalRunRatio,
-      projectPaneRight, trackerPaneRight, projectEntryInset, trackerEndInset,
+      identity: identity(path), d, length: path.getTotalLength(), start, end, laneX, joinY,
+      spineX, spineTop, spineBottom, spineHeight, segments,
+      contentLeft, openGap, sourceRun, joinRun, projectPaneRight, projectEntryInset,
       strokeWidth: Number.parseFloat(style.strokeWidth), stroke: style.stroke,
       opacity: Number.parseFloat(style.opacity), display: style.display, visibility: style.visibility,
       vectorEffect: style.vectorEffect, lineJoin: style.strokeLinejoin, lineCap: style.strokeLinecap,
       orthogonal: Boolean(parsed),
       bends: Boolean(parsed && Math.abs(laneX - start.x) > .5
-        && Math.abs(baselineY - start.y) > .5 && Math.abs(end.x - laneX) > .5),
+        && Math.abs(joinY - start.y) > .5 && Math.abs(spineX - laneX) > .5 && spineHeight > .5),
       startAttached: Boolean(projectBox && projectSlice)
         && Math.abs(start.x - projectBox.right) <= 2
         && Math.abs(start.y - ((projectBox.top + projectBox.bottom) / 2)) <= 1
         && start.y >= projectSlice.top - 1 && start.y <= projectSlice.bottom + 1,
-      laneInChannel: Boolean(sessionsBox) && laneX > start.x && laneX < sessionsBox.left,
-      underlineAttached: Boolean(groupBox && sessionsBox)
-        && baselineY >= groupBox.bottom + 1.9 && baselineY <= groupBox.bottom + 6.1
-        && laneX < groupBox.left
-        && Math.abs(end.x - sessionsBox.right) <= 2,
-      baselineClear: !nextGroupBox || baselineY <= nextGroupBox.top - 2,
+      laneInChannel: Boolean(sessionsBox) && laneX > start.x && laneX < spineX,
+      joinAttached: Math.abs(spineRepeatX - spineX) <= .01
+        && joinY >= spineTop - .01 && joinY <= spineBottom + .01,
+      spineAttached: Boolean(groupBox && sessionsBox)
+        && contentLeft - spineX >= 3 && contentLeft - spineX <= 5
+        && Math.abs(spineTop - expectedSpineTop) <= 1
+        && Math.abs(spineBottom - expectedSpineBottom) <= 1,
+      noGroupUnderline: Boolean(sessionsBox) && segments
+        .filter((segment) => segment.axis === 'h')
+        .every((segment) => Math.max(segment.from, segment.to) <= spineX + .01),
       insideVisibility: Boolean(projectVisibilityClip && groupVisibilityClip && sessionsBox)
         && start.y >= projectVisibilityClip.top - 1 && start.y <= projectVisibilityClip.bottom + 1
-        && baselineY >= groupVisibilityClip.top - 1 && baselineY <= groupVisibilityClip.bottom + 1
-        && end.x >= groupVisibilityClip.left - 1 && end.x <= groupVisibilityClip.right + 1
-        && (!composerCoversTracker || Math.max(start.y, baselineY) <= composerRect.top + 1),
+        && joinY >= groupVisibilityClip.top - 1 && joinY <= groupVisibilityClip.bottom + 1
+        && spineTop >= groupVisibilityClip.top - 1 && spineBottom <= groupVisibilityClip.bottom + 1
+        && spineX >= groupVisibilityClip.left - 5 && spineX <= groupVisibilityClip.right + 1
+        && (!composerCoversTracker || Math.max(start.y, joinY, spineBottom) <= composerRect.top + 1),
     };
   };
   const routes = paths.map(route);
@@ -672,13 +685,13 @@ function assertOverview(state, expected) {
   "all relationship routes retain square, non-scaling quiet hairline styling");
   if (diagnose) {
     const invalid = state.connectorPaths.filter((route) => !route.orthogonal || !route.bends)
-      .map(({ identity, d, orthogonal, bends, start, laneX, baselineY, end }) => (
-        { identity, d, orthogonal, bends, start, laneX, baselineY, end }
+      .map(({ identity, d, orthogonal, bends, start, laneX, joinY, spineX, spineTop, spineBottom }) => (
+        { identity, d, orthogonal, bends, start, laneX, joinY, spineX, spineTop, spineBottom }
       ));
     if (invalid.length) console.error("invalid connector bends", invalid);
   }
   assert.ok(state.connectorPaths.every((route) => route.orthogonal && route.bends),
-    "every overview relationship has horizontal/vertical bends and no diagonal or curved segment");
+    "every overview relationship uses crisp horizontal/vertical segments with deliberate mitered bends");
   assert.ok(state.connectorPaths.every((route) => route.startAttached && route.laneInChannel),
     "each route starts at its matching project center and enters a gutter-only vertical lane");
   const projectChannelEdge = state.projectVisibilityClip.right - .75;
@@ -687,30 +700,35 @@ function assertOverview(state, expected) {
   assert.ok(Math.abs(laneOrigin - targetLaneOrigin) <= .2,
     "the vertical lane bundle begins at the project-side gutter edge rather than migrating toward the channel midpoint");
   assert.ok(state.connectorPaths.every((route) => route.projectEntryInset >= Math.min(24, (state.projectVisibilityClip.right - state.projectVisibilityClip.left) * .12)
-    && route.trackerEndInset >= Math.min(24, (state.groupVisibilityClip.right - state.groupVisibilityClip.left) * .12)),
-    "overview endpoint extents leave material project- and tracker-side insets without moving the lane origin");
+    && route.sourceRun >= 24 && route.joinRun >= 1.5),
+    "each angular lead has a material project-side run and reaches its row-side spine from the gutter");
   if (diagnose) {
-    const disproportionate = state.connectorPaths.filter((route) => route.sourceRun < 24
-      || !Number.isFinite(route.horizontalRunRatio) || route.horizontalRunRatio > 5)
-      .map(({ identity, d, sourceRun, underlineRun, horizontalRunRatio,
-        projectEntryInset, trackerEndInset, laneX }) => ({
-        identity, d, sourceRun, underlineRun, horizontalRunRatio,
-        projectEntryInset, trackerEndInset, laneX,
+    const invalid = state.connectorPaths.filter((route) => !route.joinAttached || !route.spineAttached
+      || !route.noGroupUnderline || route.spineHeight < 4
+      || Math.abs(route.joinY - ((route.spineTop + route.spineBottom) / 2)) > 2.1)
+      .map(({ identity, d, joinAttached, spineAttached, noGroupUnderline, joinY,
+        spineX, spineTop, spineBottom, spineHeight, contentLeft }) => ({
+        identity, d, joinAttached, spineAttached, noGroupUnderline, joinY,
+        spineX, spineTop, spineBottom, spineHeight, contentLeft,
       }));
-    if (disproportionate.length) console.error("disproportionate connector runs", disproportionate);
+    if (invalid.length) console.error("invalid connector spines", invalid);
   }
-  assert.ok(state.connectorPaths.every((route) => route.sourceRun >= 24
-    && Number.isFinite(route.horizontalRunRatio) && route.horizontalRunRatio <= 5),
-    "project-side runs are materially longer and full-group underlines are no longer wildly disproportionate");
+  assert.ok(state.connectorPaths.every((route) => route.joinAttached && route.spineAttached
+    && route.spineHeight >= 4
+    && Math.abs(route.joinY - ((route.spineTop + route.spineBottom) / 2)) <= 2.1),
+    "each project lead joins one quiet vertical spine immediately left of and across its matching session rows");
+  assert.ok(state.connectorPaths.every((route) => route.noGroupUnderline),
+    "no connector has a horizontal underline beneath or across its session group");
   if (diagnose) {
-    const invalid = state.connectorPaths.filter((route) => !route.underlineAttached || !route.baselineClear)
-      .map(({ identity, d, underlineAttached, baselineClear, start, laneX, baselineY, end }) => (
-        { identity, d, underlineAttached, baselineClear, start, laneX, baselineY, end }
+    const invalid = state.connectorPaths.filter((route) => !route.insideVisibility)
+      .map(({ identity, d, start, joinY, spineX, spineTop, spineBottom }) => (
+        { identity, d, start, joinY, spineX, spineTop, spineBottom }
       ));
-    if (invalid.length) console.error("invalid connector underlines", invalid);
+    if (invalid.length) console.error("connector visibility escapes", {
+      invalid, projectVisibilityClip: state.projectVisibilityClip,
+      groupVisibilityClip: state.groupVisibilityClip, composerRect: state.composerRect,
+    });
   }
-  assert.ok(state.connectorPaths.every((route) => route.underlineAttached && route.baselineClear),
-    "each final segment is one visible underline immediately below and across its matching session group");
   assert.ok(state.connectorPaths.every((route) => route.insideVisibility),
     "routes remain in their project/tracker bands and above actual composer occlusion");
   assert.equal(new Set(state.connectorPaths.map((route) => route.laneX.toFixed(2))).size, state.connectorPaths.length,
@@ -984,14 +1002,15 @@ try {
     const project = document.querySelector('.active-project-item[data-project="alpha"][data-folder=""]');
     const group = document.querySelector('.live-tracker-project[data-project="alpha"][data-folder=""]');
     const projectBox = project.getBoundingClientRect();
-    const groupBox = group.getBoundingClientRect();
-    tracker.scrollTop += groupBox.bottom + 4 - ((projectBox.top + projectBox.bottom) / 2);
+    const sessionsBox = group.querySelector('.live-tracker-sessions').getBoundingClientRect();
+    tracker.scrollTop += ((sessionsBox.top + sessionsBox.bottom) / 2)
+      - ((projectBox.top + projectBox.bottom) / 2);
   })()`);
-  report.desktopBaselineAligned = await inspect(desktop.cdp, "desktop-baseline-aligned", { capture: false });
-  assertOverview(report.desktopBaselineAligned, expectedMany);
-  const alignedAlpha = report.desktopBaselineAligned.connectorPaths.find((route) => route.identity === "alpha\n");
-  assert.ok(alignedAlpha && Math.abs(alignedAlpha.baselineY - alignedAlpha.start.y) >= 1.5,
-    "exact source/baseline scroll alignment retains a visible orthogonal bend");
+  report.desktopSpineAligned = await inspect(desktop.cdp, "desktop-spine-aligned", { capture: false });
+  assertOverview(report.desktopSpineAligned, expectedMany);
+  const alignedAlpha = report.desktopSpineAligned.connectorPaths.find((route) => route.identity === "alpha\n");
+  assert.ok(alignedAlpha && Math.abs(alignedAlpha.joinY - alignedAlpha.start.y) >= 1.5,
+    "exact source/spine-midpoint scroll alignment retains a visible angular bend");
   await desktop.cdp.evaluate(`(() => {
     const tracker = document.querySelector('.live-tracker');
     const projects = document.querySelector('.active-projects');
@@ -1043,12 +1062,12 @@ try {
     "small overview connects every meaningfully visible pair, including epsilon");
   const epsilonRoute = report.pwaSmallOverview.connectorPaths.find((route) => route.identity === "epsilon\n");
   assert.ok(epsilonRoute, "epsilon has its required project-to-group relationship line");
-  assert.ok(epsilonRoute.end.y > report.pwaSmallOverview.projectVisibilityClip.bottom,
-    "epsilon underline remains visible below the shorter centered left project list");
+  assert.ok(epsilonRoute.spineBottom > report.pwaSmallOverview.projectVisibilityClip.bottom,
+    "epsilon’s group spine remains visible below the shorter centered left project list");
   assert.ok(report.pwaSmallOverview.composerCoversTracker
     && Math.abs(report.pwaSmallOverview.groupVisibilityClip.bottom - report.pwaSmallOverview.composerRect.top) < .01
-    && epsilonRoute.end.y < report.pwaSmallOverview.composerRect.top,
-  "small overview clips the right tracker at the actual composer while retaining epsilon’s underline above it");
+    && epsilonRoute.spineBottom < report.pwaSmallOverview.composerRect.top,
+  "small overview clips the right tracker at the actual composer while retaining epsilon’s spine above it");
   await smallPwa.cdp.evaluate(`document.body.click()`);
   report.smallClosedAfter = await inspect(smallPwa.cdp, "small-closed-after", { capture: false });
   assert.equal(report.smallClosedAfter.connectorPaths.length, 0, "closing narrow navigation suppresses relationship routes");
