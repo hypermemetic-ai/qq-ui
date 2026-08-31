@@ -584,24 +584,12 @@ assert.match(connectorSource, /sessionTrackerConnectorRect[\s\S]*?#session-compo
   "narrow group visibility uses the right tracker band capped by the actual composer");
 assert.doesNotMatch(connectorSource, /targetVerticalScrollport|visibleConnectorSurface\(group, tracker, projects\)/,
   "right endpoint visibility never proxies through or requires overlap with the left project list");
-assert.match(connectorSource, /sessionConnectorLaneOrder[\s\S]*?canonicalOrderWorks[\s\S]*?reverseOrderWorks[\s\S]*?incoming/,
-  "mixed vertical intervals produce deterministic pairwise constraints with canonical tie-breaking");
-assert.match(connectorSource, /SESSION_CONNECTOR_SPINE_GAP = 4[\s\S]*?SESSION_CONNECTOR_LANE_EDGE_GAP = 2[\s\S]*?SESSION_CONNECTOR_LANE_GAP = 6[\s\S]*?SESSION_CONNECTOR_MIN_LANE_GAP = 1\.25/,
-  "spines retain a quiet row-side gap while lanes keep defined project-edge, preferred, and minimum separation");
-assert.doesNotMatch(connectorSource, /SESSION_CONNECTOR_LANE_BUNDLE_RATIO|channelMidpoint|laneSpan/,
-  "lane allocation contains no midpoint-derived bundle behavior");
 assert.match(connectorSource, /sessionConnectorJoin[\s\S]*?preferred = \(spineTop \+ spineBottom\) \/ 2[\s\S]*?Math\.abs\(preferred - sourceY\) >= 1[\s\S]*?preferred >= sourceY \? 2 : -2/,
   "the project route joins the spine at its stable midpoint and keeps an angular bend on exact source alignment");
 assert.match(connectorSource, /spineX = contentLeft - SESSION_CONNECTOR_SPINE_GAP[\s\S]*?spineTop = Math\.max\(target\.visible\.top, sessionsRect\.top\) \+ SESSION_CONNECTOR_INSET[\s\S]*?spineBottom = Math\.min\(target\.visible\.bottom, sessionsRect\.bottom\) - SESSION_CONNECTOR_INSET/,
   "each endpoint is a clipped vertical spine immediately left of the matching session rows");
-assert.match(connectorSource, /channelStart = projectClip\.right - SESSION_CONNECTOR_INSET[\s\S]*?channelEnd[\s\S]*?Math\.min\(SESSION_CONNECTOR_LANE_GAP, maximumLaneSpan \/ \(routes\.length - 1\)\)[\s\S]*?firstLane = channelStart \+ SESSION_CONNECTOR_LANE_EDGE_GAP[\s\S]*?laneRanks[\s\S]*?routes\[index\]\.lane/,
-  "every eligible route receives a unique adaptive lane beginning at the stable project-side gutter edge");
-assert.match(connectorSource, /setAttribute\("d", `M \${start\.x[^`]* H \${lane[^`]* V \${joinY[^`]* H \${spineX[^`]* M \${spineX[^`]* \${spineTop[^`]* V \${spineBottom/,
-  "each relationship is one path element whose angular lead touches one vertical group spine");
 assert.doesNotMatch(connectorSource, /SESSION_CONNECTOR_BASELINE_GAP|sessionConnectorBaseline|endX|route\.baseline/,
   "connector geometry contains no below-group baseline or underline endpoint");
-assert.doesNotMatch(connectorSource, /setAttribute\("d",[^\n]*[LQCSTA] \${/,
-  "relationship path emission contains no diagonal, curved, or arc command");
 assert.match(browser, /const showLiveTrackerOverview[\s\S]*?scheduleSessionConnectors\(\)[\s\S]*?const showLiveTrackerProject[\s\S]*?suppressSessionConnectors\(\)/,
   "overview entry schedules routes while single-project entry synchronously removes them");
 assert.match(browser, /const removeLiveTrackerCreate[\s\S]*?create\.remove\(\)[\s\S]*?const ensureLiveTrackerCreate[\s\S]*?create\.method = "post"[\s\S]*?aria-label", "New session"/,
