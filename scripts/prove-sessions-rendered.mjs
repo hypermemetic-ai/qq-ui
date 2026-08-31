@@ -415,10 +415,13 @@ const inspectExpression = `(() => {
     const sourceY = (projectBox.top + projectBox.bottom) / 2;
     const contentLeft = Math.max(groupBox.left, sessionsBox.left);
     const spineX = contentLeft - 4;
-    const spineTop = Math.max(groupSlice.top, sessionsBox.top) + .75;
-    const spineBottom = Math.min(groupSlice.bottom, sessionsBox.bottom) - .75;
+    const groupTop = Math.max(groupSlice.top, sessionsBox.top);
+    const groupBottom = Math.min(groupSlice.bottom, sessionsBox.bottom);
+    const spineInset = Math.min(3, Math.max(0, (groupBottom - groupTop - 8) / 2));
+    const spineTop = groupTop + spineInset;
+    const spineBottom = groupBottom - spineInset;
     return sourceY >= projectSlice.top - .01 && sourceY <= projectSlice.bottom + .01
-      && spineBottom - spineTop >= 4 && spineX - sourceX >= 4
+      && spineBottom - spineTop >= 8 && spineX - sourceX >= 4
       && sessionsBox.right > sessionsBox.left;
   };
   const visiblePairSequenceFor = (groupClip) => projects.flatMap((project) => (
@@ -440,10 +443,13 @@ const inspectExpression = `(() => {
     const sessionsBox = group?.querySelector('.live-tracker-sessions')?.getBoundingClientRect();
     const contentLeft = groupBox && sessionsBox ? Math.max(groupBox.left, sessionsBox.left) : NaN;
     const spineX = contentLeft - 4;
-    const spineTop = sessionsBox && groupVisibilityClip
-      ? Math.max(sessionsBox.top, groupVisibilityClip.top) + .75 : NaN;
-    const spineBottom = sessionsBox && groupVisibilityClip
-      ? Math.min(sessionsBox.bottom, groupVisibilityClip.bottom) - .75 : NaN;
+    const groupTop = sessionsBox && groupVisibilityClip
+      ? Math.max(sessionsBox.top, groupVisibilityClip.top) : NaN;
+    const groupBottom = sessionsBox && groupVisibilityClip
+      ? Math.min(sessionsBox.bottom, groupVisibilityClip.bottom) : NaN;
+    const spineInset = Math.min(3, Math.max(0, (groupBottom - groupTop - 8) / 2));
+    const spineTop = groupTop + spineInset;
+    const spineBottom = groupBottom - spineInset;
     const spineHeight = spineBottom - spineTop;
     const length = path.getTotalLength();
     const incomingLength = Math.max(0, length - spineHeight);
@@ -699,7 +705,7 @@ function assertOverview(state, expected) {
     "each route starts at the center of its matching visible project choice");
   if (diagnose) {
     const invalid = state.connectorPaths.filter((route) => !route.joinAttached || !route.spineAttached
-      || !route.noGroupUnderline || route.spineHeight < 4
+      || !route.noGroupUnderline || route.spineHeight < 8
       || Math.abs(route.joinY - ((route.spineTop + route.spineBottom) / 2)) > 2.1)
       .map(({ identity, d, joinAttached, spineAttached, noGroupUnderline, joinY,
         spineX, spineTop, spineBottom, spineHeight, contentLeft }) => ({
@@ -709,7 +715,7 @@ function assertOverview(state, expected) {
     if (invalid.length) console.error("invalid connector spines", invalid);
   }
   assert.ok(state.connectorPaths.every((route) => route.joinAttached && route.spineAttached
-    && route.spineHeight >= 4
+    && route.spineHeight >= 8
     && Math.abs(route.joinY - ((route.spineTop + route.spineBottom) / 2)) <= 2.1),
     "each project route joins one quiet vertical spine immediately left of and across its matching session rows");
   assert.ok(state.connectorPaths.every((route) => route.noGroupUnderline),

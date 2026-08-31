@@ -586,8 +586,8 @@ assert.doesNotMatch(connectorSource, /targetVerticalScrollport|visibleConnectorS
   "right endpoint visibility never proxies through or requires overlap with the left project list");
 assert.match(connectorSource, /sessionConnectorJoin[\s\S]*?preferred = \(spineTop \+ spineBottom\) \/ 2[\s\S]*?Math\.abs\(preferred - sourceY\) >= 1[\s\S]*?preferred >= sourceY \? 2 : -2/,
   "the project route joins the spine at its stable midpoint and keeps an angular bend on exact source alignment");
-assert.match(connectorSource, /spineX = contentLeft - SESSION_CONNECTOR_SPINE_GAP[\s\S]*?spineTop = Math\.max\(target\.visible\.top, sessionsRect\.top\) \+ SESSION_CONNECTOR_INSET[\s\S]*?spineBottom = Math\.min\(target\.visible\.bottom, sessionsRect\.bottom\) - SESSION_CONNECTOR_INSET/,
-  "each endpoint is a clipped vertical spine immediately left of the matching session rows");
+assert.match(connectorSource, /SESSION_CONNECTOR_SOURCE_INSET = 0\.75[\s\S]*?SESSION_CONNECTOR_SPINE_INSET = 3[\s\S]*?SESSION_CONNECTOR_SPINE_MIN_HEIGHT = 8[\s\S]*?spineX = contentLeft - SESSION_CONNECTOR_SPINE_GAP[\s\S]*?groupTop = Math\.max\(target\.visible\.top, sessionsRect\.top\)[\s\S]*?groupBottom = Math\.min\(target\.visible\.bottom, sessionsRect\.bottom\)[\s\S]*?spineTop = groupTop \+ spineInset[\s\S]*?spineBottom = groupBottom - spineInset/,
+  "each endpoint is a modestly inset clipped vertical spine while the project source remains at its edge");
 assert.doesNotMatch(connectorSource, /SESSION_CONNECTOR_BASELINE_GAP|sessionConnectorBaseline|endX|route\.baseline/,
   "connector geometry contains no below-group baseline or underline endpoint");
 assert.match(browser, /const showLiveTrackerOverview[\s\S]*?scheduleSessionConnectors\(\)[\s\S]*?const showLiveTrackerProject[\s\S]*?suppressSessionConnectors\(\)/,
