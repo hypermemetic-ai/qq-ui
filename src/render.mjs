@@ -492,9 +492,7 @@ function renderConversationNode(node) {
       ${node.summary ? `<div class="message-body">${renderMessageText(node.summary)}</div>` : ""}
     </details>`;
   }
-  if (node?.kind === "turn-error") {
-    return `<article class="message message-turn-error" data-seq="${seq}" role="alert"><strong>Turn failed</strong><p>${escapeHtml(safeTurnFailure(node.code))}</p>${node.code ? `<code>${escapeHtml(node.code)}</code>` : ""}</article>`;
-  }
+  if (node?.kind === "turn-error") return renderTurnFailure(node);
   if (node?.kind === "turn-status") {
     const labels = {
       aborted: "Turn interrupted",
@@ -551,6 +549,16 @@ function renderPendingQueue(snapshot, paths) {
   </section>`;
 }
 
+export function renderTurnFailure(node = {}) {
+  const seq = escapeHtml(node.seq ?? "");
+  const code = typeof node.code === "string" ? node.code : "";
+  const detail = typeof node.detail === "string" ? node.detail.trim() : "";
+  const diagnostic = detail
+    ? `<p class="turn-error-diagnostic"><strong>Provider diagnostic:</strong> <code>${escapeHtml(detail)}</code></p>`
+    : "";
+  return `<article class="message message-turn-error" data-seq="${seq}" role="alert"><strong>Turn failed</strong><p>${escapeHtml(safeTurnFailure(code))}</p>${code ? `<code>${escapeHtml(code)}</code>` : ""}${diagnostic}</article>`;
+}
+
 function safeTurnFailure(code) {
   switch (code) {
     case "INVALID_REQUEST":
@@ -565,7 +573,7 @@ function safeTurnFailure(code) {
     case "CONTEXT_WINDOW_EXCEEDED":
       return "This session is too large for the selected model route. Compact the session before trying again.";
     default:
-      return "DSH could not complete the last turn. You can revise the message and try again; host logs retain the diagnostic.";
+      return "DSH could not complete the last turn. A bounded retry may run automatically; otherwise revise the message and try again.";
   }
 }
 
