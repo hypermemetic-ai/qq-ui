@@ -2968,7 +2968,6 @@
   const SESSION_CONNECTOR_ID = "session-connectors";
   const SESSION_CONNECTOR_INSET = 0.75;
   const SESSION_CONNECTOR_SPINE_GAP = 4;
-  const SESSION_CONNECTOR_LEAD = 10;
   const SESSION_CONNECTOR_NS = "http://www.w3.org/2000/svg";
   let sessionConnectorFrame = 0;
   let sessionConnectorResizeObserver = null;
@@ -3086,16 +3085,12 @@
       const spineBottom = Math.min(target.visible.bottom, sessionsRect.bottom) - SESSION_CONNECTOR_INSET;
       const joinY = sessionConnectorJoin(spineTop, spineBottom, start.y);
       const connectorWidth = spineX - start.x;
-      const leadX = start.x + Math.min(
-        SESSION_CONNECTOR_LEAD,
-        Math.max(2, connectorWidth / 3),
-      );
       const sourceAnchorVisible = start.y >= source.visible.top - 0.01
         && start.y <= source.visible.bottom + 0.01;
       const spineVisible = spineBottom - spineTop >= 4
         && spineTop >= trackerClip.top && spineBottom <= trackerClip.bottom;
       if (!sourceAnchorVisible || !spineVisible || connectorWidth < 4) continue;
-      routes.push({ project, group, start, leadX, joinY, contentLeft, spineX, spineTop, spineBottom });
+      routes.push({ project, group, start, joinY, contentLeft, spineX, spineTop, spineBottom });
     }
     const observe = [rail, projects, tracker, composerShell, ...groups.values()];
     if (routes.length === 0) {
@@ -3117,12 +3112,12 @@
     svg.setAttribute("width", String(width));
     svg.setAttribute("height", String(height));
     svg.replaceChildren(...routes.map(({
-      project, start, leadX, joinY, spineX, spineTop, spineBottom,
+      project, start, joinY, spineX, spineTop, spineBottom,
     }) => {
       const path = document.createElementNS(SESSION_CONNECTOR_NS, "path");
       path.dataset.project = project.dataset.project || "";
       path.dataset.folder = project.dataset.folder || "";
-      path.setAttribute("d", `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} H ${leadX.toFixed(2)} L ${spineX.toFixed(2)} ${joinY.toFixed(2)} M ${spineX.toFixed(2)} ${spineTop.toFixed(2)} V ${spineBottom.toFixed(2)}`);
+      path.setAttribute("d", `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} L ${spineX.toFixed(2)} ${joinY.toFixed(2)} M ${spineX.toFixed(2)} ${spineTop.toFixed(2)} V ${spineBottom.toFixed(2)}`);
       return path;
     }));
     observeSessionConnectorSurfaces(observe);
