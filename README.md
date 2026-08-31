@@ -20,6 +20,22 @@ npm run prove:prompt-geometry
 npm run latency:report
 ```
 
+## Console menu contributions
+
+The plugin provides a scoped Cordis service named `qq-ui`. Optional sibling plugins can dynamically inject that service and register a navigation entry without making qq-ui depend on the sibling:
+
+```js
+const off = ui.consoleMenu.register({
+  kind: "navigation",
+  id: "example-plugin",
+  label: "Example",
+  href: "/example",
+  order: 100,
+});
+```
+
+`register()` accepts navigation descriptors only and returns an idempotent unregister function. Labels are rendered as escaped text, `href` must be a safe same-origin absolute path, duplicate IDs are rejected, and entries are ordered by `order`, label, then ID. Bind the disposer to the contributor's Cordis effect so plugin reloads cannot leave stale entries.
+
 ## Repository map
 
 - [`src/plugin.mjs`](src/plugin.mjs) — package root and Cordis plugin entry point.
