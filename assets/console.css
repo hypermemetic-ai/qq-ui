@@ -1039,29 +1039,25 @@ details.session-menu.session-controls {
   list-style: none;
 }
 
-.queue-item {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: .4rem .5rem;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #8a8a8a;
-}
-
+/* Queue/status affordances are overlays on the shared prompt block. They
+   never become grid columns, so authority and admission cannot move or rewrap
+   the operator's text. */
 .queue-mark {
-  color: #5f5f5f;
+  position: absolute;
+  z-index: 1;
+  top: .88rem;
+  left: .3rem;
+  color: #9a8fc2;
   font-size: .9rem;
-  line-height: 1.55;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .queue-edit {
+  display: block;
+  width: 100%;
   min-width: 0;
+  margin: 0;
 }
 
 .queue-edit label {
@@ -1077,11 +1073,11 @@ details.session-menu.session-controls {
   appearance: none;
   width: 100%;
   min-width: 0;
-  min-height: 1.4rem;
-  max-height: 8rem;
+  min-height: 1lh;
+  max-height: none;
   margin: 0;
   padding: 0;
-  overflow-y: auto;
+  overflow: hidden;
   resize: none;
   border: 0;
   border-radius: 0;
@@ -1095,11 +1091,9 @@ details.session-menu.session-controls {
   field-sizing: content;
 }
 
-.queue-edit textarea:focus {
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  color: #c8c8c8;
+.queue-edit textarea:focus-visible {
+  outline: 1px solid rgba(205, 194, 238, .62);
+  outline-offset: .2rem;
 }
 
 .queue-preview {
@@ -1110,6 +1104,14 @@ details.session-menu.session-controls {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.55;
+}
+
+.queue-remove {
+  position: absolute;
+  z-index: 1;
+  top: .62rem;
+  right: .55rem;
+  margin: 0;
 }
 
 .queue-remove button {
@@ -1130,6 +1132,10 @@ details.session-menu.session-controls {
 
 .queue-remove button:hover,
 .queue-remove button:focus-visible { color: #ffaaa4; }
+.queue-remove button:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 2px;
+}
 .queue-item button:disabled { cursor: wait; opacity: .55; }
 
 .empty-transcript {
@@ -1148,14 +1154,23 @@ details.session-menu.session-controls {
   background: transparent;
 }
 
-.message-user {
-  width: fit-content;
+/* A prompt is one full-width transcript object from local send through queue
+   authority and final admission. The right inset is shared even after controls
+   settle, keeping text width, wrapping, and height invariant across replacement. */
+.message-user,
+.queue-item {
+  position: relative;
+  display: block;
+  width: 100%;
   max-width: 100%;
-  margin-left: auto;
-  padding: .7rem .82rem;
+  min-width: 0;
+  margin: 0;
+  padding: .7rem 2.65rem .7rem .82rem;
+  border: 0;
   border-radius: 0;
   background: rgba(107, 86, 176, 0.28);
   color: #e4ddf4;
+  font: inherit;
 }
 
 .queue-item[data-prompt-echo-state] {
@@ -1164,11 +1179,11 @@ details.session-menu.session-controls {
 }
 
 .queue-item[data-prompt-echo-state="pending"] {
-  color: #777;
+  color: #e4ddf4;
 }
 
 .queue-item[data-prompt-echo-state="accepted"] {
-  color: #8a8a8a;
+  color: #e4ddf4;
 }
 
 .prompt-echo-status {
@@ -1208,7 +1223,8 @@ details.session-menu.session-controls {
   color: #d3e2e8;
 }
 
-.message-steering {
+.message-steering,
+.queue-item[data-placement="steering"] {
   border: 0;
   border-radius: 0;
   background: rgba(98, 78, 160, 0.22);
@@ -2177,11 +2193,16 @@ body > footer {
     scrollbar-gutter: auto;
   }
   .message { padding: .25rem 0; }
-  .message-user { padding: .65rem .75rem; }
+  .message-user,
+  .queue-item { padding: .65rem 2.55rem .65rem .75rem; }
+  .queue-mark { top: .82rem; left: .28rem; }
+  .queue-remove { top: .55rem; right: .5rem; }
   .message-assistant { padding-right: .75rem; }
   .message-tool { padding: .65rem .72rem; }
   .message time { display: none; }
-  .message-text { line-height: 1.45; }
+  .message-text,
+  .queue-preview,
+  .queue-edit textarea { line-height: 1.45; }
   .composer {
     --composer-inset: 1.15rem;
     padding: var(--composer-inset) max(.65rem, env(safe-area-inset-right)) calc(var(--composer-inset) + env(safe-area-inset-bottom, 0px)) max(.65rem, env(safe-area-inset-left));

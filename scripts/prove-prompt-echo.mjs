@@ -46,6 +46,24 @@ const cssRule = (selector) => {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return consoleCss.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
 };
+const sharedPromptGeometry = consoleCss.match(/\.message-user,\s*\.queue-item\s*\{([^}]*)\}/)?.[1] ?? "";
+assert.match(sharedPromptGeometry, /width:\s*100%/, "queued and admitted prompts share full transcript width");
+assert.match(sharedPromptGeometry, /padding:\s*\.7rem 2\.65rem \.7rem \.82rem/,
+  "queued and admitted prompts share one desktop content inset");
+assert.doesNotMatch(sharedPromptGeometry, /fit-content|margin-left:\s*auto/,
+  "the shared prompt block cannot regress to compact right-aligned bubble geometry");
+assert.doesNotMatch(cssRule(".queue-mark"), /display:\s*(?:grid|flex)|grid-template|margin(?:-left|-right)?:/,
+  "the queue marker never reserves or indents a content column");
+assert.match(cssRule(".queue-mark"), /position:\s*absolute/, "the queue marker overlays the shared block");
+assert.match(cssRule(".queue-remove"), /position:\s*absolute/, "queue controls overlay the shared reserve");
+for (const selector of [
+  ".queue-edit textarea:focus", ".queue-edit textarea:focus-visible",
+  ".queue-remove button:hover", ".queue-remove button:focus-visible",
+]) {
+  assert.doesNotMatch(cssRule(selector),
+    /(?:^|;)\s*(?:display|position|inset|top|right|bottom|left|width|height|min-|max-|margin|padding|border(?:-(?:width|spacing))?|font(?:-size)?|line-height|letter-spacing|white-space|overflow|transform|transition|animation|flex|grid|gap)\s*:/,
+    `${selector} cannot change queue layout`);
+}
 const statusCss = cssRule(".prompt-echo-status");
 assert.match(statusCss, /position:\s*absolute/, "the accessible status is out of flow");
 assert.match(statusCss, /clip(?:-path)?:/, "the status is visually hidden without consuming a row");
