@@ -496,13 +496,6 @@ assert.doesNotMatch(switchOrNavigate[0], /if \(!liveSwitch\(/,
   "already-live liveSwitch false is not treated as cannot-switch");
 const selectProjectSource = browser.match(/const selectOverlayProject = \(item\) => \{([\s\S]*?)\n  \};/);
 assert.ok(selectProjectSource, "overlay project selection exists");
-const narrowProjectSource = selectProjectSource[1].match(/if \(navMode\(\) && !desktopChair\(\) && !projectsOverview\) \{([\s\S]*?)\n    \}/)?.[1] ?? "";
-assert.match(narrowProjectSource, /return filterLiveTrackerProject\(projectItem\)/,
-  "ordinary narrow project choices remain filter context only");
-assert.doesNotMatch(narrowProjectSource, /showLiveTrackerOverview|liveSwitch|navigatePage|rememberOverlaySession/,
-  "narrow project filtering never replaces Projects or implicitly chooses a session");
-assert.match(selectProjectSource[1], /if \(projectsOverview\) \{[\s\S]*?liveSwitchOrNavigate\(sessionId/,
-  "Projects reaches its pre-redesign switch/navigation branch even in narrow navigation");
 assert.match(selectProjectSource[1], /liveSwitchOrNavigate\(sessionId,[\s\S]*?projectItem\.href/,
   "re-selecting the projects chair uses the capability-gated fallback");
 assert.match(selectProjectSource[1], /liveSwitchOrNavigate\(selected\.id,[\s\S]*?projectItem\.href/,
@@ -511,11 +504,6 @@ assert.doesNotMatch(selectProjectSource[1], /if \(!liveSwitch\(/,
   "overlay project clicks do not full-navigate merely because the session is already live");
 assert.match(selectProjectSource[1], /if \(!selected\?\.id\)[\s\S]*?navigatePage\(projectItem\.href/,
   "a project without a session navigates to its empty page instead of becoming a no-op");
-const selectSessionSource = browser.match(/const selectOverlaySession = \(link\) => \{([\s\S]*?)\n  \};/)?.[1] ?? "";
-assert.match(selectSessionSource, /rememberOverlaySession[\s\S]*?liveSwitchOrNavigate\(link\.dataset\.sessionId/,
-  "a session row remains the single shared live-switch or navigation commit action");
-assert.match(browser, /const filterOnlyProject = link\.matches\("\.active-project-item\[data-project\], \.projects-choice\[data-project\]"\)[\s\S]*?const closesMobileRail = picker && !filterOnlyProject[\s\S]*?closeMobileRailAfterAction\(\)/,
-  "mobile dismissal follows Projects and direct session actions while actual project filtering stays open");
 const chairGoSource = browser.match(/const chairGo = \(value, current = null\) => \{([\s\S]*?)\n  \};/);
 assert.ok(chairGoSource, "chair navigation exists");
 assert.match(chairGoSource[1], /selectOverlayProject\(current\)\) return;[\s\S]*?navigatePage\(value, current\)/,

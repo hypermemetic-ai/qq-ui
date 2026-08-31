@@ -3018,7 +3018,7 @@
   const sessionConnectorModeVisible = (tracker, rail) => {
     if (!(tracker instanceof HTMLElement) || !(rail instanceof HTMLElement)) return false;
     if (tracker.dataset.overview !== "true") return false;
-    if (!desktopChair()) return false;
+    if (!desktopChair() && !navMode()) return false;
     const trackerStyle = getComputedStyle(tracker);
     const railStyle = getComputedStyle(rail);
     return trackerStyle.display !== "none" && trackerStyle.visibility !== "hidden"
@@ -3205,6 +3205,10 @@
     }));
     observeSessionConnectorSurfaces(observe);
   };
+  function scheduleSessionConnectors() {
+    if (sessionConnectorFrame) return;
+    sessionConnectorFrame = requestAnimationFrame(paintSessionConnectors);
+  }
   const suppressSessionConnectors = () => {
     if (sessionConnectorFrame) cancelAnimationFrame(sessionConnectorFrame);
     sessionConnectorFrame = 0;
@@ -3212,23 +3216,15 @@
     sessionConnectorResizeObserver?.disconnect();
     sessionConnectorObserved = [];
   };
-  function scheduleSessionConnectors() {
-    if (!desktopChair()) {
-      suppressSessionConnectors();
-      return;
-    }
-    if (sessionConnectorFrame) return;
-    sessionConnectorFrame = requestAnimationFrame(paintSessionConnectors);
-  }
 
   const liveTrackerGroups = (tracker = document.querySelector(".live-tracker")) => tracker
     ? [...tracker.querySelectorAll(".live-tracker-project[data-project]")]
     : [];
   const removeLiveTrackerCreate = (tracker) => {
-    tracker.querySelector(":scope > form.new-session")?.remove();
+    for (const create of tracker.querySelectorAll("form.new-session")) create.remove();
   };
   const ensureLiveTrackerCreate = (tracker, project, folder) => {
-    let create = tracker.querySelector(":scope > form.new-session");
+    let create = tracker.querySelector("form.new-session");
     if (!(create instanceof HTMLFormElement)) {
       create = document.createElement("form");
       create.className = "new-session";
@@ -3247,10 +3243,6 @@
   const showLiveTrackerOverview = ({ remember = true } = {}) => {
     const tracker = document.querySelector(".live-tracker");
     if (!(tracker instanceof HTMLElement)) return false;
-    const projectsItem = document.querySelector(".projects-session-item");
-    const projectsChoice = document.querySelector(".projects-session-choice");
-    const projectsContext = projectsItem?.getAttribute("aria-current") === "page"
-      || projectsChoice?.getAttribute("aria-current") === "page";
     for (const group of liveTrackerGroups(tracker)) {
       group.hidden = false;
       group.dataset.current = "false";
@@ -3262,8 +3254,8 @@
     const empty = tracker.querySelector(".live-tracker-filter-empty");
     if (empty instanceof HTMLElement) empty.hidden = true;
     removeLiveTrackerCreate(tracker);
-    markGroupCurrent(".active-project-item[href]", "active-project-current", projectsContext ? projectsItem : null);
-    markGroupCurrent(".projects-choice[href]", "projects-choice-current", projectsContext ? projectsChoice : null);
+    markGroupCurrent(".active-project-item[href]", "active-project-current", null);
+    markGroupCurrent(".projects-choice[href]", "projects-choice-current", null);
     if (remember) liveTrackerProjectFilter = LIVE_TRACKER_OVERVIEW;
     scheduleSessionConnectors();
     return true;
@@ -3283,18 +3275,13 @@
     }
     const label = String(
       group?.dataset?.projectLabel
-        ?? item?.dataset?.projectLabel
         ?? item?.querySelector?.(".active-project-label")?.textContent
         ?? item?.textContent
         ?? project,
     ).trim();
-    const folderLabel = String(
-      group?.dataset?.folderLabel ?? item?.dataset?.folderLabel ?? folder,
-    ).trim();
-    const placeLabel = folder ? `${label || project} / ${folderLabel || folder}` : (label || project);
     tracker.dataset.filterProject = project;
     tracker.dataset.filterFolder = folder;
-    tracker.setAttribute("aria-label", `${placeLabel} sessions`);
+    tracker.setAttribute("aria-label", `${label || project} sessions`);
     const empty = tracker.querySelector(".live-tracker-filter-empty");
     if (empty instanceof HTMLElement) empty.hidden = Boolean(group);
     ensureLiveTrackerCreate(tracker, project, folder);
@@ -3456,7 +3443,7 @@
     }
     const canonical = normalizedCanonical(meta.canonical);
     const projectBase = canonical.replace(/\/session\/[^/?#]+$/, "");
-    const create = document.querySelector(".session-traversal form.new-session");
+    const create = document.querySelector(".session-traversal form.new-session") || rail.querySelector("form.new-session");
     const close = rail.querySelector("#close-session");
     if (create instanceof HTMLFormElement && !projectsScope) create.action = `${projectBase}/sessions`;
     if (close instanceof HTMLFormElement) close.action = `${canonical}/close`;
@@ -3558,16 +3545,9 @@
   const selectOverlayProject = (item) => {
     const projectItem = overlayProjectItem(item);
     if (!(projectItem instanceof HTMLElement)) return false;
-    const projectsOverview = projectItem.matches(".projects-session-item")
-      || item?.matches?.(".projects-session-choice");
-    if (navMode() && !desktopChair() && !projectsOverview) {
-      markLinkCurrent(projectItem);
-      if (item !== projectItem && item instanceof Element) markLinkCurrent(item);
-      return filterLiveTrackerProject(projectItem);
-    }
     markLinkCurrent(projectItem);
     if (item !== projectItem && item instanceof Element) markLinkCurrent(item);
-    if (projectsOverview) {
+    if (projectItem.matches(".projects-session-item") || item?.matches?.(".projects-session-choice")) {
       const sessionId = projectItem.dataset.sessionId || item?.dataset?.sessionId || "";
       paintSessionTokens([], "", projectItem);
       if (!sessionId) {
@@ -3620,14 +3600,14 @@
   const paintChairMode = (nav, persist = true) => {
     if (nav) document.body.classList.add("nav-mode");
     else document.body.classList.remove("nav-mode");
-    if (!desktopChair()) suppressSessionConnectors();
+    if (nav) scheduleSessionConnectors();
+    else if (!desktopChair()) suppressSessionConnectors();
     else scheduleSessionConnectors();
     if (nav) {
       overlaySessionId = "";
       pendingCanonical = "";
       const prompt = composer();
       if (prompt instanceof HTMLTextAreaElement && document.activeElement === prompt) prompt.blur();
-      if (!desktopChair()) syncLiveTrackerProjectFilter();
     }
     syncDrawerChrome();
     if (!persist) return;
@@ -4371,10 +4351,6 @@
     const point = event.touches[0];
     const now = performance.now();
     if (navMode()) {
-      // The project dock is a native horizontal scroller. Never arm the
-      // document-wide close gesture here; Chromium must own drags in either
-      // direction even when the dock is currently at one of its scroll edges.
-      if (target.closest("#project-rail, .active-projects")) return;
       surfaceGesture = {
         kind: "nav",
         mode: "close",
@@ -4460,7 +4436,7 @@
   document.addEventListener("submit", (event) => {
     const form = event.target;
     if (desktopChair() || !navMode() || !(form instanceof HTMLFormElement)
-      || !form.matches(".session-traversal > .new-session")) return;
+      || !form.matches(".session-traversal .new-session")) return;
     // Observe the native submission rather than replacing the button's action.
     // This keeps pointer and keyboard activation single-shot.
     paintChairMode(false);
@@ -4620,11 +4596,6 @@
       } else if (event.key === "Tab") {
         trapDrawerFocus(event);
       }
-      return;
-    }
-    if (navMode() && !desktopChair() && event.key === "Escape") {
-      event.preventDefault();
-      paintChairMode(false);
       return;
     }
     if (clearProjectFilterFromChooserKey(event)) return;
