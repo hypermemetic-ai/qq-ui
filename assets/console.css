@@ -3609,6 +3609,14 @@ body.document-page {
 }
 
 /* All-project session overview: connectors replace duplicate visible labels. */
+/*
+ * Leave a real project-side arm before the fixed gutter lanes. The row itself
+ * remains the semantic/click attachment surface; only its overview extent is
+ * shortened. Selected-project hit areas retain their established sizing.
+ */
+body:has(.live-tracker[data-overview="true"]) .project-rail .active-project-item[data-project] {
+  width: calc(100% - clamp(2rem, 8vw, 3.5rem));
+}
 .live-tracker[data-overview="true"] {
   flex-direction: column;
   align-items: stretch;
@@ -3654,10 +3662,22 @@ body.document-page {
   gap: .1rem;
 }
 
+@media (max-width: 42rem) {
+  .nav-mode .live-tracker[data-overview="true"] .live-tracker-project {
+    width: min(calc(100% - 2rem), 10rem);
+  }
+}
+
 @media (min-width: 42.01rem) {
   .live-tracker[data-overview="true"] {
+    position: relative;
+    inset-inline-end: clamp(2.5rem, 5vw, 4rem);
+    width: 12.125rem;
     max-height: min(65vh, 28rem);
     padding-block: .25rem;
+  }
+  .live-tracker[data-overview="true"] .live-tracker-project {
+    width: 9rem;
   }
 }
 

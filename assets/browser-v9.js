@@ -2971,7 +2971,6 @@
   const SESSION_CONNECTOR_LANE_EDGE_GAP = 2;
   const SESSION_CONNECTOR_LANE_GAP = 6;
   const SESSION_CONNECTOR_MIN_LANE_GAP = 1.25;
-  const SESSION_CONNECTOR_LANE_BUNDLE_RATIO = 0.34;
   const SESSION_CONNECTOR_NS = "http://www.w3.org/2000/svg";
   let sessionConnectorFrame = 0;
   let sessionConnectorResizeObserver = null;
@@ -3156,34 +3155,23 @@
       observeSessionConnectorSurfaces(observe);
       return;
     }
-    const channelStart = Math.max(...routes.map((route) => route.start.x));
+    // Keep the lane bundle at the project-side gutter edge. Endpoint sizing is
+    // allowed to rebalance the two horizontal runs; it must not drag this
+    // independently routed vertical channel toward the gap midpoint.
+    const channelStart = projectClip.right - SESSION_CONNECTOR_INSET;
     const channelEnd = Math.min(...routes.map((route) => route.contentLeft));
     const channelWidth = channelEnd - channelStart;
     const usableWidth = channelWidth - (2 * SESSION_CONNECTOR_LANE_EDGE_GAP);
     const maximumLaneSpan = Math.max(0, usableWidth);
-    const minimumLaneSpan = SESSION_CONNECTOR_MIN_LANE_GAP * Math.max(0, routes.length - 1);
-    const laneSpan = routes.length > 1
-      ? Math.min(
-        maximumLaneSpan,
-        Math.max(
-          minimumLaneSpan,
-          Math.min(
-            SESSION_CONNECTOR_LANE_GAP * (routes.length - 1),
-            maximumLaneSpan * SESSION_CONNECTOR_LANE_BUNDLE_RATIO,
-          ),
-        ),
-      )
-      : 0;
     const laneGap = routes.length > 1
-      ? laneSpan / (routes.length - 1)
+      ? Math.min(SESSION_CONNECTOR_LANE_GAP, maximumLaneSpan / (routes.length - 1))
       : SESSION_CONNECTOR_LANE_GAP;
     if (channelWidth < 4 || (routes.length > 1 && laneGap < SESSION_CONNECTOR_MIN_LANE_GAP)) {
       removeSessionConnectors();
       observeSessionConnectorSurfaces(observe);
       return;
     }
-    const channelMidpoint = (channelStart + channelEnd) / 2;
-    const firstLane = channelMidpoint - (laneSpan / 2);
+    const firstLane = channelStart + SESSION_CONNECTOR_LANE_EDGE_GAP;
     const lastLane = firstLane + Math.max(laneGap, SESSION_CONNECTOR_MIN_LANE_GAP);
     const laneOrder = sessionConnectorLaneOrder(routes, firstLane, lastLane);
     if (!laneOrder) {
