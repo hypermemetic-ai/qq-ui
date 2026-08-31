@@ -6,6 +6,7 @@ const liveId = "session-63a11000-0000-4000-8000-0000000000aa";
 const paths = {
   canonical: `/qq/project/qq/session/${liveId}`,
   prompt: `/qq/project/qq/session/${liveId}/prompt`,
+  workflow: `/qq/project/qq/session/${liveId}/workflow`,
   interrupt: `/qq/project/qq/session/${liveId}/interrupt`,
   createSession: "/qq/project/qq/sessions",
   switchSession: "/qq/sessions/open",

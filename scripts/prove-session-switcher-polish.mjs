@@ -17,6 +17,7 @@ const paths = {
   close: `/qq/project/qq/session/${rootId}/close`,
   events: `/qq/project/qq/session/${rootId}/events`,
   prompt: `/qq/project/qq/session/${rootId}/prompt`,
+  workflow: `/qq/project/qq/session/${rootId}/workflow`,
   interrupt: `/qq/project/qq/session/${rootId}/interrupt`,
   approval: `/qq/project/qq/session/${rootId}/approval`,
   offer: `/qq/project/qq/session/${rootId}/offer`,

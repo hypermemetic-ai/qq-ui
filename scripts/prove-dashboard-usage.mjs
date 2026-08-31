@@ -141,7 +141,11 @@ assert.match(usageHtml, />110%<\//);
 assert.match(usageHtml, /5000 \/ 10000 estimated/);
 assert.equal((usageHtml.match(/>reset /g) ?? []).length, 2, "only known resets are shown");
 
-const paths = { canonical: `/qq/session/${sessionId}`, prompt: `/qq/session/${sessionId}/prompt` };
+const paths = {
+  canonical: `/qq/session/${sessionId}`,
+  prompt: `/qq/session/${sessionId}/prompt`,
+  workflow: `/qq/session/${sessionId}/workflow`,
+};
 const snapshot = {
   id: sessionId, project: "alpha", alias: "opal", events: [], agentStatus: "idle",
   conversation: { nodes: [], pending: [] }, children: [], sessionMode: "architect",
@@ -152,7 +156,7 @@ for (const dashboardCase of [absent, validatedDashboardSnapshot({ ...base, usage
   assert.match(content, /<details class="workflows-menu console-menu" data-mode="architect">/, "the existing control is generalized rather than duplicated");
   assert.match(content, /<summary aria-label="Console menu"[^>]*>architect<\/summary>/, "current workflow summary semantics remain intact");
   assert.match(content, /<a class="console-menu-choice usage-choice"[^>]*>usage<\/a>/, "usage is an exact lowercase general action");
-  assert.match(content, /<form class="workflows-menu-list"[^>]*action="\/qq\/session\/[^"]+\/prompt" method="post"[\s\S]*value="\/workflows architect"[\s\S]*value="\/workflows iterate"[\s\S]*value="\/workflows find"/, "workflow POST values and progressive form fallback remain exact");
+  assert.match(content, /<form class="workflows-menu-list"[^>]*action="\/qq\/session\/[^"]+\/workflow" method="post"[\s\S]*name="workflow" value="architect"[\s\S]*name="workflow" value="iterate"[\s\S]*name="workflow" value="find"/, "workflow POST values and progressive form fallback remain exact");
   assert.doesNotMatch(content.match(/<a class="console-menu-choice usage-choice"[^>]*>/)?.[0] ?? "", /prompt|method=|type="submit"/, "usage is not a workflow submission");
   assert.match(content, /id="session-usage"[^>]*sse-swap="usage"/, "usage has an independent incremental region");
 }
