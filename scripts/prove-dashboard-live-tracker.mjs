@@ -388,8 +388,6 @@ assert.match(browser, /setTimeout\(syncLiveTrackerElapsed, nextUpdate\)/,
   "browser schedules the next visible unit threshold without server rerenders");
 assert.doesNotMatch(browser, /setInterval\(syncLiveTrackerElapsed,\s*1000\)/,
   "tracker elapsed metadata avoids needless one-second polling");
-assert.match(browser, /if \(navMode\(\)\) \{[\s\S]*?target\.closest\("#project-rail, \.active-projects"\)\) return;[\s\S]*?kind: "nav",[\s\S]*?mode: "close"/,
-  "PWA project dock touches stay with the native horizontal scroller instead of arming overlay dismissal");
 assert.match(browser, /if \(event\.defaultPrevented \|\| modifiedClick\(event\)\) return;[\s\S]*?chairGo\(url\.href, link\)/,
   "normal tracker clicks use chairGo while modified clicks retain native href behavior");
 assert.match(browser, /if \(!nav \|\| nav\.classList\.contains\("live-tracker"\)\) return;/,
@@ -601,23 +599,17 @@ assert.match(connectorSource, /setAttribute\("d", `M \${start\.x[^`]* H \${lane[
 assert.doesNotMatch(connectorSource, /setAttribute\("d",[^\n]*[LQCSTA] \${/,
   "relationship path emission contains no diagonal, curved, or arc command");
 assert.match(browser, /const showLiveTrackerOverview[\s\S]*?scheduleSessionConnectors\(\)[\s\S]*?const showLiveTrackerProject[\s\S]*?suppressSessionConnectors\(\)/,
-  "desktop overview entry preserves connector scheduling while single-project entry removes routes");
-assert.match(connectorSource, /if \(!desktopChair\(\)\) return false/,
-  "connector painting is categorically unavailable in narrow PWA navigation");
-assert.match(browser, /const paintChairMode[\s\S]*?if \(!desktopChair\(\)\) suppressSessionConnectors\(\)/,
-  "opening or closing narrow navigation synchronously clears obsolete routes");
-assert.match(browser, /const removeLiveTrackerCreate[\s\S]*?tracker\.querySelector\(":scope > form\.new-session"\)\?\.remove\(\)[\s\S]*?const ensureLiveTrackerCreate[\s\S]*?tracker\.querySelector\(":scope > form\.new-session"\)[\s\S]*?create\.method = "post"[\s\S]*?aria-label", "New session"/,
-  "New session remains a native labelled POST form inside the relevant tracker content");
-assert.doesNotMatch(browser, /liveTrackerCreates|liveTrackerCreate|syncLiveTrackerCreateHost|#project-rail > \.new-session/,
-  "narrow presentation never reparents New session into the project strip");
+  "overview entry schedules routes while single-project entry synchronously removes them");
+assert.match(browser, /const removeLiveTrackerCreate[\s\S]*?create\.remove\(\)[\s\S]*?const ensureLiveTrackerCreate[\s\S]*?create\.method = "post"[\s\S]*?aria-label", "New session"/,
+  "client mode transitions remove the overview control node and reconstruct one native labelled POST form on selection");
 assert.match(browser, /const showLiveTrackerOverview[\s\S]*?removeLiveTrackerCreate\(tracker\)[\s\S]*?const showLiveTrackerProject[\s\S]*?ensureLiveTrackerCreate\(tracker, project, folder\)/,
-  "overview and selected-project transitions remove or restore the in-context create action");
+  "overview and selected-project transitions reconcile add-session DOM presence in opposite directions");
 assert.match(browser, /ensureLiveTrackerCreate[\s\S]*?encodeURIComponent\(project\)[\s\S]*?encodeURIComponent\(folder\)[\s\S]*?\/sessions/,
   "the reconstructed selected-project action is project/folder aware");
-assert.match(browser, /event\.target\?\.matches\?\.(?:call)?\?*\("\.active-projects, \.live-tracker"\)[\s\S]*?scheduleSessionConnectors\(\)/,
-  "desktop project and group scrolling still recomputes relationship geometry");
-assert.match(browser, /new ResizeObserver[\s\S]*?window\.addEventListener\("resize", scheduleSessionConnectors[\s\S]*?window\.addEventListener\("orientationchange", scheduleSessionConnectors/,
-  "surface resize, viewport resize, and rotation preserve desktop relationship geometry without moving DOM hosts");
+assert.match(browser, /event\.target\?\.matches\?\.\("\.active-projects, \.live-tracker"\)[\s\S]*?scheduleSessionConnectors\(\)/,
+  "independent project and group pane scrolling recomputes relationship geometry");
+assert.match(browser, /new ResizeObserver[\s\S]*?window\.addEventListener\("resize", scheduleSessionConnectors[\s\S]*?orientationchange/,
+  "surface resize, viewport resize, and rotation all recompute relationship geometry");
 assert.match(browser, /id === "session-chrome"[\s\S]*?syncLiveTrackerProjectFilter\(\)[\s\S]*?scheduleSessionConnectors\(\)/,
   "live chrome replacement restores mode before repainting its routes");
 assert.match(browser, /touchesComposer\(id\)[\s\S]*?restoreDraft\(\)[\s\S]*?scheduleSessionConnectors\(\)/,
@@ -629,17 +621,10 @@ assert.match(browser, /const appendActiveProject = \(entry\) => \{[\s\S]*?restor
 assert.doesNotMatch(browser, /qq-active-projects|readRememberedProjects|restoreListOrder/,
   "session storage can no longer override canonical project order");
 const projectPickerSource = browser.match(/const selectOverlayProject = \(item\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
-assert.match(projectPickerSource, /if \(navMode\(\) && !desktopChair\(\) && !projectsOverview\) \{[\s\S]*?return filterLiveTrackerProject\(projectItem\);/,
-  "ordinary narrow project choices filter the grouped session surface without switching");
-const narrowFilterSource = projectPickerSource.match(/if \(navMode\(\) && !desktopChair\(\) && !projectsOverview\) \{[\s\S]*?\n    \}/)?.[0] ?? "";
-assert.doesNotMatch(narrowFilterSource, /showLiveTrackerOverview|liveSwitch|navigatePage|rememberOverlaySession/,
-  "narrow project filtering cannot become all-sessions, switch, navigate, or remember a session");
-assert.match(projectPickerSource, /if \(projectsOverview\) \{[\s\S]*?liveSwitchOrNavigate\(sessionId,[\s\S]*?projectItem\.href/,
-  "Projects bypasses filter-only handling and reaches its real switch/navigation branch");
-assert.match(browser, /const filterOnlyProject = link\.matches\("\.active-project-item\[data-project\], \.projects-choice\[data-project\]"\)[\s\S]*?const closesMobileRail = picker && !filterOnlyProject/,
-  "only actual project filters keep narrow navigation open; Projects and session actions dismiss it");
-assert.match(browser, /form\.matches\("\.session-traversal > \.new-session"\)[\s\S]*?paintChairMode\(false\)/,
-  "native in-context New session submission dismisses narrow navigation");
+assert.match(projectPickerSource, /if \(filterLiveTrackerProject\(projectItem\)\) return true;\s+const sessions/,
+  "a normal project filter returns before legacy session selection or navigation");
+assert.match(browser, /const filterOnlyProject = link\.matches[\s\S]*?const closesMobileRail = picker && !filterOnlyProject/,
+  "filter-only project clicks keep the mobile two-pane chooser open");
 assert.match(browser, /id === "session-chrome"[\s\S]*?syncLiveTrackerProjectFilter\(\)/,
   "SSE chrome refreshes preserve the chosen project filter");
 const filterSyncSource = browser.match(/const syncLiveTrackerProjectFilter = \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
@@ -665,37 +650,16 @@ assert.match(pickerSource, /liveSwitchOrNavigate\([\s\S]*?link\.href\)/,
 const css = readFileSync(new URL("../assets/console.css", import.meta.url), "utf8");
 assert.match(css, /\.live-tracker-project\[hidden\][\s\S]*?display:\s*none\s*!important/,
   "filtered project groups cannot be revived by the tracker flex layout");
-const narrowCss = css.match(/@media \(max-width: 42rem\) \{([\s\S]*?)\n\}\n\n\n?\.project-rail \{ display: none; \}/)?.[1] ?? "";
-assert.match(css, /\.nav-mode::before \{[^}]*background:\s*rgba\(0, 0, 0, \.96\)/,
-  "narrow navigation retains the established translucent body overlay");
-assert.match(narrowCss, /\.nav-mode \.session-traversal \{[^}]*position:\s*fixed[^}]*inset:\s*0[^}]*width:\s*100%[^}]*overflow-y:\s*auto[^}]*background:\s*transparent/,
-  "narrow PWA has one full-width transparent vertical session surface");
-assert.match(narrowCss, /\.nav-mode \.project-rail \{[^}]*inset:\s*0 0 auto[^}]*width:\s*100%[^}]*background:\s*transparent[^}]*box-shadow:\s*none/,
-  "projects are a flat transparent top-edge context strip rather than a bottom dock");
-assert.match(narrowCss, /\.nav-mode \.project-rail \.active-projects \{[^}]*overflow-x:\s*auto[^}]*overflow-y:\s*hidden[^}]*touch-action:\s*pan-x/,
-  "many project filters use a touch-native horizontal strip without a second vertical plane");
-assert.doesNotMatch(narrowCss, /#session-panel > :not\(#session-chrome\)[^}]*display:\s*none|\.session-heading-start \{\s*display:\s*contents/,
-  "opening navigation does not remove the transcript, composer, or normal chrome structure");
-assert.match(narrowCss, /\.nav-mode \.session-connectors \{ display:\s*none\s*!important/,
-  "narrow PWA suppresses connector visualization defensively in CSS");
-assert.match(narrowCss, /\.nav-mode \.live-tracker\[data-overview="true"\] \.live-tracker-project-name \{[^}]*position:\s*static[^}]*clip-path:\s*none[^}]*text-transform:\s*lowercase/,
-  "project and folder headers are visible in the app's quiet lowercase reading order");
-assert.match(narrowCss, /\.nav-mode \.live-tracker-session \{[^}]*width:\s*100%[^}]*min-height:\s*2\.75rem[^}]*border-radius:\s*0[^}]*background:\s*transparent/,
-  "primary session rows are compact full-width flat 44px targets");
-assert.match(narrowCss, /\.nav-mode \.live-tracker-child-strip \.live-tracker-session \{[^}]*min-height:\s*2\.75rem[^}]*flex-direction:\s*column/,
-  "nested subagent rows retain full 44px targets and readable hierarchy");
-assert.match(narrowCss, /\.nav-mode \.live-tracker-child-strip \.live-tracker-session::before \{ display:\s*none/,
-  "PWA child hierarchy uses indentation and typography instead of path decoration");
-assert.match(narrowCss, /\.nav-mode \.live-tracker-session-current \{[^}]*background:\s*transparent[^}]*box-shadow:\s*none[^}]*color:\s*#f2f2f2/,
-  "current session returns to contrast/type treatment without a filled card or inset stripe");
-assert.match(narrowCss, /\.nav-mode \.session-traversal \.new-session \{[^}]*width:\s*100%[\s\S]*?\.nav-mode \.session-traversal \.new-session button \{[^}]*min-height:\s*2\.75rem[^}]*border:\s*0[^}]*background:\s*transparent/,
-  "filtered New session is a flat in-context tracker action");
-assert.doesNotMatch(narrowCss, /pwa-switcher|\.nav-mode \.project-rail > \.new-session|\.nav-mode \.session-traversal \{[^}]*background:\s*#000|\.nav-mode \.project-rail \{[^}]*background:\s*(?:#|rgba\([^)]*,\s*\.9)|\.nav-mode \.project-rail \.projects-session-item \{[^}]*position:\s*sticky/,
-  "rejected header, opaque tracker/dock, sticky chip, and floating create chrome cannot return");
-assert.doesNotMatch(narrowCss, /\.nav-mode \.project-rail \{[^}]*width:\s*50%|\.nav-mode \.session-traversal \{[^}]*width:\s*50%/,
-  "rejected equal project/session panes cannot return in narrow PWA");
-assert.match(css, /@media \(min-width: 42\.01rem\) \{\s*body:has\(\.live-tracker\[data-overview="true"\]\)/,
-  "connector-specific project arm shortening is scoped to desktop");
+assert.match(css, /\.nav-mode \.project-rail \{[^}]*width:\s*50%/,
+  "the project pane retains its original half-width");
+assert.match(css, /\.nav-mode \.session-traversal \{[^}]*width:\s*50%/,
+  "the session pane retains its original half-width");
+assert.match(css, /\.nav-mode \.project-rail \{[^}]*width:\s*50%[^}]*border-right:\s*0/,
+  "the narrow installed-app split removes its full-height central divider");
+assert.match(css, /body:has\(\.live-tracker\[data-overview="true"\]\) \.project-rail \.active-project-item\[data-project\] \{[^}]*width:\s*calc\(100% - clamp\(2rem, 8vw, 3\.5rem\)\)/,
+  "only overview project entries shorten their semantic attachment extent to lengthen source arms");
+assert.match(css, /@media \(max-width: 42rem\) \{[\s\S]*?\.nav-mode \.live-tracker\[data-overview="true"\] \.live-tracker-project \{[^}]*width:\s*min\(calc\(100% - 2rem\), 10rem\)/,
+  "narrow overview groups use a shorter full-group underline extent");
 assert.match(css, /@media \(min-width: 42\.01rem\) \{[\s\S]*?\.live-tracker\[data-overview="true"\] \{[^}]*position:\s*relative[^}]*inset-inline-end:\s*clamp\(2\.5rem, 5vw, 4rem\)[^}]*width:\s*12\.125rem[\s\S]*?\.live-tracker\[data-overview="true"\] \.live-tracker-project \{[^}]*width:\s*9rem/,
   "desktop overview shifts and constrains session content while leaving vertical lane allocation untouched");
 assert.doesNotMatch(css, /\.nav-mode \.project-rail \{[^}]*width:\s*42%|\.nav-mode \.session-traversal \{[^}]*width:\s*58%/,
@@ -715,11 +679,10 @@ for (const viewport of [800, 1024, 1440]) {
 }
 assert.match(css, /width:\s*min\(90ch, calc\(100% - var\(--project-rail-width\) - 2rem\)\)/,
   "desktop session content consumes the space released by the narrower rail");
-const desktopCurrentStyle = css.match(/(?:^|\n)\.live-tracker-session-current \{([^}]*)\}/)?.[1] ?? "";
-assert.doesNotMatch(desktopCurrentStyle, /box-shadow/,
-  "desktop current sessions keep the original understated treatment without an inset bar");
-const connectorLayerStyle = css.match(/(?:^|\n)\.session-connectors \{([^}]*)\}/)?.[1] ?? "";
-const connectorPathStyle = css.match(/(?:^|\n)\.session-connectors path \{([^}]*)\}/)?.[1] ?? "";
+assert.doesNotMatch(css, /\.live-tracker-session-current\s*\{[^}]*box-shadow/,
+  "current sessions keep the original understated treatment without an inset bar");
+const connectorLayerStyle = css.match(/\.session-connectors \{([^}]*)\}/)?.[1] ?? "";
+const connectorPathStyle = css.match(/\.session-connectors path \{([^}]*)\}/)?.[1] ?? "";
 assert.match(connectorLayerStyle, /position:\s*fixed[\s\S]*?pointer-events:\s*none/,
   "the viewport relationship layer is layout-independent and cannot block full-row interaction");
 const connectorStroke = Number(connectorPathStyle.match(/stroke-width:\s*([\d.]+)px/)?.[1]);
@@ -729,32 +692,32 @@ assert.match(connectorPathStyle, /stroke:\s*#[0-9a-f]{6}[\s\S]*?stroke-linecap:\
   "relationship lines retain a restrained neutral, square, non-scaling stroke");
 assert.doesNotMatch(connectorPathStyle, /filter|animation|marker|drop-shadow|round/i,
   "relationship lines add no glow, animation, arrows, dots, or heavy rounding");
-const overviewStyle = css.match(/(?:^|\n)\.live-tracker\[data-overview="true"\] \{([^}]*)\}/)?.[1] ?? "";
+const overviewStyle = css.match(/\.live-tracker\[data-overview="true"\] \{([^}]*)\}/)?.[1] ?? "";
 assert.match(overviewStyle, /flex-direction:\s*column[\s\S]*?gap:\s*\.9rem/,
   "overview preserves project order and reserves clear below-group baseline space");
 assert.doesNotMatch(overviewStyle, /background|gradient|border|box-shadow/i,
   "overview grouping adds spacing only, not ornamental chrome");
-const overviewHeadingStyle = css.match(/(?:^|\n)\.live-tracker\[data-overview="true"\] \.live-tracker-project-name \{([^}]*)\}/)?.[1] ?? "";
+const overviewHeadingStyle = css.match(/\.live-tracker\[data-overview="true"\] \.live-tracker-project-name \{([^}]*)\}/)?.[1] ?? "";
 assert.match(overviewHeadingStyle, /position:\s*absolute[\s\S]*?width:\s*1px[\s\S]*?clip-path:\s*inset\(50%\)/,
-  "desktop overview retains its established visually hidden relationship labels");
+  "overview project/folder headings retain semantic text while becoming visually hidden");
 assert.match(css, /\.project-rail \.active-projects:focus-visible \{[^}]*outline:\s*1px solid/,
   "the compact keyboard-operable chooser surface has a restrained visible focus state");
-const overviewSessionsStyle = css.match(/(?:^|\n)\.live-tracker\[data-overview="true"\] \.live-tracker-sessions \{([^}]*)\}/)?.[1] ?? "";
+const overviewSessionsStyle = css.match(/\.live-tracker\[data-overview="true"\] \.live-tracker-sessions \{([^}]*)\}/)?.[1] ?? "";
 assert.match(overviewSessionsStyle, /width:\s*100%[\s\S]*?flex-direction:\s*column[\s\S]*?align-items:\s*stretch/,
   "overview stacks wide project session sets vertically so every link stays reachable");
-const hierarchyStyle = css.match(/(?:^|\n)\.live-tracker-sessions-hierarchical \{([^}]*)\}/)?.[1] ?? "";
+const hierarchyStyle = css.match(/\.live-tracker-sessions-hierarchical \{([^}]*)\}/)?.[1] ?? "";
 assert.match(hierarchyStyle, /flex-direction:\s*column[\s\S]*?align-items:\s*stretch/,
   "architects and any number of direct children stack in ownership order");
-const childStripStyle = css.match(/(?:^|\n)\.live-tracker-child-strip \.live-tracker-session \{([^}]*)\}/)?.[1] ?? "";
+const childStripStyle = css.match(/\.live-tracker-child-strip \.live-tracker-session \{([^}]*)\}/)?.[1] ?? "";
 assert.match(childStripStyle, /min-height:\s*1\.65rem[\s\S]*?flex-direction:\s*row/,
   "direct children collapse to compact one-line execution strips");
-assert.match(css, /(?:^|\n)\.live-tracker-child-strip \.live-tracker-session::before \{[^}]*border-bottom:\s*\.75px solid[^}]*border-left:\s*\.75px solid/,
+assert.match(css, /\.live-tracker-child-strip \.live-tracker-session::before \{[^}]*border-bottom:\s*\.75px solid[^}]*border-left:\s*\.75px solid/,
   "each direct child has one restrained orthogonal dependency branch");
 assert.match(childStripStyle, /justify-content:\s*flex-start[\s\S]*?gap:\s*\.4rem/,
   "child identity and work metadata form one compact left-biased cluster");
 assert.doesNotMatch(childStripStyle, /justify-content:\s*space-between/,
   "child state is never stranded at the far edge of an empty strip");
-assert.match(css, /(?:^|\n)\.live-tracker-child-strip \.live-tracker-state \{[^}]*max-width:\s*none/,
+assert.match(css, /\.live-tracker-child-strip \.live-tracker-state \{[^}]*max-width:\s*none/,
   "child phase and own elapsed time can use reclaimed row space");
 assert.doesNotMatch(css, /\.live-tracker-child-strip \.live-tracker-(?:phase|elapsed)[^}]*display:\s*none/,
   "child workflow role and active-work time remain visible");
@@ -762,11 +725,11 @@ assert.match(css, /\.live-tracker-elapsed\[hidden\] \{ display:\s*none; \}/,
   "sub-minute elapsed metadata leaves no separator or reserved-width artifact");
 assert.doesNotMatch(childStripStyle, /background|gradient|box-shadow/i,
   "child hierarchy is expressed without cards or decorative surfaces");
-assert.match(css, /(?:^|\n)\.live-tracker-child-strip \.live-tracker-face \{[^}]*font-size:\s*\.68rem/,
+assert.match(css, /\.live-tracker-child-strip \.live-tracker-face \{[^}]*font-size:\s*\.68rem/,
   "child identity typography remains smaller and quieter than its architect");
-assert.match(css, /(?:^|\n)\.live-tracker-child-strip \.live-tracker-session:focus-visible \{[^}]*outline:\s*1px solid/,
+assert.match(css, /\.live-tracker-child-strip \.live-tracker-session:focus-visible \{[^}]*outline:\s*1px solid/,
   "the reduced child strip retains a visible keyboard focus indicator");
-assert.match(css, /(?:^|\n)\.live-tracker-child-strip \.live-tracker-session-current \{[^}]*background:\s*transparent/,
+assert.match(css, /\.live-tracker-child-strip \.live-tracker-session-current \{[^}]*background:\s*transparent/,
   "the compact active state stays understated and card-free");
 assert.match(browser, /\.new-session:not\(\[hidden\]\)/,
   "the new-session shortcut only targets a selected-project control that is still present");
