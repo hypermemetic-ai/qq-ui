@@ -711,7 +711,7 @@ function assertOverview(state, expected) {
   assert.ok(state.connectorPaths.every((route) => route.joinAttached && route.spineAttached
     && route.spineHeight >= 4
     && Math.abs(route.joinY - ((route.spineTop + route.spineBottom) / 2)) <= 2.1),
-    "each project lead joins one quiet vertical spine immediately left of and across its matching session rows");
+    "each project route joins one quiet vertical spine immediately left of and across its matching session rows");
   assert.ok(state.connectorPaths.every((route) => route.noGroupUnderline),
     "no connector has a horizontal underline beneath or across its session group");
   if (diagnose) {
