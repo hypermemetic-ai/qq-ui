@@ -34,7 +34,7 @@ const off = ui.consoleMenu.register({
 });
 ```
 
-`register()` accepts navigation descriptors only and returns an idempotent unregister function. Labels are rendered as escaped text, `href` must be a safe same-origin absolute path, duplicate IDs are rejected, and entries are ordered by `order`, label, then ID. Bind the disposer to the contributor's Cordis effect so plugin reloads cannot leave stale entries.
+`register()` accepts navigation descriptors only and returns an idempotent unregister function. Labels are rendered as escaped text, `href` must be a safe same-origin absolute path, duplicate IDs are rejected, and entries are ordered by `order`, label, then ID. Contributed links use native full-document navigation so the sibling owns its document, styles, scripts, and fragment handling. Bind the disposer to the contributor's Cordis effect so plugin reloads cannot leave stale entries.
 
 ## Repository map
 

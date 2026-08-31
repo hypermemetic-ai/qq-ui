@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createConsoleMenuRegistry } from "../src/console-menu.mjs";
 import { createConsoleHandler } from "../src/http-app.mjs";
@@ -89,7 +90,7 @@ const sts2At = chrome.indexOf("StS2 Companion");
 const workflowAt = chrome.indexOf('value="/workflows architect"');
 assert.ok(usageAt >= 0 && alphaAt > usageAt && sts2At > alphaAt && workflowAt > sts2At,
   "shell action, sorted navigation, and workflow action keep their semantic order");
-assert.match(chrome, /<a class="console-menu-choice" role="menuitem" href="\/sts2">StS2 Companion<\/a>/);
+assert.match(chrome, /<a class="console-menu-choice" role="menuitem" href="\/sts2" data-native-navigation="true">StS2 Companion<\/a>/);
 assert.doesNotMatch(chrome, /mutated|attacker\.invalid/);
 const emptyChrome = renderChrome({ ...snapshot, consoleMenu: [] }, paths);
 assert.doesNotMatch(emptyChrome, /StS2 Companion|Alpha &amp;/,
@@ -99,6 +100,9 @@ assert.notEqual(
   regionFingerprints(snapshot).chrome,
   "console menu changes invalidate the chrome region",
 );
+const browserSource = readFileSync(new URL("../assets/browser-v9.js", import.meta.url), "utf8");
+assert.ok((browserSource.match(/hasAttribute\("data-native-navigation"\)/g) ?? []).length >= 2,
+  "prefetch and click interception both preserve contributed links as native navigations");
 
 assert.equal(provide, "qq-ui");
 let provided;
@@ -180,7 +184,7 @@ try {
   const first = await fetch(`${base}/qq/session/${liveSnapshot.id}`);
   assert.equal(first.status, 200);
   const firstHtml = await first.text();
-  assert.match(firstHtml, /href="\/generic">Generic &lt;Provider&gt;<\/a>/,
+  assert.match(firstHtml, /href="\/generic" data-native-navigation="true">Generic &lt;Provider&gt;<\/a>/,
     "SSR reads validated contributions through the optional sheet");
 
   disposeLive();

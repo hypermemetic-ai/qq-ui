@@ -1182,7 +1182,7 @@ function renderWorkflowMenu(snapshot, paths) {
     .filter((item) => item?.kind === "navigation"
       && typeof item.label === "string"
       && typeof item.href === "string")
-    .map((item) => `<a class="console-menu-choice" role="menuitem" href="${escapeHtml(item.href)}">${escapeHtml(item.label)}</a>`)
+    .map((item) => `<a class="console-menu-choice" role="menuitem" href="${escapeHtml(item.href)}" data-native-navigation="true">${escapeHtml(item.label)}</a>`)
     .join("");
   const names = (Array.isArray(snapshot?.workflows) ? snapshot.workflows : [])
     .map(workflowName)
