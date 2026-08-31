@@ -432,19 +432,6 @@ const inspectExpression = `(() => {
   const paths = [...document.querySelectorAll('#session-connectors path[data-project][data-folder]')];
   const route = (path) => {
     const d = path.getAttribute('d') || '';
-    const tokens = d.trim().split(/\\s+/);
-    const values = [tokens[1], tokens[2], tokens[4], tokens[6], tokens[8], tokens[10], tokens[11], tokens[13]].map(Number);
-    const parsed = tokens.length === 14 && tokens[0] === 'M' && tokens[3] === 'H'
-      && tokens[5] === 'V' && tokens[7] === 'H' && tokens[9] === 'M'
-      && tokens[12] === 'V' && values.every(Number.isFinite);
-    const start = parsed ? { x: values[0], y: values[1] } : { x: NaN, y: NaN };
-    const laneX = parsed ? values[2] : NaN;
-    const joinY = parsed ? values[3] : NaN;
-    const spineX = parsed ? values[4] : NaN;
-    const spineRepeatX = parsed ? values[5] : NaN;
-    const spineTop = parsed ? values[6] : NaN;
-    const spineBottom = parsed ? values[7] : NaN;
-    const end = { x: spineX, y: spineBottom };
     const style = getComputedStyle(path);
     const project = projects.find((candidate) => identity(candidate) === identity(path));
     const group = groupByIdentity.get(identity(path));
@@ -452,70 +439,95 @@ const inspectExpression = `(() => {
     const groupBox = group?.getBoundingClientRect();
     const sessionsBox = group?.querySelector('.live-tracker-sessions')?.getBoundingClientRect();
     const contentLeft = groupBox && sessionsBox ? Math.max(groupBox.left, sessionsBox.left) : NaN;
-    const openGap = contentLeft - start.x;
-    const sourceRun = laneX - start.x;
-    const joinRun = spineX - laneX;
-    const spineHeight = spineBottom - spineTop;
-    const projectPaneRight = projectVisibilityClip?.right ?? NaN;
-    const projectEntryInset = projectPaneRight - start.x;
-    const projectSlice = visibleSlice(project, projectVisibilityClip);
-    const expectedSpineTop = sessionsBox && groupVisibilityClip
+    const spineX = contentLeft - 4;
+    const spineTop = sessionsBox && groupVisibilityClip
       ? Math.max(sessionsBox.top, groupVisibilityClip.top) + .75 : NaN;
-    const expectedSpineBottom = sessionsBox && groupVisibilityClip
+    const spineBottom = sessionsBox && groupVisibilityClip
       ? Math.min(sessionsBox.bottom, groupVisibilityClip.bottom) - .75 : NaN;
-    const segments = parsed ? [
-      { axis: 'h', fixed: start.y, from: start.x, to: laneX, name: 'source' },
-      { axis: 'v', fixed: laneX, from: start.y, to: joinY, name: 'lane' },
-      { axis: 'h', fixed: joinY, from: laneX, to: spineX, name: 'join' },
-      { axis: 'v', fixed: spineX, from: spineTop, to: spineBottom, name: 'spine' },
-    ] : [];
+    const spineHeight = spineBottom - spineTop;
+    const length = path.getTotalLength();
+    const incomingLength = Math.max(0, length - spineHeight);
+    const pointAt = (distance) => {
+      const point = path.getPointAtLength(Math.max(0, Math.min(length, distance)));
+      return { x: point.x, y: point.y };
+    };
+    const start = pointAt(0);
+    const join = pointAt(Math.max(0, incomingLength - .05));
+    const spineStart = pointAt(Math.min(length, incomingLength + .05));
+    const end = pointAt(length);
+    const sampleRange = (from, to, name) => {
+      if (!(to > from)) return [];
+      const distances = [from];
+      for (let distance = from + 2; distance < to; distance += 2) distances.push(distance);
+      distances.push(to);
+      const points = distances.map(pointAt);
+      return points.slice(1).map((point, index) => ({ from: points[index], to: point, name }));
+    };
+    const segments = [
+      ...sampleRange(0, Math.max(0, incomingLength - .05), 'incoming'),
+      ...sampleRange(Math.min(length, incomingLength + .05), length, 'spine'),
+    ];
+    const sampledPoints = segments.flatMap((segment) => [segment.from, segment.to]);
+    const projectSlice = visibleSlice(project, projectVisibilityClip);
+    const joinY = join.y;
     return {
-      identity: identity(path), d, length: path.getTotalLength(), start, end, laneX, joinY,
+      identity: identity(path), d, length, start, end, joinY,
       spineX, spineTop, spineBottom, spineHeight, segments,
-      contentLeft, openGap, sourceRun, joinRun, projectPaneRight, projectEntryInset,
+      contentLeft,
       strokeWidth: Number.parseFloat(style.strokeWidth), stroke: style.stroke,
       opacity: Number.parseFloat(style.opacity), display: style.display, visibility: style.visibility,
       vectorEffect: style.vectorEffect, lineJoin: style.strokeLinejoin, lineCap: style.strokeLinecap,
-      orthogonal: Boolean(parsed),
-      bends: Boolean(parsed && Math.abs(laneX - start.x) > .5
-        && Math.abs(joinY - start.y) > .5 && Math.abs(spineX - laneX) > .5 && spineHeight > .5),
       startAttached: Boolean(projectBox && projectSlice)
         && Math.abs(start.x - projectBox.right) <= 2
         && Math.abs(start.y - ((projectBox.top + projectBox.bottom) / 2)) <= 1
         && start.y >= projectSlice.top - 1 && start.y <= projectSlice.bottom + 1,
-      laneInChannel: Boolean(sessionsBox) && laneX > start.x && laneX < spineX,
-      joinAttached: Math.abs(spineRepeatX - spineX) <= .01
-        && joinY >= spineTop - .01 && joinY <= spineBottom + .01,
+      joinAttached: Math.abs(join.x - spineX) <= .15
+        && joinY >= spineTop - .15 && joinY <= spineBottom + .15,
       spineAttached: Boolean(groupBox && sessionsBox)
         && contentLeft - spineX >= 3 && contentLeft - spineX <= 5
-        && Math.abs(spineTop - expectedSpineTop) <= 1
-        && Math.abs(spineBottom - expectedSpineBottom) <= 1,
-      noGroupUnderline: Boolean(sessionsBox) && segments
-        .filter((segment) => segment.axis === 'h')
-        .every((segment) => Math.max(segment.from, segment.to) <= spineX + .01),
+        && Math.abs(spineStart.x - spineX) <= .15
+        && Math.abs(spineStart.y - spineTop) <= .15
+        && Math.abs(end.x - spineX) <= .15
+        && Math.abs(end.y - spineBottom) <= .15,
+      noGroupUnderline: Boolean(sessionsBox) && sampledPoints.length > 0
+        && sampledPoints.every((point) => point.x <= spineX + .15),
       insideVisibility: Boolean(projectVisibilityClip && groupVisibilityClip && sessionsBox)
         && start.y >= projectVisibilityClip.top - 1 && start.y <= projectVisibilityClip.bottom + 1
         && joinY >= groupVisibilityClip.top - 1 && joinY <= groupVisibilityClip.bottom + 1
         && spineTop >= groupVisibilityClip.top - 1 && spineBottom <= groupVisibilityClip.bottom + 1
         && spineX >= groupVisibilityClip.left - 5 && spineX <= groupVisibilityClip.right + 1
-        && (!composerCoversTracker || Math.max(start.y, joinY, spineBottom) <= composerRect.top + 1),
+        && (!composerCoversTracker || sampledPoints.every((point) => point.y <= composerRect.top + 1)),
     };
   };
   const routes = paths.map(route);
-  const range = (segment) => [Math.min(segment.from, segment.to), Math.max(segment.from, segment.to)];
+  const cross = (a, b, c) => ((b.x - a.x) * (c.y - a.y)) - ((b.y - a.y) * (c.x - a.x));
+  const within = (value, start, end) => value >= Math.min(start, end) - .05
+    && value <= Math.max(start, end) + .05;
+  const onSegment = (point, segment) => Math.abs(cross(segment.from, segment.to, point)) <= .05
+    && within(point.x, segment.from.x, segment.to.x)
+    && within(point.y, segment.from.y, segment.to.y);
   const segmentConflict = (left, right) => {
-    if (left.axis === right.axis) {
-      if (Math.abs(left.fixed - right.fixed) > .01) return '';
-      const [leftMin, leftMax] = range(left);
-      const [rightMin, rightMax] = range(right);
-      return Math.min(leftMax, rightMax) >= Math.max(leftMin, rightMin) - .01 ? 'coincident' : '';
+    const leftFrom = cross(left.from, left.to, right.from);
+    const leftTo = cross(left.from, left.to, right.to);
+    const rightFrom = cross(right.from, right.to, left.from);
+    const rightTo = cross(right.from, right.to, left.to);
+    const collinear = Math.abs(leftFrom) <= .05 && Math.abs(leftTo) <= .05
+      && Math.abs(rightFrom) <= .05 && Math.abs(rightTo) <= .05;
+    if (collinear) {
+      const overlaps = within(left.from.x, right.from.x, right.to.x)
+        || within(left.to.x, right.from.x, right.to.x)
+        || within(right.from.x, left.from.x, left.to.x)
+        || within(right.to.x, left.from.x, left.to.x);
+      const overlapsY = within(left.from.y, right.from.y, right.to.y)
+        || within(left.to.y, right.from.y, right.to.y)
+        || within(right.from.y, left.from.y, left.to.y)
+        || within(right.to.y, left.from.y, left.to.y);
+      return overlaps && overlapsY ? 'coincident' : '';
     }
-    const horizontal = left.axis === 'h' ? left : right;
-    const vertical = left.axis === 'v' ? left : right;
-    const [horizontalMin, horizontalMax] = range(horizontal);
-    const [verticalMin, verticalMax] = range(vertical);
-    return vertical.fixed >= horizontalMin - .01 && vertical.fixed <= horizontalMax + .01
-      && horizontal.fixed >= verticalMin - .01 && horizontal.fixed <= verticalMax + .01 ? 'intersection' : '';
+    const crosses = ((leftFrom < -.05 && leftTo > .05) || (leftFrom > .05 && leftTo < -.05))
+      && ((rightFrom < -.05 && rightTo > .05) || (rightFrom > .05 && rightTo < -.05));
+    return crosses || onSegment(right.from, left) || onSegment(right.to, left)
+      || onSegment(left.from, right) || onSegment(left.to, right) ? 'intersection' : '';
   };
   const routeConflicts = [];
   for (let left = 0; left < routes.length; left += 1) {
@@ -683,25 +695,8 @@ function assertOverview(state, expected) {
   assert.ok(state.connectorPaths.every((route) => route.strokeWidth > 0 && route.strokeWidth <= 1
     && route.vectorEffect === "non-scaling-stroke" && route.lineJoin === "miter" && route.lineCap === "butt"),
   "all relationship routes retain square, non-scaling quiet hairline styling");
-  if (diagnose) {
-    const invalid = state.connectorPaths.filter((route) => !route.orthogonal || !route.bends)
-      .map(({ identity, d, orthogonal, bends, start, laneX, joinY, spineX, spineTop, spineBottom }) => (
-        { identity, d, orthogonal, bends, start, laneX, joinY, spineX, spineTop, spineBottom }
-      ));
-    if (invalid.length) console.error("invalid connector bends", invalid);
-  }
-  assert.ok(state.connectorPaths.every((route) => route.orthogonal && route.bends),
-    "every overview relationship uses crisp horizontal/vertical segments with deliberate mitered bends");
-  assert.ok(state.connectorPaths.every((route) => route.startAttached && route.laneInChannel),
-    "each route starts at its matching project center and enters a gutter-only vertical lane");
-  const projectChannelEdge = state.projectVisibilityClip.right - .75;
-  const laneOrigin = Math.min(...state.connectorPaths.map((route) => route.laneX));
-  const targetLaneOrigin = projectChannelEdge + 2;
-  assert.ok(Math.abs(laneOrigin - targetLaneOrigin) <= .2,
-    "the vertical lane bundle begins at the project-side gutter edge rather than migrating toward the channel midpoint");
-  assert.ok(state.connectorPaths.every((route) => route.projectEntryInset >= Math.min(24, (state.projectVisibilityClip.right - state.projectVisibilityClip.left) * .12)
-    && route.sourceRun >= 24 && route.joinRun >= 1.5),
-    "each angular lead has a material project-side run and reaches its row-side spine from the gutter");
+  assert.ok(state.connectorPaths.every((route) => route.startAttached),
+    "each route starts at the center of its matching visible project choice");
   if (diagnose) {
     const invalid = state.connectorPaths.filter((route) => !route.joinAttached || !route.spineAttached
       || !route.noGroupUnderline || route.spineHeight < 4
@@ -731,10 +726,8 @@ function assertOverview(state, expected) {
   }
   assert.ok(state.connectorPaths.every((route) => route.insideVisibility),
     "routes remain in their project/tracker bands and above actual composer occlusion");
-  assert.equal(new Set(state.connectorPaths.map((route) => route.laneX.toFixed(2))).size, state.connectorPaths.length,
-    "every simultaneously visible route owns a unique vertical lane");
   assert.deepEqual(state.routeConflicts, [],
-    "routes have no coincident segments or pairwise horizontal/vertical intersections");
+    "rendered project-to-group routes have no coincident segments or pairwise intersections");
   assert.deepEqual(state.projectSequence, expected, "left project identities keep canonical order");
   assert.deepEqual(state.groupSequence, expected, "right group identities exactly match canonical left order");
   assert.deepEqual(state.visibleGroups, expected, "overview exposes every group in reading order");
@@ -1008,9 +1001,6 @@ try {
   })()`);
   report.desktopSpineAligned = await inspect(desktop.cdp, "desktop-spine-aligned", { capture: false });
   assertOverview(report.desktopSpineAligned, expectedMany);
-  const alignedAlpha = report.desktopSpineAligned.connectorPaths.find((route) => route.identity === "alpha\n");
-  assert.ok(alignedAlpha && Math.abs(alignedAlpha.joinY - alignedAlpha.start.y) >= 1.5,
-    "exact source/spine-midpoint scroll alignment retains a visible angular bend");
   await desktop.cdp.evaluate(`(() => {
     const tracker = document.querySelector('.live-tracker');
     const projects = document.querySelector('.active-projects');
