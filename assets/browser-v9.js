@@ -3018,7 +3018,7 @@
   const sessionConnectorModeVisible = (tracker, rail) => {
     if (!(tracker instanceof HTMLElement) || !(rail instanceof HTMLElement)) return false;
     if (tracker.dataset.overview !== "true") return false;
-    if (!desktopChair() && !navMode()) return false;
+    if (!desktopChair()) return false;
     const trackerStyle = getComputedStyle(tracker);
     const railStyle = getComputedStyle(rail);
     return trackerStyle.display !== "none" && trackerStyle.visibility !== "hidden"
@@ -3205,10 +3205,6 @@
     }));
     observeSessionConnectorSurfaces(observe);
   };
-  function scheduleSessionConnectors() {
-    if (sessionConnectorFrame) return;
-    sessionConnectorFrame = requestAnimationFrame(paintSessionConnectors);
-  }
   const suppressSessionConnectors = () => {
     if (sessionConnectorFrame) cancelAnimationFrame(sessionConnectorFrame);
     sessionConnectorFrame = 0;
@@ -3216,15 +3212,50 @@
     sessionConnectorResizeObserver?.disconnect();
     sessionConnectorObserved = [];
   };
+  function scheduleSessionConnectors() {
+    if (!desktopChair()) {
+      suppressSessionConnectors();
+      return;
+    }
+    if (sessionConnectorFrame) return;
+    sessionConnectorFrame = requestAnimationFrame(paintSessionConnectors);
+  }
 
   const liveTrackerGroups = (tracker = document.querySelector(".live-tracker")) => tracker
     ? [...tracker.querySelectorAll(".live-tracker-project[data-project]")]
     : [];
+  const liveTrackerCreates = (tracker = document.querySelector(".live-tracker")) => {
+    const dock = projectRail();
+    return [
+      ...(tracker instanceof HTMLElement ? tracker.querySelectorAll(":scope > form.new-session") : []),
+      ...(dock instanceof HTMLElement ? dock.querySelectorAll(":scope > form.new-session") : []),
+    ];
+  };
+  const liveTrackerCreate = (tracker = document.querySelector(".live-tracker")) => {
+    const creates = liveTrackerCreates(tracker);
+    const dock = projectRail();
+    const host = navMode() && !desktopChair() && dock instanceof HTMLElement ? dock : tracker;
+    return creates.find((create) => create.parentElement === host) ?? creates[0] ?? null;
+  };
+  const syncLiveTrackerCreateHost = (tracker = document.querySelector(".live-tracker")) => {
+    const create = liveTrackerCreate(tracker);
+    if (!(create instanceof HTMLFormElement) || !(tracker instanceof HTMLElement)) return create;
+    const dock = projectRail();
+    const host = navMode() && !desktopChair() && dock instanceof HTMLElement ? dock : tracker;
+    // A live chrome replacement can render a new tracker form while the prior
+    // form survives in the PWA dock. Keep the form already in the desired host
+    // (and its focus/listeners), but never let both copies remain actionable.
+    for (const duplicate of liveTrackerCreates(tracker)) {
+      if (duplicate !== create) duplicate.remove();
+    }
+    if (create.parentElement !== host) host.append(create);
+    return create;
+  };
   const removeLiveTrackerCreate = (tracker) => {
-    for (const create of tracker.querySelectorAll("form.new-session")) create.remove();
+    for (const create of liveTrackerCreates(tracker)) create.remove();
   };
   const ensureLiveTrackerCreate = (tracker, project, folder) => {
-    let create = tracker.querySelector("form.new-session");
+    let create = liveTrackerCreate(tracker);
     if (!(create instanceof HTMLFormElement)) {
       create = document.createElement("form");
       create.className = "new-session";
@@ -3238,7 +3269,12 @@
     }
     create.hidden = false;
     create.action = `${consoleBasePath()}/project/${encodeURIComponent(project)}${folder ? `/${encodeURIComponent(folder)}` : ""}/sessions`;
+    syncLiveTrackerCreateHost(tracker);
     return create;
+  };
+  const syncPwaSwitcherTitle = (tracker, title) => {
+    const heading = tracker?.querySelector?.(".pwa-switcher-title");
+    if (heading instanceof HTMLElement) heading.textContent = title || "Sessions";
   };
   const showLiveTrackerOverview = ({ remember = true } = {}) => {
     const tracker = document.querySelector(".live-tracker");
@@ -3251,11 +3287,16 @@
     delete tracker.dataset.filterProject;
     delete tracker.dataset.filterFolder;
     tracker.setAttribute("aria-label", "All project sessions");
+    syncPwaSwitcherTitle(tracker, "All sessions");
     const empty = tracker.querySelector(".live-tracker-filter-empty");
     if (empty instanceof HTMLElement) empty.hidden = true;
     removeLiveTrackerCreate(tracker);
     markGroupCurrent(".active-project-item[href]", "active-project-current", null);
     markGroupCurrent(".projects-choice[href]", "projects-choice-current", null);
+    if (navMode() && !desktopChair()) {
+      markGroupCurrent(".active-project-item[href]", "active-project-current", document.querySelector(".projects-session-item"));
+      markGroupCurrent(".projects-choice[href]", "projects-choice-current", document.querySelector(".projects-session-choice"));
+    }
     if (remember) liveTrackerProjectFilter = LIVE_TRACKER_OVERVIEW;
     scheduleSessionConnectors();
     return true;
@@ -3275,13 +3316,19 @@
     }
     const label = String(
       group?.dataset?.projectLabel
+        ?? item?.dataset?.projectLabel
         ?? item?.querySelector?.(".active-project-label")?.textContent
         ?? item?.textContent
         ?? project,
     ).trim();
+    const folderLabel = String(
+      group?.dataset?.folderLabel ?? item?.dataset?.folderLabel ?? folder,
+    ).trim();
+    const placeLabel = folder ? `${label || project} / ${folderLabel || folder}` : (label || project);
     tracker.dataset.filterProject = project;
     tracker.dataset.filterFolder = folder;
-    tracker.setAttribute("aria-label", `${label || project} sessions`);
+    tracker.setAttribute("aria-label", `${placeLabel} sessions`);
+    syncPwaSwitcherTitle(tracker, placeLabel);
     const empty = tracker.querySelector(".live-tracker-filter-empty");
     if (empty instanceof HTMLElement) empty.hidden = Boolean(group);
     ensureLiveTrackerCreate(tracker, project, folder);
@@ -3545,9 +3592,22 @@
   const selectOverlayProject = (item) => {
     const projectItem = overlayProjectItem(item);
     if (!(projectItem instanceof HTMLElement)) return false;
+    const projectsOverview = projectItem.matches(".projects-session-item")
+      || item?.matches?.(".projects-session-choice");
+    if (navMode() && !desktopChair()) {
+      if (projectsOverview) {
+        if (!showLiveTrackerOverview()) return false;
+        markLinkCurrent(projectItem);
+        if (item !== projectItem && item instanceof Element) markLinkCurrent(item);
+        return true;
+      }
+      markLinkCurrent(projectItem);
+      if (item !== projectItem && item instanceof Element) markLinkCurrent(item);
+      return filterLiveTrackerProject(projectItem);
+    }
     markLinkCurrent(projectItem);
     if (item !== projectItem && item instanceof Element) markLinkCurrent(item);
-    if (projectItem.matches(".projects-session-item") || item?.matches?.(".projects-session-choice")) {
+    if (projectsOverview) {
       const sessionId = projectItem.dataset.sessionId || item?.dataset?.sessionId || "";
       paintSessionTokens([], "", projectItem);
       if (!sessionId) {
@@ -3600,14 +3660,20 @@
   const paintChairMode = (nav, persist = true) => {
     if (nav) document.body.classList.add("nav-mode");
     else document.body.classList.remove("nav-mode");
-    if (nav) scheduleSessionConnectors();
-    else if (!desktopChair()) suppressSessionConnectors();
+    syncLiveTrackerCreateHost();
+    if (!desktopChair()) suppressSessionConnectors();
     else scheduleSessionConnectors();
     if (nav) {
       overlaySessionId = "";
       pendingCanonical = "";
       const prompt = composer();
       if (prompt instanceof HTMLTextAreaElement && document.activeElement === prompt) prompt.blur();
+      if (!desktopChair()) {
+        syncLiveTrackerProjectFilter();
+        requestAnimationFrame(() => {
+          document.querySelector(".pwa-switcher-close")?.focus?.({ preventScroll: true });
+        });
+      }
     }
     syncDrawerChrome();
     if (!persist) return;
@@ -4351,6 +4417,10 @@
     const point = event.touches[0];
     const now = performance.now();
     if (navMode()) {
+      // The project dock is a native horizontal scroller. Never arm the
+      // document-wide close gesture here; Chromium must own drags in either
+      // direction even when the dock is currently at one of its scroll edges.
+      if (target.closest("#project-rail, .active-projects")) return;
       surfaceGesture = {
         kind: "nav",
         mode: "close",
@@ -4436,7 +4506,7 @@
   document.addEventListener("submit", (event) => {
     const form = event.target;
     if (desktopChair() || !navMode() || !(form instanceof HTMLFormElement)
-      || !form.matches(".session-traversal .new-session")) return;
+      || !form.matches(".session-traversal > .new-session, #project-rail > .new-session")) return;
     // Observe the native submission rather than replacing the button's action.
     // This keeps pointer and keyboard activation single-shot.
     paintChairMode(false);
@@ -4461,7 +4531,7 @@
     const picker = link.matches(`.active-project-item, .projects-choice, ${LIVE_SESSION_PICKER}`);
     if (!url) return;
     if (!picker && url.pathname === location.pathname && url.search === location.search) return;
-    const filterOnlyProject = link.matches(".active-project-item[data-project], .projects-choice[data-project]")
+    const filterOnlyProject = Boolean(overlayProjectItem(link))
       && Boolean(document.querySelector(".live-tracker"));
     const closesMobileRail = picker && !filterOnlyProject && !desktopChair() && navMode()
       && Boolean(link.closest("#project-rail, .session-traversal"));
@@ -4533,6 +4603,12 @@
       dismiss.closest(".workflows-popup")?.remove();
       return;
     }
+    const switcherClose = target?.closest(".pwa-switcher-close");
+    if (switcherClose instanceof HTMLButtonElement) {
+      event.preventDefault();
+      paintChairMode(false);
+      return;
+    }
     if (activateOverviewFromChooserClick(event, target)) return;
     const traversalAction = target?.closest(".session-traversal a[href], .session-traversal button, .session-traversal input, .session-traversal select, .session-traversal textarea, .session-traversal [role=button], .session-traversal [role=link]");
     if (!desktopChair() && !traversalAction
@@ -4596,6 +4672,11 @@
       } else if (event.key === "Tab") {
         trapDrawerFocus(event);
       }
+      return;
+    }
+    if (navMode() && !desktopChair() && event.key === "Escape") {
+      event.preventDefault();
+      paintChairMode(false);
       return;
     }
     if (clearProjectFilterFromChooserKey(event)) return;
@@ -5277,8 +5358,12 @@
     });
   }
 
-  window.addEventListener("resize", scheduleSessionConnectors, { passive: true });
-  window.addEventListener("orientationchange", scheduleSessionConnectors, { passive: true });
+  const syncSwitcherViewport = () => {
+    syncLiveTrackerCreateHost();
+    scheduleSessionConnectors();
+  };
+  window.addEventListener("resize", syncSwitcherViewport, { passive: true });
+  window.addEventListener("orientationchange", syncSwitcherViewport, { passive: true });
   window.visualViewport?.addEventListener?.("resize", scheduleSessionConnectors, { passive: true });
   window.visualViewport?.addEventListener?.("scroll", scheduleSessionConnectors, { passive: true });
   document.fonts?.ready?.then?.(scheduleSessionConnectors).catch?.(() => {});

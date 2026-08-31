@@ -2937,44 +2937,6 @@ body.document-page {
   white-space: nowrap;
 }
 
-@media (max-width: 42rem) {
-  .nav-mode .live-tracker-project {
-    display: block;
-    width: 100%;
-    padding-block: .35rem;
-  }
-  .nav-mode .live-tracker-project-name {
-    margin: 0 0 .3rem .15rem;
-    color: #555;
-    font-size: .7rem;
-  }
-  .nav-mode .live-tracker-sessions {
-    width: 100%;
-    flex-direction: column;
-    align-items: stretch;
-    gap: .05rem;
-  }
-  .nav-mode .live-tracker-session {
-    min-height: 2.75rem;
-    padding: .3rem .15rem;
-    border-radius: 0;
-    background: transparent;
-  }
-  .nav-mode .live-tracker-session-current { color: #f2f2f2; }
-  .nav-mode .live-tracker-depth-1 .live-tracker-session { margin-inline-start: .65rem; }
-  .nav-mode .live-tracker-depth-2 .live-tracker-session { margin-inline-start: 1.3rem; }
-  .nav-mode .live-tracker-depth-3 .live-tracker-session { margin-inline-start: 1.95rem; }
-  .nav-mode .live-tracker-depth-4 .live-tracker-session,
-  .nav-mode .live-tracker-depth-5 .live-tracker-session,
-  .nav-mode .live-tracker-depth-6 .live-tracker-session,
-  .nav-mode .live-tracker-depth-7 .live-tracker-session,
-  .nav-mode .live-tracker-depth-8 .live-tracker-session { margin-inline-start: 2.6rem; }
-  .nav-mode .live-tracker-message {
-    padding: .7rem .15rem;
-    color: #777;
-    font-size: .9rem;
-  }
-}
 
 .nav-mode .session-traversal {
   display: flex;
@@ -2992,126 +2954,352 @@ body.document-page {
 
 .nav-mode .session-heading-start > .session-id { display: none; }
 
+.pwa-switcher-header { display: none; }
+
 @media (max-width: 42rem) {
+  /* Narrow navigation is a single, opaque app screen. The conversation and
+     composer leave both the visual surface and keyboard order while it is open. */
+  body.nav-mode { grid-template-rows: minmax(0, 1fr); }
+  .nav-mode #session-panel > :not(#session-chrome),
+  .nav-mode .session-heading > .session-heading-end,
+  .nav-mode .session-heading-start > :not(.session-traversal),
+  .nav-mode #session-chrome > .notice,
+  .nav-mode #session-chrome > .turn-error { display: none !important; }
+  .nav-mode .session-heading { position: static; display: block; }
+  .nav-mode .session-heading-start { display: contents; }
+  .nav-mode .session-connectors { display: none !important; }
+
   .nav-mode .session-traversal {
     visibility: visible;
     position: fixed;
     z-index: 7;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: auto;
+    inset: 0;
     display: flex;
-    width: 50%;
+    width: 100%;
     max-width: none;
+    height: 100dvh;
+    min-height: 100%;
     flex: none;
     flex-direction: column;
     flex-wrap: nowrap;
     align-items: stretch;
-    justify-content: center;
-    justify-content: safe center;
-    gap: .1rem;
+    justify-content: flex-start;
+    gap: 0;
     overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: max(1.35rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) 7.25rem 1rem;
+    scroll-padding-block: calc(max(1rem, env(safe-area-inset-top)) + 5rem) calc(5.25rem + env(safe-area-inset-bottom));
+    padding: 0 max(1rem, env(safe-area-inset-right)) calc(5.25rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+    background: #000;
     pointer-events: auto;
   }
-  .nav-mode .session-token {
+
+  .nav-mode .pwa-switcher-header {
+    position: sticky;
+    z-index: 2;
+    top: 0;
     display: flex;
-    justify-content: flex-start;
-    align-items: center;
-    min-width: 0;
-    min-height: 2.75rem;
-    padding: .3rem .15rem;
-    border-radius: 0;
-    background: transparent;
-    color: #454545;
-    font-size: 1.05rem;
+    min-height: calc(4.85rem + env(safe-area-inset-top));
+    flex: none;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-inline: calc(-1 * max(1rem, env(safe-area-inset-left))) calc(-1 * max(1rem, env(safe-area-inset-right)));
+    padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) .85rem max(1rem, env(safe-area-inset-left));
+    border-bottom: 1px solid #1c1c1c;
+    background: rgba(0, 0, 0, .96);
+  }
+  .nav-mode .pwa-switcher-heading { min-width: 0; }
+  .nav-mode .pwa-switcher-kicker {
+    display: block;
+    margin-bottom: .16rem;
+    color: #656565;
+    font-size: .66rem;
+    font-weight: 620;
+    letter-spacing: .1em;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+  .nav-mode .pwa-switcher-title {
+    margin: 0;
+    overflow: hidden;
+    color: #f1f1f1;
+    font-size: 1.35rem;
     font-weight: 650;
+    letter-spacing: -.018em;
+    line-height: 1.12;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .nav-mode .session-token-current {
-    color: #f2f2f2;
-    background: transparent;
-  }
-  .nav-mode .session-token:hover,
-  .nav-mode .session-token:focus-visible { color: #fff; }
-  .nav-mode .session-traversal .new-session {
-    display: flex;
-    width: 100%;
-    margin-top: .2rem;
-  }
-  .nav-mode .session-traversal .new-session button {
-    display: flex;
-    justify-content: flex-start;
-    align-items: center;
-    width: 100%;
-    min-width: 0;
-    min-height: 2.75rem;
-    padding: .3rem .15rem;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    color: #454545;
-    font-size: 1.05rem;
-    font-weight: 650;
+  .nav-mode .pwa-switcher-close {
+    display: grid;
+    width: 2.75rem;
+    min-width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+    place-items: center;
+    border: 1px solid #262626;
+    border-radius: .35rem;
+    background: #0b0b0b;
+    color: #a8a8a8;
     cursor: pointer;
   }
-  .nav-mode .session-traversal .new-session button:hover,
-  .nav-mode .session-traversal .new-session button:focus-visible {
+  .nav-mode .pwa-switcher-close:hover,
+  .nav-mode .pwa-switcher-close:focus-visible {
+    border-color: #4a4a4a;
+    color: #fff;
+    outline: none;
+  }
+
+  .nav-mode .live-tracker[data-overview="true"] {
+    justify-content: flex-start;
+    gap: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+  .nav-mode .live-tracker-project,
+  .nav-mode .live-tracker[data-overview="true"] .live-tracker-project {
+    display: block;
+    width: 100%;
+    flex: none;
+    padding: 1.05rem 0 .65rem;
+    border-bottom: 1px solid #171717;
+  }
+  .nav-mode .live-tracker-project:last-of-type { border-bottom: 0; }
+  .nav-mode .live-tracker-project-name,
+  .nav-mode .live-tracker[data-overview="true"] .live-tracker-project-name {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0 0 .42rem;
+    padding: 0 .75rem;
+    overflow: visible;
+    clip: auto;
+    clip-path: none;
+    border: 0;
+    color: #777;
+    font-size: .7rem;
+    font-weight: 650;
+    letter-spacing: .085em;
+    line-height: 1.25;
+    text-transform: uppercase;
+    white-space: normal;
+  }
+  .nav-mode .live-tracker-folder::before { color: #444; }
+  .nav-mode .live-tracker-sessions,
+  .nav-mode .live-tracker[data-overview="true"] .live-tracker-sessions,
+  .nav-mode .live-tracker-sessions-hierarchical {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: .12rem;
+  }
+  .nav-mode .live-tracker-row { width: 100%; }
+  .nav-mode .live-tracker-session {
+    position: relative;
+    display: flex;
+    width: 100%;
+    min-height: 3.25rem;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: .16rem;
+    padding: .54rem .75rem;
+    border-radius: .28rem;
+    background: transparent;
+    color: #b0b0b0;
+    line-height: 1.12;
+  }
+  .nav-mode .live-tracker-session:hover,
+  .nav-mode .live-tracker-session:focus-visible {
+    background: #0d0d0d;
+    color: #fff;
+    outline: 1px solid #333;
+    outline-offset: -1px;
+  }
+  .nav-mode .live-tracker-session-current {
+    background: #151515;
+    box-shadow: inset 2px 0 #bdbdbd;
     color: #fff;
   }
-  .nav-mode .session-traversal .new-session button .banner-mark {
-    display: block;
-    width: 1.1rem;
-    height: 1.1rem;
+  .nav-mode .live-tracker-face {
+    font-size: 1rem;
+    font-weight: 650;
+    letter-spacing: .005em;
   }
+  .nav-mode .live-tracker-label,
+  .nav-mode .live-tracker-state {
+    color: #707070;
+    font-size: .72rem;
+    letter-spacing: .015em;
+    line-height: 1.15;
+  }
+  .nav-mode .live-tracker-session-current .live-tracker-label,
+  .nav-mode .live-tracker-session-current .live-tracker-state { color: #9a9a9a; }
+  .nav-mode .live-tracker-activity[data-activity="working"] { color: #cacaca; }
+
+  /* Subagents retain a full target and hierarchy through indentation/type, not
+     through project-style relationship paths. */
+  .nav-mode .live-tracker-depth-1 .live-tracker-session,
+  .nav-mode .live-tracker-depth-2 .live-tracker-session,
+  .nav-mode .live-tracker-depth-3 .live-tracker-session,
+  .nav-mode .live-tracker-depth-4 .live-tracker-session,
+  .nav-mode .live-tracker-depth-5 .live-tracker-session,
+  .nav-mode .live-tracker-depth-6 .live-tracker-session,
+  .nav-mode .live-tracker-depth-7 .live-tracker-session,
+  .nav-mode .live-tracker-depth-8 .live-tracker-session {
+    width: calc(100% - 1rem);
+    min-height: 3rem;
+    margin-inline-start: 1rem;
+  }
+  .nav-mode .live-tracker-child-strip .live-tracker-session {
+    min-height: 3rem;
+    padding: .48rem .75rem;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: .14rem;
+    color: #929292;
+  }
+  .nav-mode .live-tracker-child-strip .live-tracker-session::before { display: none; }
+  .nav-mode .live-tracker-child-strip .live-tracker-face {
+    color: inherit;
+    font-size: .86rem;
+    font-weight: 580;
+  }
+  .nav-mode .live-tracker-child-strip .live-tracker-label,
+  .nav-mode .live-tracker-child-strip .live-tracker-state { color: #626262; }
+  .nav-mode .live-tracker-child-strip .live-tracker-session-current {
+    background: #121212;
+    box-shadow: inset 2px 0 #858585;
+    color: #d6d6d6;
+  }
+  .nav-mode .live-tracker-message,
+  .nav-mode .live-tracker-filter-empty {
+    padding: 1.5rem .75rem;
+    color: #777;
+    font-size: .9rem;
+    white-space: normal;
+  }
+
+  /* The safe-area dock is project context. It scrolls only horizontally; the
+     session surface above remains the sole vertical scroll plane. */
   .nav-mode .project-rail {
     display: flex;
     position: fixed;
-    z-index: 7;
-    inset: 0 auto 0 0;
-    width: 50%;
-    flex-direction: column;
+    z-index: 8;
+    inset: auto 0 0;
+    width: 100%;
+    height: calc(4.25rem + env(safe-area-inset-bottom));
+    flex-direction: row;
     align-items: stretch;
-    justify-content: center;
-    justify-content: safe center;
-    padding: max(1.35rem, env(safe-area-inset-top)) 1rem 7.25rem max(.9rem, env(safe-area-inset-left));
+    padding: .55rem max(.75rem, env(safe-area-inset-right)) max(.55rem, env(safe-area-inset-bottom)) max(.75rem, env(safe-area-inset-left));
     overflow: hidden;
+    border-top: 1px solid #202020;
     border-right: 0;
-    background: transparent;
-    box-shadow: none;
+    background: rgba(7, 7, 7, .98);
+    box-shadow: 0 -.6rem 1.6rem rgba(0, 0, 0, .32);
     transform: none;
     visibility: visible;
     pointer-events: auto;
   }
   .nav-mode .project-rail .active-projects {
-    width: 100%;
-    max-height: 100%;
-    overflow: auto;
-    overscroll-behavior: contain;
+    display: flex;
+    width: auto;
+    min-width: 0;
+    max-height: none;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: .2rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
     pointer-events: auto;
     scrollbar-width: none;
   }
+  .nav-mode .project-rail .active-projects::-webkit-scrollbar { display: none; }
   .nav-mode .project-rail .active-projects ol {
     display: flex;
-    flex-direction: column;
-    gap: .1rem;
+    flex: none;
+    flex-direction: row;
+    gap: .2rem;
   }
-  .nav-mode .project-rail .active-projects ol::-webkit-scrollbar { display: none; }
+  .nav-mode .project-rail .active-projects li { flex: none; }
+  .nav-mode .project-rail .projects-session-item,
   .nav-mode .project-rail .active-project-item {
-    justify-content: flex-start;
+    width: auto;
+    justify-content: center;
     min-height: 2.75rem;
-    padding: .3rem .15rem;
-    color: #454545;
-    font-size: 1.05rem;
-    font-weight: 650;
+    margin: 0;
+    padding: .55rem .78rem;
+    border: 0;
+    border-radius: .3rem;
+    background: transparent;
+    color: #6f6f6f;
+    font-size: .78rem;
+    font-weight: 600;
+    letter-spacing: .025em;
   }
-  .nav-mode .project-rail .active-project-current { color: #f2f2f2; }
+  .nav-mode .project-rail .projects-session-item {
+    position: sticky;
+    z-index: 1;
+    left: 0;
+    flex: none;
+    background: #070707;
+    color: #9b9b9b;
+  }
+  .nav-mode .project-rail .active-project-current {
+    background: #1a1a1a;
+    color: #f2f2f2;
+  }
   .nav-mode .project-rail .active-project-item:hover,
-  .nav-mode .project-rail .active-project-item:focus-visible { color: #fff; }
+  .nav-mode .project-rail .active-project-item:focus-visible {
+    background: #141414;
+    color: #fff;
+    outline: 1px solid #3a3a3a;
+    outline-offset: -1px;
+  }
   .nav-mode .project-rail .session-background-actions,
   .nav-mode .project-rail .inactive-project-tree { display: none; }
+
+  /* Keep the create action outside the horizontal scroller. It owns real dock
+     width instead of visually overlaying (and blocking) a project target. */
+  .nav-mode .project-rail > .new-session {
+    display: flex;
+    position: relative;
+    z-index: 2;
+    width: 2.75rem;
+    height: 2.75rem;
+    flex: 0 0 2.75rem;
+    align-self: center;
+    margin: 0 0 0 .2rem;
+  }
+  .nav-mode .project-rail > .new-session button {
+    display: grid;
+    width: 2.75rem;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    padding: 0;
+    place-items: center;
+    border: 1px solid #303030;
+    border-radius: .3rem;
+    background: #181818;
+    color: #d0d0d0;
+    cursor: pointer;
+  }
+  .nav-mode .project-rail > .new-session button:hover,
+  .nav-mode .project-rail > .new-session button:focus-visible {
+    border-color: #555;
+    color: #fff;
+    outline: none;
+  }
+  .nav-mode .project-rail > .new-session button .banner-mark {
+    display: block;
+    width: 1.15rem;
+    height: 1.15rem;
+  }
 }
 
 .project-rail { display: none; }
@@ -3614,8 +3802,10 @@ body.document-page {
  * remains the semantic/click attachment surface; only its overview extent is
  * shortened. Selected-project hit areas retain their established sizing.
  */
-body:has(.live-tracker[data-overview="true"]) .project-rail .active-project-item[data-project] {
-  width: calc(100% - clamp(2rem, 8vw, 3.5rem));
+@media (min-width: 42.01rem) {
+  body:has(.live-tracker[data-overview="true"]) .project-rail .active-project-item[data-project] {
+    width: calc(100% - clamp(2rem, 8vw, 3.5rem));
+  }
 }
 .live-tracker[data-overview="true"] {
   flex-direction: column;
@@ -3660,12 +3850,6 @@ body:has(.live-tracker[data-overview="true"]) .project-rail .active-project-item
   flex-direction: column;
   align-items: stretch;
   gap: .1rem;
-}
-
-@media (max-width: 42rem) {
-  .nav-mode .live-tracker[data-overview="true"] .live-tracker-project {
-    width: min(calc(100% - 2rem), 10rem);
-  }
 }
 
 @media (min-width: 42.01rem) {
