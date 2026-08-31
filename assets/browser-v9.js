@@ -2966,7 +2966,9 @@
     return "/qq";
   };
   const SESSION_CONNECTOR_ID = "session-connectors";
-  const SESSION_CONNECTOR_INSET = 0.75;
+  const SESSION_CONNECTOR_SOURCE_INSET = 0.75;
+  const SESSION_CONNECTOR_SPINE_INSET = 3;
+  const SESSION_CONNECTOR_SPINE_MIN_HEIGHT = 8;
   const SESSION_CONNECTOR_SPINE_GAP = 4;
   const SESSION_CONNECTOR_NS = "http://www.w3.org/2000/svg";
   let sessionConnectorFrame = 0;
@@ -3076,18 +3078,24 @@
       if (!key || !source || !target || !(sessions instanceof HTMLElement)) continue;
       const sessionsRect = sessions.getBoundingClientRect();
       const start = {
-        x: source.rect.right - SESSION_CONNECTOR_INSET,
+        x: source.rect.right - SESSION_CONNECTOR_SOURCE_INSET,
         y: (source.rect.top + source.rect.bottom) / 2,
       };
       const contentLeft = Math.max(target.rect.left, sessionsRect.left);
       const spineX = contentLeft - SESSION_CONNECTOR_SPINE_GAP;
-      const spineTop = Math.max(target.visible.top, sessionsRect.top) + SESSION_CONNECTOR_INSET;
-      const spineBottom = Math.min(target.visible.bottom, sessionsRect.bottom) - SESSION_CONNECTOR_INSET;
+      const groupTop = Math.max(target.visible.top, sessionsRect.top);
+      const groupBottom = Math.min(target.visible.bottom, sessionsRect.bottom);
+      const spineInset = Math.min(
+        SESSION_CONNECTOR_SPINE_INSET,
+        Math.max(0, (groupBottom - groupTop - SESSION_CONNECTOR_SPINE_MIN_HEIGHT) / 2),
+      );
+      const spineTop = groupTop + spineInset;
+      const spineBottom = groupBottom - spineInset;
       const joinY = sessionConnectorJoin(spineTop, spineBottom, start.y);
       const connectorWidth = spineX - start.x;
       const sourceAnchorVisible = start.y >= source.visible.top - 0.01
         && start.y <= source.visible.bottom + 0.01;
-      const spineVisible = spineBottom - spineTop >= 4
+      const spineVisible = spineBottom - spineTop >= SESSION_CONNECTOR_SPINE_MIN_HEIGHT
         && spineTop >= trackerClip.top && spineBottom <= trackerClip.bottom;
       if (!sourceAnchorVisible || !spineVisible || connectorWidth < 4) continue;
       routes.push({ project, group, start, joinY, contentLeft, spineX, spineTop, spineBottom });
