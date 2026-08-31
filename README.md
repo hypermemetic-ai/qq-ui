@@ -1,11 +1,18 @@
-# @hypermemetic-ai/qq-ui
+# `@hypermemetic-ai/qq-ui`
 
-Server-rendered Cordis plugin for the qq operator console. This package is private, uses ES modules, and depends on the sibling `../qq-core` package through `@hypermemetic-ai/qq-core`.
+Private ES-module package providing the server-rendered Cordis plugin for the qq operator console. The package root exports [`src/plugin.mjs`](src/plugin.mjs); additional public entry points expose the [HTTP app](src/http-app.mjs), [renderer](src/render.mjs), and [Markdown support](src/markdown.mjs).
 
-## Established commands
+## Setup and commands
+
+The package declares `@hypermemetic-ai/qq-core` as `file:../qq-core`, so dependency setup expects that sibling package at the stated relative path. No start script is defined in `package.json`; runtime integration begins at the plugin or one of the exported entry points above.
 
 ```sh
 npm test
+```
+
+`npm test` performs syntax checks and runs the repository's established proof scripts. Focused package scripts are also available:
+
+```sh
 npm run prove:sessions-rendered
 npm run prove:prompt-echo
 npm run prove:prompt-correlation
@@ -13,29 +20,20 @@ npm run prove:prompt-geometry
 npm run latency:report
 ```
 
-`npm test` is the full declared check: it syntax-checks [`src/plugin.mjs`](src/plugin.mjs) and [`assets/browser-v9.js`](assets/browser-v9.js), then runs the repository's UI proof scripts. `prove:sessions-rendered` runs the focused sessions-rendered proof; `prove:prompt-echo` runs the immediate provisional/correlation/header/reconciliation/privacy proof; `prove:prompt-correlation` runs the real-Chromium, real-HTMX slow-response paint/transport proof; `prove:prompt-geometry` runs the desktop/Android full-width provisional → queue authority → admitted continuity proof with ≤1px geometry and per-frame identity gates; `latency:report` runs [`scripts/report-ui-latency.mjs`](scripts/report-ui-latency.mjs).
+## Repository map
 
-No install or start command is declared in `package.json`. In particular, dependency installation must account for the local `../qq-core` dependency.
+- [`src/plugin.mjs`](src/plugin.mjs) — package root and Cordis plugin entry point.
+- [`src/http-app.mjs`](src/http-app.mjs) — exported HTTP boundary and the most-imported internal module.
+- [`src/render.mjs`](src/render.mjs) — exported rendering boundary and a frequent change surface.
+- [`src/markdown.mjs`](src/markdown.mjs) — exported Markdown boundary.
+- [`assets/browser-v9.js`](assets/browser-v9.js) and [`assets/console.css`](assets/console.css) — current high-change browser and styling surfaces. Versioned browser, service-worker, and offline assets are retained alongside them; do not assume similarly named older files are disposable without further evidence.
+- [`scripts/`](scripts/prove-sessions-rendered.mjs) — executable proofs and latency reporting. The full suite and exact order are defined by the `test` script in [`package.json`](package.json).
+- [`vendor/`](vendor/htmx-2.0.10.min.js) and [`vendor-pins.json`](vendor-pins.json) — tracked vendored files, licenses, and pin data.
 
-## Code map
-
-The package exposes four module entry points:
-
-| Export | Source |
-| --- | --- |
-| package root | [`src/plugin.mjs`](src/plugin.mjs) |
-| `./http` | [`src/http-app.mjs`](src/http-app.mjs) |
-| `./render` | [`src/render.mjs`](src/render.mjs) |
-| `./markdown` | [`src/markdown.mjs`](src/markdown.mjs) |
-
-For a first change, route by boundary rather than surveying every file:
-
-- **HTTP or rendering work:** start with [`src/http-app.mjs`](src/http-app.mjs) and [`src/render.mjs`](src/render.mjs). They have the highest relative-module fan-in and are among the most frequently changed source files.
-- **Browser presentation:** start with [`assets/browser-v9.js`](assets/browser-v9.js) and [`assets/console.css`](assets/console.css). The former is explicitly checked by `npm test`; both are active change surfaces.
-- **Verification:** [`scripts/`](scripts/prove-root-routing.mjs) contains focused proof scripts. Use the proof whose filename matches the affected area, then run `npm test` for the full declared check.
-- **Vendored browser dependencies:** start at [`vendor-pins.json`](vendor-pins.json) and the tracked distributions and licenses under [`vendor/`](vendor/htmx-2.0.10.min.js).
+For a change to an exported boundary, start with its mapped `src` entry point and run `npm test`. For session rendering, prompt echo/correlation/geometry, or latency work, use the matching focused command above while iterating, then run the full suite.
 
 ## Further orientation
 
-- [`wiki/index.md`](wiki/index.md) — repository documentation index
-- [`wiki/operator-console.md`](wiki/operator-console.md) — operator-console detail
+- [Operator console notes](wiki/operator-console.md)
+- [Latency roadmap](wiki/latency-roadmap.md)
+- [Wiki index](wiki/index.md)
