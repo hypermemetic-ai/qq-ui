@@ -344,6 +344,18 @@ async function accessibleNewSessionCount(cdp) {
   const tree = await cdp.send("Accessibility.getFullAXTree");
   return tree.nodes.filter((node) => !node.ignored && node.name?.value === "New session").length;
 }
+async function accessibleSwitcherState(cdp) {
+  const tree = await cdp.send("Accessibility.getFullAXTree");
+  const nodes = tree.nodes.filter((node) => !node.ignored).map((node) => ({
+    role: node.role?.value || "", name: node.name?.value || "",
+  }));
+  return {
+    returnButtons: nodes.filter((node) => node.role === "button" && node.name === "Return to conversation").length,
+    headings: nodes.filter((node) => node.role === "heading").map((node) => node.name),
+    textboxes: nodes.filter((node) => node.role === "textbox").map((node) => node.name),
+    navigation: nodes.filter((node) => node.role === "navigation").map((node) => node.name),
+  };
+}
 const openNavigation = (cdp) => cdp.evaluate(`document.querySelector('.session-heading-start').click()`);
 const openOverview = (cdp) => cdp.evaluate(`(() => {
   const nav = document.querySelector('.active-projects');
@@ -361,7 +373,7 @@ const inspectExpression = `(() => {
   const composerShell = document.querySelector('#session-composer');
   const rail = document.querySelector('#project-rail');
   const railStyle = rail ? getComputedStyle(rail) : null;
-  const createForms = [...(groupPort?.querySelectorAll('form.new-session') ?? [])];
+  const createForms = [...document.querySelectorAll('.live-tracker > form.new-session, #project-rail > form.new-session')];
   const createButtons = createForms.flatMap((form) => [...form.querySelectorAll('button[type="submit"]')]);
   const clientRect = (node) => {
     const box = node?.getBoundingClientRect();
@@ -533,11 +545,93 @@ const inspectExpression = `(() => {
       clipPath: style?.clipPath || '', overflow: style?.overflow || '',
     };
   });
+  const trackerStyle = groupPort ? getComputedStyle(groupPort) : null;
+  const trackerRect = elementRect(groupPort);
+  const railRect = elementRect(rail);
+  const switcherHeader = groupPort?.querySelector('.pwa-switcher-header');
+  const switcherClose = groupPort?.querySelector('.pwa-switcher-close');
+  const visibleSessionRows = visibleGroups.flatMap((group) => [...group.querySelectorAll('.live-tracker-session')]);
+  const rowMetrics = visibleSessionRows.map((row) => {
+    const box = row.getBoundingClientRect();
+    const groupBox = row.closest('.live-tracker-project')?.getBoundingClientRect();
+    const style = getComputedStyle(row);
+    return {
+      id: row.dataset.sessionId || '', depth: Number(row.dataset.depth || 0),
+      width: box.width, height: box.height, left: box.left, right: box.right,
+      groupWidth: groupBox?.width || 0, groupLeft: groupBox?.left || 0,
+      background: style.backgroundColor, boxShadow: style.boxShadow,
+      current: row.getAttribute('aria-current') === 'page',
+    };
+  });
+  const createForm = createForms[0] ?? null;
+  const createButton = createForm?.querySelector('button[type="submit"]') ?? null;
+  const createRect = elementRect(createButton);
+  const intersects = (left, right) => Boolean(left && right
+    && Math.min(left.right, right.right) - Math.max(left.left, right.left) > .5
+    && Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top) > .5);
+  const createCenter = createRect ? {
+    x: (createRect.left + createRect.right) / 2,
+    y: (createRect.top + createRect.bottom) / 2,
+  } : null;
+  const createTopmost = createCenter ? document.elementFromPoint(createCenter.x, createCenter.y) : null;
+  const dockChoices = [...(projectPort?.querySelectorAll('a[href]') ?? [])];
+  const clippedDockRect = (item) => {
+    const box = elementRect(item);
+    if (!box || !projectVisibilityClip) return null;
+    const clipped = {
+      left: Math.max(box.left, projectVisibilityClip.left),
+      top: Math.max(box.top, projectVisibilityClip.top),
+      right: Math.min(box.right, projectVisibilityClip.right),
+      bottom: Math.min(box.bottom, projectVisibilityClip.bottom),
+    };
+    return clipped.right > clipped.left && clipped.bottom > clipped.top ? clipped : null;
+  };
+  const overviewDockChoice = projectPort?.querySelector('.projects-session-item') ?? null;
+  const overviewDockRect = elementRect(overviewDockChoice);
+  const fullyVisibleDockChoices = dockChoices.filter((item) => {
+    const box = item.getBoundingClientRect();
+    const style = getComputedStyle(item);
+    return projectVisibilityClip && style.display !== 'none' && style.visibility !== 'hidden'
+      && box.width > 0 && box.height > 0
+      && box.left >= projectVisibilityClip.left - .5 && box.right <= projectVisibilityClip.right + .5
+      && box.top >= projectVisibilityClip.top - .5 && box.bottom <= projectVisibilityClip.bottom + .5
+      && (item === overviewDockChoice || !intersects(box, overviewDockRect));
+  });
+  const configuredVerticalScrollers = [...document.querySelectorAll('body *')].filter((node) => {
+    const style = getComputedStyle(node);
+    return style.display !== 'none' && style.visibility !== 'hidden'
+      && (style.overflowY === 'auto' || style.overflowY === 'scroll');
+  }).map((node) => node.id || node.className || node.tagName);
+  const stream = document.querySelector('#console-stream');
   return {
     standalone: matchMedia('(display-mode: standalone)').matches,
     navMode: document.body.classList.contains('nav-mode'),
     overview: groupPort?.dataset.overview === 'true',
     narrowNav,
+    viewportWidth: innerWidth,
+    viewportHeight: innerHeight,
+    locationPath: location.pathname + location.search,
+    streamUrl: stream?.getAttribute('sse-connect') || '',
+    trackerRect,
+    railRect,
+    trackerOverflowY: trackerStyle?.overflowY || '',
+    projectOverflowX: projectPort ? getComputedStyle(projectPort).overflowX : '',
+    projectOverflowY: projectPort ? getComputedStyle(projectPort).overflowY : '',
+    configuredVerticalScrollers,
+    composerDisplay: composerStyle?.display || '',
+    transcriptDisplay: getComputedStyle(document.querySelector('#transcript')).display,
+    childrenDisplay: getComputedStyle(document.querySelector('#session-children')).display,
+    switcher: {
+      title: switcherHeader?.querySelector('.pwa-switcher-title')?.textContent.trim() || '',
+      headerRect: elementRect(switcherHeader),
+      closeRect: elementRect(switcherClose),
+      closeLabel: switcherClose?.getAttribute('aria-label') || '',
+      closeVisible: switcherClose ? getComputedStyle(switcherClose).display !== 'none' : false,
+    },
+    dockLabels: [...document.querySelectorAll('.project-rail .active-project-item')].map((item) => item.textContent.trim()),
+    dockCurrentLabels: [...document.querySelectorAll('.project-rail .active-project-current')].map((item) => item.textContent.trim()),
+    activeElement: document.activeElement?.className || document.activeElement?.id || document.activeElement?.tagName || '',
+    rowMetrics,
     horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
       || document.body.scrollWidth > document.documentElement.clientWidth + 1,
     railBorderRightWidth: Number.parseFloat(railStyle?.borderRightWidth || '0'),
@@ -554,6 +648,23 @@ const inspectExpression = `(() => {
       labelledCount: createButtons.filter((button) => button.getAttribute('aria-label') === 'New session').length,
       action: createForms[0] ? new URL(createForms[0].action, location.href).pathname : '',
       method: createForms[0]?.method || '',
+      host: createForm?.parentElement?.id || createForm?.parentElement?.className || '',
+      rect: createRect,
+      topmost: Boolean(createForm && (createTopmost === createForm || createForm.contains(createTopmost))),
+      topmostNode: createTopmost?.getAttribute?.('aria-label') || createTopmost?.getAttribute?.('class')
+        || (typeof createTopmost?.className === 'string' ? createTopmost.className : '') || createTopmost?.tagName || '',
+      dockOverlap: dockChoices.filter((item) => intersects(createRect, clippedDockRect(item))).map(identity),
+      dockHits: fullyVisibleDockChoices.map((item) => {
+        const box = item.getBoundingClientRect();
+        const top = document.elementFromPoint((box.left + box.right) / 2, (box.top + box.bottom) / 2);
+        return { identity: identity(item), hit: top === item || item.contains(top) };
+      }),
+      railPadding: railStyle ? {
+        top: Number.parseFloat(railStyle.paddingTop),
+        right: Number.parseFloat(railStyle.paddingRight),
+        bottom: Number.parseFloat(railStyle.paddingBottom),
+        left: Number.parseFloat(railStyle.paddingLeft),
+      } : null,
     },
     connectorElements: document.querySelectorAll('#session-connectors').length,
     connectorLayerHidden: !layer || getComputedStyle(layer).display === 'none' || getComputedStyle(layer).visibility === 'hidden',
@@ -599,6 +710,9 @@ const inspectExpression = `(() => {
     idleParentElapsedCount: alphaGroup?.querySelector('.live-tracker-session[data-session-id="${architectB}"] .live-tracker-elapsed')?.textContent.trim() ? 1 : 0,
     scroll: {
       projectTop: projectPort?.scrollTop || 0,
+      projectLeft: projectPort?.scrollLeft || 0,
+      projectWidth: projectPort?.clientWidth || 0,
+      projectScrollWidth: projectPort?.scrollWidth || 0,
       projectHeight: projectPort?.clientHeight || 0,
       projectScrollHeight: projectPort?.scrollHeight || 0,
       trackerTop: groupPort?.scrollTop || 0,
@@ -634,10 +748,62 @@ const createActionFor = (identity) => {
   const [project, folder = ""] = identity.split("\n");
   return `/qq/project/${encodeURIComponent(project)}${folder ? `/${encodeURIComponent(folder)}` : ""}/sessions`;
 };
+const newSessionSemantics = ({ count, visibleCount, tabbableCount, labelledCount, action, method }) => ({
+  count, visibleCount, tabbableCount, labelledCount, action, method,
+});
 function assertNoCenterDivider(state) {
   if (!state.narrowNav) return;
   assert.equal(state.railBorderRightWidth, 0,
-    "narrow installed-app project/session split has no full-height center divider");
+    "narrow installed-app dock has no obsolete full-height center divider");
+}
+function assertPwaSessionSurface(state, { overview = false } = {}) {
+  if (!state.narrowNav) return;
+  assert.equal(state.connectorPaths.length, 0, "narrow PWA renders no project relationship paths");
+  assert.ok(state.connectorElements === 0 || state.connectorLayerHidden,
+    "narrow PWA removes or hides the obsolete connector layer");
+  assert.ok(state.trackerRect && Math.abs(state.trackerRect.left) < 1
+    && Math.abs(state.trackerRect.right - state.viewportWidth) < 1,
+  "session surface spans the full viewport rather than a half pane");
+  assert.equal(state.trackerOverflowY, "auto", "session surface owns vertical scrolling");
+  assert.equal(state.projectOverflowY, "hidden", "bottom project dock never creates a second vertical scroll plane");
+  assert.ok(state.configuredVerticalScrollers.includes("live-session-list"),
+    "the full-width session list is a configured scroll plane");
+  assert.equal(state.composerDisplay, "none", "composer is removed while the switcher owns the screen");
+  assert.equal(state.transcriptDisplay, "none", "covered conversation content leaves the keyboard and visual order");
+  assert.equal(state.childrenDisplay, "none", "covered child chrome leaves the keyboard and visual order");
+  assert.ok(state.railRect && Math.abs(state.railRect.left) < 1
+    && Math.abs(state.railRect.right - state.viewportWidth) < 1
+    && Math.abs(state.railRect.bottom - state.viewportHeight) < 1,
+  "project navigation is a full-width bottom safe-area dock");
+  assert.equal(state.projectOverflowX, "auto", "project dock can scroll horizontally for many projects");
+  assert.equal(state.switcher.closeLabel, "Return to conversation");
+  assert.ok(state.switcher.closeVisible && state.switcher.closeRect?.width >= 44 && state.switcher.closeRect?.height >= 44,
+    "switcher has a labelled thumb-sized return action");
+  const selectedHeading = state.groupHeadings.find((_, index) => state.visibleGroups.includes(state.groupSequence[index])) || "";
+  const normalizedPlace = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  assert.equal(normalizedPlace(state.switcher.title), normalizedPlace(overview ? "All sessions" : selectedHeading),
+    "switcher title reflects overview or selected project/folder context");
+  assert.ok(state.headingVisibility.every((heading) => heading.text && heading.id && heading.labelled
+    && heading.position === "static" && heading.width > 40 && heading.height > 8
+    && heading.overflow === "visible"),
+  "PWA project/folder headings are explicitly visible while retaining labelled sections");
+  assert.ok(state.rowMetrics.length > 0 && state.rowMetrics.every((row) => row.height >= 48 && row.height <= 56.5),
+    "every visible root and subagent session has an approximately 48–56px target");
+  assert.ok(state.rowMetrics.every((row) => row.width >= row.groupWidth - (row.depth ? 17 : 1)),
+    "session targets consume the available row width, with only deliberate child indentation");
+  const current = state.rowMetrics.find((row) => row.current);
+  if (current) assert.ok(current.background !== "rgba(0, 0, 0, 0)" && current.boxShadow !== "none",
+    "current session has an unmistakable quiet surface and inset marker");
+  const childRow = state.rowMetrics.find((row) => row.depth > 0);
+  if (childRow) assert.ok(childRow.left - childRow.groupLeft >= 15,
+    "subagent session is visibly nested beneath its parent without shrinking its target");
+  assert.ok(state.dockLabels[0] === "projects", "dock preserves the projects overview affordance");
+  assert.equal(state.dockCurrentLabels.length, 1, "dock exposes exactly one current filter context");
+  if (overview) assert.deepEqual(state.dockCurrentLabels, ["projects"],
+    "overview keeps the projects affordance unmistakably current");
+  else assert.notEqual(state.dockCurrentLabels[0], "projects",
+    "filtered view marks its project rather than the all-project affordance");
+  assertNoCenterDivider(state);
 }
 function assertSelected(state, expected, selected = "alpha\n") {
   assert.equal(state.connectorPaths.length, 0, "selected mode has zero project connector paths");
@@ -647,18 +813,59 @@ function assertSelected(state, expected, selected = "alpha\n") {
   assert.deepEqual(state.projectSequence, expected, "left DOM/reading order is canonical");
   assert.deepEqual(state.groupSequence, expected, "right DOM/reading order matches the left exactly");
   assert.deepEqual(state.visibleGroups, [selected], "selected mode exposes only its authoritative project group");
-  assert.deepEqual(state.newSession, {
+  assert.deepEqual(newSessionSemantics(state.newSession), {
     count: 1, visibleCount: 1, tabbableCount: 1, labelledCount: 1,
     action: createActionFor(selected), method: "post",
   }, "selected-project mode exposes one labelled, tabbable add-session form for the exact project/folder");
+  assertPwaSessionSurface(state);
   assertNoCenterDivider(state);
 }
+function assertNewSessionDock(state, { safeBottom = 0 } = {}) {
+  const create = state.newSession;
+  assert.ok(state.narrowNav && create.count === 1 && create.visibleCount === 1,
+    "filtered narrow PWA exposes exactly one visible New session action");
+  assert.equal(create.host, "project-rail",
+    "New session is a direct dock child instead of being trapped below the dock stacking context");
+  assert.ok(create.rect && create.rect.width >= 44 && create.rect.height >= 44,
+    "New session has a full 44px thumb target");
+  if (diagnose && !create.topmost) console.error("New session hit-test diagnostics", {
+    viewport: { width: state.viewportWidth, height: state.viewportHeight },
+    rail: state.railRect, create: create.rect, padding: create.railPadding,
+    found: create.topmostNode || "nothing",
+  });
+  assert.ok(create.topmost,
+    `New session is the topmost hit target at its visible center (found ${create.topmostNode || "nothing"})`);
+  assert.ok(state.railRect && create.rect.left >= state.railRect.left - .5
+    && create.rect.right <= state.railRect.right + .5
+    && create.rect.top >= state.railRect.top - .5 && create.rect.bottom <= state.railRect.bottom + .5,
+  "New session stays wholly inside the bottom dock");
+  assert.deepEqual(create.dockOverlap, [],
+    "the dedicated create-action column does not overlap any project dock entry");
+  if (diagnose && !create.dockHits.every((entry) => entry.hit)) console.error("Project dock hit-test diagnostics", {
+    scroll: state.scroll, hits: create.dockHits, create: create.rect, rail: state.railRect,
+  });
+  assert.ok(create.dockHits.length > 0 && create.dockHits.every((entry) => entry.hit),
+    "every fully visible project dock entry remains its own topmost hit target");
+  assert.ok((create.railPadding?.bottom ?? 0) + .5 >= safeBottom,
+    "dock padding honors the emulated bottom safe area");
+  assert.ok(create.rect.bottom <= state.viewportHeight - safeBottom + .5,
+    "New session remains above the bottom safe area");
+}
+
 function assertOverview(state, expected) {
   assert.equal(state.overview, true, "overview mode is active");
-  assert.deepEqual(state.newSession, {
+  assert.deepEqual(newSessionSemantics(state.newSession), {
     count: 0, visibleCount: 0, tabbableCount: 0, labelledCount: 0, action: "", method: "",
   }, "all-project overview has no rendered, visible, interactive, or accessibility-exposed add-session control");
   assertNoCenterDivider(state);
+  assert.equal(state.horizontalOverflow, false, "switcher creates no horizontal viewport overflow");
+  if (state.narrowNav) {
+    assert.deepEqual(state.projectSequence, expected, "project dock identities retain canonical order");
+    assert.deepEqual(state.groupSequence, expected, "session groups retain canonical project order");
+    assert.deepEqual(state.visibleGroups, expected, "overview exposes every group in one reading order");
+    assertPwaSessionSurface(state, { overview: true });
+    return;
+  }
   assert.equal(state.horizontalOverflow, false, "connector routing and its viewport SVG create no horizontal overflow");
   assert.equal(state.connectorElements, 1, "overview has one viewport connector layer");
   assert.equal(state.connectorPointerEvents, "none", "relationship routes never intercept full-row interaction");
@@ -750,6 +957,72 @@ async function menuState(cdp) {
 
 async function pressKey(cdp, key) {
   await cdp.evaluate(`document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, bubbles: true, cancelable: true }))`);
+}
+
+async function touchTap(cdp, selector) {
+  const hit = await cdp.evaluate(`(() => {
+    const node = document.querySelector(${JSON.stringify(selector)});
+    if (!node) return null;
+    const box = node.getBoundingClientRect();
+    const point = { x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 };
+    const top = document.elementFromPoint(point.x, point.y);
+    return {
+      ...point, width: box.width, height: box.height,
+      topmost: top === node || node.contains(top),
+      topmostNode: top?.getAttribute?.('aria-label') || top?.getAttribute?.('class')
+        || (typeof top?.className === 'string' ? top.className : '') || top?.tagName || '',
+    };
+  })()`);
+  assert.ok(hit && hit.width >= 44 && hit.height >= 44 && hit.topmost,
+    `${selector} must be a real topmost thumb target (found ${hit?.topmostNode || "nothing"})`);
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: hit.x, y: hit.y, id: 1, radiusX: 2, radiusY: 2, force: 1 }],
+  });
+  await sleep(32);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await sleep(140);
+  return hit;
+}
+
+async function touchSwipe(cdp, selector, { fromX = .75, toX = .25 } = {}) {
+  const bounds = await cdp.evaluate(`(() => {
+    const node = document.querySelector(${JSON.stringify(selector)});
+    if (!node) return null;
+    const box = node.getBoundingClientRect();
+    return { left: box.left, top: box.top, width: box.width, height: box.height };
+  })()`);
+  assert.ok(bounds && bounds.width > 80 && bounds.height > 20,
+    `${selector} must expose a usable real-touch gesture surface`);
+  const start = {
+    x: bounds.left + bounds.width * fromX,
+    y: bounds.top + bounds.height * .5,
+  };
+  const end = {
+    x: bounds.left + bounds.width * toX,
+    y: start.y,
+  };
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ ...start, id: 1, radiusX: 2, radiusY: 2, force: 1 }],
+  });
+  for (let step = 1; step <= 6; step += 1) {
+    const progress = step / 6;
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{
+        x: start.x + (end.x - start.x) * progress,
+        y: start.y,
+        id: 1,
+        radiusX: 2,
+        radiusY: 2,
+        force: 1,
+      }],
+    });
+    await sleep(18);
+  }
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await sleep(120);
 }
 
 async function usageLayout(cdp, name, { capture = true } = {}) {
@@ -1029,6 +1302,9 @@ try {
   await smallPwa.cdp.send("Emulation.setDeviceMetricsOverride", {
     width: 390, height: 700, deviceScaleFactor: 3, mobile: true, screenWidth: 390, screenHeight: 700,
   });
+  await smallPwa.cdp.send("Emulation.setSafeAreaInsetsOverride", {
+    insets: { top: 12, topMax: 12, right: 0, rightMax: 0, bottom: 24, bottomMax: 24, left: 0, leftMax: 0 },
+  });
   await waitForPaint(smallPwa.cdp);
   report.smallClosed = await inspect(smallPwa.cdp, "small-closed", { capture: false });
   assert.equal(report.smallClosed.connectorPaths.length, 0, "closed narrow navigation suppresses relationship routes");
@@ -1036,32 +1312,72 @@ try {
   report.pwaSelected = await inspect(smallPwa.cdp, "pwa-selected");
   assert.ok(report.pwaSelected.standalone && report.pwaSelected.navMode, "selected screenshot is installed-PWA navigation");
   assertSelected(report.pwaSelected, expectedSmall);
+  assert.match(report.pwaSelected.activeElement, /pwa-switcher-close/,
+    "opening narrow navigation places focus on the labelled return action");
   await openOverview(smallPwa.cdp);
   report.pwaSmallOverview = await inspect(smallPwa.cdp, "pwa-small-overview");
   assertOverview(report.pwaSmallOverview, expectedSmall);
-  assert.deepEqual(report.pwaSmallOverview.connectorPathIdentities, expectedSmall,
-    "small overview connects every meaningfully visible pair, including epsilon");
-  const epsilonRoute = report.pwaSmallOverview.connectorPaths.find((route) => route.identity === "epsilon\n");
-  assert.ok(epsilonRoute, "epsilon has its required project-to-group relationship line");
-  assert.ok(epsilonRoute.end.y > report.pwaSmallOverview.projectVisibilityClip.bottom,
-    "epsilon underline remains visible below the shorter centered left project list");
-  assert.ok(report.pwaSmallOverview.composerCoversTracker
-    && Math.abs(report.pwaSmallOverview.groupVisibilityClip.bottom - report.pwaSmallOverview.composerRect.top) < .01
-    && epsilonRoute.end.y < report.pwaSmallOverview.composerRect.top,
-  "small overview clips the right tracker at the actual composer while retaining epsilon’s underline above it");
-  await smallPwa.cdp.evaluate(`document.body.click()`);
+  assert.equal(report.pwaSmallOverview.connectorPaths.length, 0,
+    "small PWA overview contains no relationship visualization");
+  report.pwaOverviewAccessibility = await accessibleSwitcherState(smallPwa.cdp);
+  assert.equal(report.pwaOverviewAccessibility.returnButtons, 1,
+    "accessibility tree exposes one labelled return action");
+  const accessibleHeadings = report.pwaOverviewAccessibility.headings.map((name) => name.toLowerCase());
+  assert.ok(accessibleHeadings.includes("all sessions")
+    && ["alpha", "beta", "delta", "epsilon"].every((name) => accessibleHeadings.includes(name)),
+  "accessibility tree exposes screen and visible project section headings");
+  assert.deepEqual(report.pwaOverviewAccessibility.textboxes, [],
+    "hidden conversation composer is absent from the switcher accessibility tree");
+  await pressKey(smallPwa.cdp, "Escape");
   report.smallClosedAfter = await inspect(smallPwa.cdp, "small-closed-after", { capture: false });
   assert.equal(report.smallClosedAfter.connectorPaths.length, 0, "closing narrow navigation suppresses relationship routes");
   await openNavigation(smallPwa.cdp);
   report.smallReopened = await inspect(smallPwa.cdp, "small-reopened", { capture: false });
   assertOverview(report.smallReopened, expectedSmall);
+  const streamBeforeProjectFilter = report.smallReopened.streamUrl;
+  const locationBeforeProjectFilter = report.smallReopened.locationPath;
   await smallPwa.cdp.evaluate(`document.querySelector('.active-project-item[data-project="beta"][data-folder=""]')?.click()`);
-  report.pwaReselected = await inspect(smallPwa.cdp, "pwa-reselected", { capture: false });
+  report.pwaReselected = await inspect(smallPwa.cdp, "pwa-reselected");
   assertSelected(report.pwaReselected, expectedSmall, "beta\n");
-  await openOverview(smallPwa.cdp);
+  assertNewSessionDock(report.pwaReselected, { safeBottom: 24 });
+  assert.ok(report.pwaReselected.navMode, "project filter keeps the opaque switcher open");
+  assert.equal(report.pwaReselected.streamUrl, streamBeforeProjectFilter,
+    "project filter does not initiate a live session switch");
+  assert.equal(report.pwaReselected.locationPath, locationBeforeProjectFilter,
+    "project filter does not silently commit a remembered session URL");
+  await smallPwa.cdp.evaluate(`(() => {
+    window.__newSessionSubmissions = [];
+    const form = document.querySelector('#project-rail > form.new-session');
+    form?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      window.__newSessionSubmissions.push({ action: new URL(form.action).pathname, method: form.method });
+    }, { once: true });
+  })()`);
+  report.pwaNewSessionTouchHit = await touchTap(smallPwa.cdp, "#project-rail > form.new-session button");
+  report.pwaNewSessionTouchSubmit = await smallPwa.cdp.evaluate(`({
+    submissions: window.__newSessionSubmissions,
+    navMode: document.body.classList.contains('nav-mode'),
+    host: document.querySelector('form.new-session')?.parentElement?.id || '',
+  })`);
+  assert.deepEqual(report.pwaNewSessionTouchSubmit.submissions,
+    [{ action: "/qq/project/beta/sessions", method: "post" }],
+  "a real touch tap at the visible control initiates exactly the filtered project's New session form");
+  assert.equal(report.pwaNewSessionTouchSubmit.navMode, false,
+    "initiating New session dismisses the PWA switcher through its existing navigation lifecycle");
+  assert.equal(report.pwaNewSessionTouchSubmit.host, "live-session-list",
+    "closing the narrow switcher restores the form to its desktop/server tracker structure");
+  await openNavigation(smallPwa.cdp);
+  await waitForPaint(smallPwa.cdp);
+  await smallPwa.cdp.evaluate(`document.querySelector('.projects-session-item')?.click()`);
   report.pwaOverviewReentered = await inspect(smallPwa.cdp, "pwa-overview-reentered", { capture: false });
   assertOverview(report.pwaOverviewReentered, expectedSmall);
-  await smallPwa.cdp.evaluate(`document.body.click()`);
+  assert.ok(report.pwaOverviewReentered.navMode,
+    "projects dock overview keeps the opaque switcher open");
+  assert.equal(report.pwaOverviewReentered.streamUrl, streamBeforeProjectFilter,
+    "projects dock overview does not initiate a live session switch");
+  assert.equal(report.pwaOverviewReentered.locationPath, locationBeforeProjectFilter,
+    "projects dock overview does not navigate away from the current conversation");
+  await smallPwa.cdp.evaluate(`document.querySelector('.pwa-switcher-close')?.click()`);
   await waitForPaint(smallPwa.cdp);
   await smallPwa.cdp.evaluate(`document.querySelector('.console-menu > summary').click(); document.querySelector('.usage-choice').click()`);
   report.pwaUsagePortrait = await usageLayout(smallPwa.cdp, "pwa-usage-portrait");
@@ -1075,61 +1391,117 @@ try {
   assert.equal(report.pwaUsageRotated.connectorPaths, 0, "rotated selected mode keeps zero connector paths with usage open");
   await closeChrome(smallPwa);
 
-  // Installed/standalone many-project PWA: mandatory many, independently
-  // scrolled, and rotated screenshots.
+  // A session row is the only PWA commit action. Isolate native fallback
+  // navigation so its destination document cannot contaminate visual fixtures.
+  const commitPwa = await launchChrome("/small", { app: true });
+  await commitPwa.cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 390, height: 700, deviceScaleFactor: 3, mobile: true, screenWidth: 390, screenHeight: 700,
+  });
+  await waitForPaint(commitPwa.cdp);
+  await openNavigation(commitPwa.cdp);
+  await commitPwa.cdp.evaluate(`document.querySelector('.active-project-item[data-project="beta"][data-folder=""]')?.click()`);
+  const betaSessionId = sessionId(32);
+  await commitPwa.cdp.evaluate(`document.querySelector('.live-tracker-project[data-project="beta"] .live-tracker-session')?.click()`);
+  await sleep(180);
+  report.pwaDirectSessionCommit = await inspect(commitPwa.cdp, "pwa-direct-session-commit", { capture: false });
+  assert.equal(report.pwaDirectSessionCommit.navMode, false,
+    "direct session choice dismisses the PWA switcher through its navigation lifecycle");
+  assert.match(report.pwaDirectSessionCommit.locationPath, new RegExp(`^/qq/sessions/open\\?session=${betaSessionId}$`),
+    "direct session choice initiates the exact selected session destination");
+  await closeChrome(commitPwa);
+
+  // Installed/standalone many-project PWA: mandatory one-plane scrolling,
+  // small-phone, and rotated screenshots.
   const manyPwa = await launchChrome("/many", { app: true });
   await manyPwa.cdp.send("Emulation.setDeviceMetricsOverride", {
     width: 390, height: 700, deviceScaleFactor: 3, mobile: true, screenWidth: 390, screenHeight: 700,
+  });
+  await manyPwa.cdp.send("Emulation.setSafeAreaInsetsOverride", {
+    insets: { top: 0, topMax: 0, right: 0, rightMax: 0, bottom: 20, bottomMax: 20, left: 0, leftMax: 0 },
   });
   await waitForPaint(manyPwa.cdp);
   await openNavigation(manyPwa.cdp);
   await openOverview(manyPwa.cdp);
   report.pwaManyOverview = await inspect(manyPwa.cdp, "pwa-many-overview");
   assertOverview(report.pwaManyOverview, expectedMany);
-  assert.ok(report.pwaManyOverview.composerOccludedPairSequence.length > 0,
-    "portrait fixture includes a project-visible group hidden by the actual composer");
-  assert.ok(report.pwaManyOverview.composerOccludedPairSequence.every((identity) =>
-    !report.pwaManyOverview.connectorPathIdentities.includes(identity)),
-  "portrait overview omits every pair whose right group surface is composer-occluded");
+  assert.equal(report.pwaManyOverview.connectorPaths.length, 0,
+    "many-project PWA remains connector-free");
+  assert.ok(report.pwaManyOverview.scroll.trackerScrollHeight > report.pwaManyOverview.scroll.trackerHeight,
+    "many session groups overflow the single vertical session surface");
+  assert.equal(report.pwaManyOverview.scroll.projectScrollHeight, report.pwaManyOverview.scroll.projectHeight,
+    "many project context never creates a second vertical plane");
+  assert.ok(report.pwaManyOverview.scroll.projectScrollWidth > report.pwaManyOverview.scroll.projectWidth,
+    "many project filters overflow horizontally in the thumb dock");
+  await manyPwa.cdp.evaluate(`document.querySelector('.active-projects').scrollLeft = 0`);
+  await touchSwipe(manyPwa.cdp, ".active-projects", { fromX: .8, toX: .25 });
+  report.pwaDockTouchLeft = await inspect(manyPwa.cdp, "pwa-dock-touch-left", { capture: false });
+  assert.equal(report.pwaDockTouchLeft.navMode, true,
+    "a real leftward touch drag in the overflowing project dock does not dismiss the switcher");
+  assert.ok(report.pwaDockTouchLeft.scroll.projectLeft > 20,
+    "a real leftward touch drag scrolls the overflowing project dock toward later projects");
+  const dockLeftAfterForwardSwipe = report.pwaDockTouchLeft.scroll.projectLeft;
+  await touchSwipe(manyPwa.cdp, ".active-projects", { fromX: .25, toX: .8 });
+  report.pwaDockTouchRight = await inspect(manyPwa.cdp, "pwa-dock-touch-right", { capture: false });
+  assert.equal(report.pwaDockTouchRight.navMode, true,
+    "a real rightward touch drag in the overflowing project dock keeps the switcher open");
+  assert.ok(report.pwaDockTouchRight.scroll.projectLeft < dockLeftAfterForwardSwipe,
+    "a real rightward touch drag scrolls the overflowing project dock back toward overview");
   await manyPwa.cdp.evaluate(`(() => {
     const tracker = document.querySelector('.live-tracker');
     const projects = document.querySelector('.active-projects');
-    tracker.scrollTop = Math.min(165, tracker.scrollHeight - tracker.clientHeight);
-    projects.scrollTop = Math.min(110, projects.scrollHeight - projects.clientHeight);
+    tracker.scrollTop = Math.min(220, tracker.scrollHeight - tracker.clientHeight);
+    projects.scrollLeft = Math.min(140, projects.scrollWidth - projects.clientWidth);
   })()`);
   report.pwaScrolled = await inspect(manyPwa.cdp, "pwa-scrolled");
   assertOverview(report.pwaScrolled, expectedMany);
-  assert.ok(report.pwaScrolled.scroll.trackerTop > 0 && report.pwaScrolled.scroll.projectTop > 0,
-    "both narrow chooser panes were independently scrolled");
-  await manyPwa.cdp.evaluate(`(() => {
-    const tracker = document.querySelector('.live-tracker');
-    const projects = document.querySelector('.active-projects');
-    tracker.scrollTop = tracker.scrollHeight - tracker.clientHeight;
-    projects.scrollTop = projects.scrollHeight - projects.clientHeight;
-  })()`);
-  report.pwaDuplicateFolders = await inspect(manyPwa.cdp, "pwa-duplicate-folders", { capture: false });
-  assertOverview(report.pwaDuplicateFolders, expectedMany);
-  assert.deepEqual(report.pwaDuplicateFolders.connectorPathIdentities.filter((identity) => identity.startsWith("studio\n")),
-    ["studio\neast", "studio\nwest"],
-    "duplicate names route independently to the correct authoritative folder groups");
-  await manyPwa.cdp.evaluate(`(() => {
-    document.querySelector('.live-tracker').scrollTop = 165;
-    document.querySelector('.active-projects').scrollTop = 110;
-  })()`);
+  assert.ok(report.pwaScrolled.scroll.trackerTop > 0 && report.pwaScrolled.scroll.projectTop === 0
+    && report.pwaScrolled.scroll.projectLeft > 0,
+  "sessions scroll vertically in one plane while project context scrolls only horizontally");
+  await manyPwa.cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 320, height: 568, deviceScaleFactor: 2, mobile: true, screenWidth: 320, screenHeight: 568,
+  });
+  await manyPwa.cdp.evaluate(`document.querySelector('.active-projects').scrollLeft = 0`);
+  await touchSwipe(manyPwa.cdp, ".active-projects", { fromX: .8, toX: .25 });
+  report.pwaSmallPhone = await inspect(manyPwa.cdp, "pwa-small-phone");
+  assertOverview(report.pwaSmallPhone, expectedMany);
+  assert.ok(report.pwaSmallPhone.navMode && report.pwaSmallPhone.scroll.projectLeft > 20,
+    "small-phone visual state follows a real dock swipe without dismissing the switcher");
+  assert.equal(report.pwaSmallPhone.horizontalOverflow, false,
+    "small phone keeps session surface and dock within the viewport");
+  assert.deepEqual(report.pwaSmallPhone.duplicateStudio, ["studio\neast", "studio\nwest"],
+    "duplicate project names retain explicit folder identities on small phones");
+  await manyPwa.cdp.evaluate(`document.querySelector('.active-project-item[data-project="alpha"][data-folder=""]')?.click()`);
+  report.pwaSmallFiltered = await inspect(manyPwa.cdp, "pwa-small-filtered");
+  assertSelected(report.pwaSmallFiltered, expectedMany, "alpha\n");
+  assertNewSessionDock(report.pwaSmallFiltered, { safeBottom: 20 });
+  assert.equal(report.pwaSmallFiltered.horizontalOverflow, false,
+    "small filtered switcher keeps its action and dock within the viewport");
+  await openOverview(manyPwa.cdp);
+  await manyPwa.cdp.evaluate(`document.querySelector('.live-tracker').scrollTop = 165`);
   await manyPwa.cdp.send("Emulation.setDeviceMetricsOverride", {
     width: 640, height: 390, deviceScaleFactor: 2, mobile: true, screenWidth: 640, screenHeight: 390,
   });
+  await manyPwa.cdp.evaluate(`document.querySelector('.active-projects').scrollLeft = 0`);
+  await touchSwipe(manyPwa.cdp, ".active-projects", { fromX: .8, toX: .25 });
   report.pwaRotated = await inspect(manyPwa.cdp, "pwa-rotated");
   assertOverview(report.pwaRotated, expectedMany);
-  assert.ok(report.pwaRotated.composerOccludedPairSequence.every((identity) =>
-    !report.pwaRotated.connectorPathIdentities.includes(identity)),
-  "rotated overview omits every pair whose right group surface is composer-occluded");
+  assert.ok(report.pwaRotated.navMode && report.pwaRotated.scroll.projectLeft > 20,
+    "rotated-phone visual state follows a real dock swipe without dismissing the switcher");
+  assert.equal(report.pwaRotated.connectorPaths.length, 0,
+    "rotated PWA overview remains connector-free and composer-free");
   await manyPwa.cdp.evaluate(`document.querySelector('.active-project-item[data-project="studio"][data-folder="east"]')?.click()`);
-  report.pwaFolderSelected = await inspect(manyPwa.cdp, "pwa-folder-selected", { capture: false });
+  report.pwaFolderSelected = await inspect(manyPwa.cdp, "pwa-folder-selected");
   assertSelected(report.pwaFolderSelected, expectedMany, "studio\neast");
+  assertNewSessionDock(report.pwaFolderSelected, { safeBottom: 20 });
+  assert.equal(report.pwaFolderSelected.horizontalOverflow, false,
+    "rotated filtered switcher keeps its action and dock within the viewport");
   await openOverview(manyPwa.cdp);
   report.pwaFolderOverviewReentered = await inspect(manyPwa.cdp, "pwa-folder-overview-reentered", { capture: false });
   assertOverview(report.pwaFolderOverviewReentered, expectedMany);
+  await touchSwipe(manyPwa.cdp, ".pwa-switcher-heading", { fromX: .8, toX: .25 });
+  report.pwaOrdinarySwipeClose = await inspect(manyPwa.cdp, "pwa-ordinary-swipe-close", { capture: false });
+  assert.equal(report.pwaOrdinarySwipeClose.navMode, false,
+    "ordinary swipe-left-to-close remains available outside the project dock");
   await closeChrome(manyPwa);
 
   await writeFile(join(artifacts, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
