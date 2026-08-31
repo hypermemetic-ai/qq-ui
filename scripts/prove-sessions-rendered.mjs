@@ -1306,6 +1306,7 @@ try {
     insets: { top: 12, topMax: 12, right: 0, rightMax: 0, bottom: 24, bottomMax: 24, left: 0, leftMax: 0 },
   });
   await waitForPaint(smallPwa.cdp);
+  await smallPwa.cdp.evaluate(`window.__serverChromeBeforePwaFilter = document.querySelector('#session-chrome').cloneNode(true)`);
   report.smallClosed = await inspect(smallPwa.cdp, "small-closed", { capture: false });
   assert.equal(report.smallClosed.connectorPaths.length, 0, "closed narrow navigation suppresses relationship routes");
   await openNavigation(smallPwa.cdp);
@@ -1345,6 +1346,25 @@ try {
     "project filter does not initiate a live session switch");
   assert.equal(report.pwaReselected.locationPath, locationBeforeProjectFilter,
     "project filter does not silently commit a remembered session URL");
+  await smallPwa.cdp.evaluate(`(() => {
+    const chrome = document.querySelector('#session-chrome');
+    chrome.innerHTML = window.__serverChromeBeforePwaFilter.innerHTML;
+    document.dispatchEvent(new CustomEvent('htmx:afterSwap', { detail: { target: chrome } }));
+  })()`);
+  report.pwaFilteredLiveSwap = await inspect(smallPwa.cdp, "pwa-filtered-live-swap", { capture: false });
+  assertSelected(report.pwaFilteredLiveSwap, expectedSmall, "beta\n");
+  assertNewSessionDock(report.pwaFilteredLiveSwap, { safeBottom: 24 });
+  assert.equal(await accessibleNewSessionCount(smallPwa.cdp), 1,
+    "live chrome replacement preserves exactly one accessible filtered-project New session action");
+  await openOverview(smallPwa.cdp);
+  report.pwaFilteredLiveSwapOverview = await inspect(smallPwa.cdp, "pwa-filtered-live-swap-overview", { capture: false });
+  assertOverview(report.pwaFilteredLiveSwapOverview, expectedSmall);
+  assert.equal(await accessibleNewSessionCount(smallPwa.cdp), 0,
+    "returning to overview after live chrome replacement removes every New session action");
+  await smallPwa.cdp.evaluate(`document.querySelector('.active-project-item[data-project="beta"][data-folder=""]')?.click()`);
+  report.pwaReselectedAfterLiveSwap = await inspect(smallPwa.cdp, "pwa-reselected-after-live-swap", { capture: false });
+  assertSelected(report.pwaReselectedAfterLiveSwap, expectedSmall, "beta\n");
+  assertNewSessionDock(report.pwaReselectedAfterLiveSwap, { safeBottom: 24 });
   await smallPwa.cdp.evaluate(`(() => {
     window.__newSessionSubmissions = [];
     const form = document.querySelector('#project-rail > form.new-session');

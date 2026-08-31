@@ -606,12 +606,14 @@ assert.match(connectorSource, /if \(!desktopChair\(\)\) return false/,
   "connector painting is categorically unavailable in narrow PWA navigation");
 assert.match(browser, /const paintChairMode[\s\S]*?if \(!desktopChair\(\)\) suppressSessionConnectors\(\)/,
   "opening or closing narrow navigation synchronously clears obsolete routes");
-assert.match(browser, /const liveTrackerCreate[\s\S]*?tracker\?\.querySelector[\s\S]*?projectRail\(\)\?\.querySelector[\s\S]*?const syncLiveTrackerCreateHost/,
-  "the selected-project create form is resolved from either its server tracker host or narrow PWA dock host");
-assert.match(browser, /const syncLiveTrackerCreateHost[\s\S]*?host = navMode\(\) && !desktopChair\(\)[\s\S]*?dock : tracker[\s\S]*?host\.append\(create\)/,
-  "narrow navigation reparents New session into the dock while desktop and closed layouts retain tracker structure");
-assert.match(browser, /const removeLiveTrackerCreate[\s\S]*?liveTrackerCreate\(tracker\)\?\.remove\(\)[\s\S]*?const ensureLiveTrackerCreate[\s\S]*?create\.method = "post"[\s\S]*?aria-label", "New session"/,
-  "client mode transitions remove the cross-host overview control and reconstruct one native labelled POST form on selection");
+assert.match(browser, /const liveTrackerCreates[\s\S]*?tracker\.querySelectorAll\(":scope > form\.new-session"\)[\s\S]*?dock\.querySelectorAll\(":scope > form\.new-session"\)[\s\S]*?const liveTrackerCreate/,
+  "create reconciliation enumerates every direct form in both its server tracker and narrow PWA dock hosts");
+assert.match(browser, /const liveTrackerCreate[\s\S]*?host = navMode\(\) && !desktopChair\(\)[\s\S]*?creates\.find\(\(create\) => create\.parentElement === host\)/,
+  "the selected-project create form prefers the instance already in the layout's intended host");
+assert.match(browser, /const syncLiveTrackerCreateHost[\s\S]*?for \(const duplicate of liveTrackerCreates\(tracker\)\)[\s\S]*?duplicate !== create[\s\S]*?duplicate\.remove\(\)[\s\S]*?host\.append\(create\)/,
+  "live reconciliation removes duplicate New session forms before reparenting the survivor");
+assert.match(browser, /const removeLiveTrackerCreate[\s\S]*?for \(const create of liveTrackerCreates\(tracker\)\) create\.remove\(\)[\s\S]*?const ensureLiveTrackerCreate[\s\S]*?create\.method = "post"[\s\S]*?aria-label", "New session"/,
+  "client mode transitions remove every cross-host overview control and reconstruct one native labelled POST form on selection");
 assert.match(browser, /const showLiveTrackerOverview[\s\S]*?removeLiveTrackerCreate\(tracker\)[\s\S]*?const showLiveTrackerProject[\s\S]*?ensureLiveTrackerCreate\(tracker, project, folder\)/,
   "overview and selected-project transitions reconcile add-session DOM presence in opposite directions");
 assert.match(browser, /ensureLiveTrackerCreate[\s\S]*?encodeURIComponent\(project\)[\s\S]*?encodeURIComponent\(folder\)[\s\S]*?\/sessions/,

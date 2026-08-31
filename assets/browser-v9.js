@@ -3224,21 +3224,35 @@
   const liveTrackerGroups = (tracker = document.querySelector(".live-tracker")) => tracker
     ? [...tracker.querySelectorAll(".live-tracker-project[data-project]")]
     : [];
+  const liveTrackerCreates = (tracker = document.querySelector(".live-tracker")) => {
+    const dock = projectRail();
+    return [
+      ...(tracker instanceof HTMLElement ? tracker.querySelectorAll(":scope > form.new-session") : []),
+      ...(dock instanceof HTMLElement ? dock.querySelectorAll(":scope > form.new-session") : []),
+    ];
+  };
   const liveTrackerCreate = (tracker = document.querySelector(".live-tracker")) => {
-    const create = tracker?.querySelector?.(":scope > form.new-session")
-      ?? projectRail()?.querySelector?.(":scope > form.new-session");
-    return create instanceof HTMLFormElement ? create : null;
+    const creates = liveTrackerCreates(tracker);
+    const dock = projectRail();
+    const host = navMode() && !desktopChair() && dock instanceof HTMLElement ? dock : tracker;
+    return creates.find((create) => create.parentElement === host) ?? creates[0] ?? null;
   };
   const syncLiveTrackerCreateHost = (tracker = document.querySelector(".live-tracker")) => {
     const create = liveTrackerCreate(tracker);
     if (!(create instanceof HTMLFormElement) || !(tracker instanceof HTMLElement)) return create;
     const dock = projectRail();
     const host = navMode() && !desktopChair() && dock instanceof HTMLElement ? dock : tracker;
+    // A live chrome replacement can render a new tracker form while the prior
+    // form survives in the PWA dock. Keep the form already in the desired host
+    // (and its focus/listeners), but never let both copies remain actionable.
+    for (const duplicate of liveTrackerCreates(tracker)) {
+      if (duplicate !== create) duplicate.remove();
+    }
     if (create.parentElement !== host) host.append(create);
     return create;
   };
   const removeLiveTrackerCreate = (tracker) => {
-    liveTrackerCreate(tracker)?.remove();
+    for (const create of liveTrackerCreates(tracker)) create.remove();
   };
   const ensureLiveTrackerCreate = (tracker, project, folder) => {
     let create = liveTrackerCreate(tracker);
