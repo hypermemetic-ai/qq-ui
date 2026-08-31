@@ -2239,11 +2239,18 @@ export function createConsoleHandler(backend, options = {}) {
             return;
           }
           const { renderSessionRegion } = render;
+          // A pending row may disappear in the same observation that admits its
+          // user message. Publish every transcript append/reset first so exact
+          // identity is continuously represented when the queue region swaps.
           for (const name of changed) {
+            if (name === "queue") continue;
             res.write(sseEvent(name, renderSessionRegion(name, surface, paths)));
           }
           if (transcriptHtml) {
             res.write(sseEvent(append.reset ? "transcript-reset" : "transcript", transcriptHtml));
+          }
+          if (changed.includes("queue")) {
+            res.write(sseEvent("queue", renderSessionRegion("queue", surface, paths)));
           }
           if (uiChanged) {
             res.write(sseEvent("ui", generation));

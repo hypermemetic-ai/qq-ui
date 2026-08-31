@@ -1479,18 +1479,55 @@
       } catch {}
       return clientMessageId || messageId ? { clientMessageId, messageId } : null;
     };
+    const identitiesMatch = (left, right) => {
+      if (left?.clientMessageId && right?.clientMessageId) {
+        return left.clientMessageId === right.clientMessageId;
+      }
+      return Boolean(left?.messageId && left.messageId === right?.messageId);
+    };
+    const retireSupersededQueueRows = (node, identity) => {
+      const transcript = document?.querySelector?.("#transcript");
+      if (!transcript) return false;
+      const user = hasClass(node, "message-user");
+      const queue = hasClass(node, "queue-item");
+      let changed = false;
+      try {
+        if (user) {
+          for (const candidate of transcript.querySelectorAll?.(".queue-item[data-client-message-id], .queue-item[data-message-id]") ?? []) {
+            const candidateIdentity = authoritativeIdentity(candidate);
+            if (candidateIdentity && identitiesMatch(identity, candidateIdentity)) {
+              candidate.remove?.();
+              changed = true;
+            }
+          }
+        } else if (queue) {
+          for (const candidate of transcript.querySelectorAll?.(".message-user[data-client-message-id], .message-user[data-message-id]") ?? []) {
+            const candidateIdentity = authoritativeIdentity(candidate);
+            if (candidateIdentity && identitiesMatch(identity, candidateIdentity)) {
+              node.remove?.();
+              changed = true;
+              break;
+            }
+          }
+        }
+      } catch {}
+      return changed;
+    };
     const reconcileNode = (node) => {
       const identity = authoritativeIdentity(node);
       if (!identity) return false;
       rememberAuthoritativeId(authoritativeClientMessageIds, identity.clientMessageId);
       rememberAuthoritativeId(authoritativeMessageIds, identity.messageId);
+      let changed = retireSupersededQueueRows(node, identity);
       const matching = new Set([
         ...(recordsByClientMessageId.get(identity.clientMessageId) ?? []),
         ...(recordsByMessageId.get(identity.messageId) ?? []),
       ]);
-      if (!matching.size) return false;
-      for (const record of matching) removeRecord(record);
-      return true;
+      for (const record of matching) {
+        removeRecord(record);
+        changed = true;
+      }
+      return changed;
     };
     const reconcile = (root = document) => {
       if (!commissionedSessionId || currentSessionId() !== commissionedSessionId) return false;
