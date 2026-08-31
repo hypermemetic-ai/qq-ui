@@ -445,12 +445,13 @@ const inspectExpression = `(() => {
     const sessionsBox = group?.querySelector('.live-tracker-sessions')?.getBoundingClientRect();
     const contentLeft = groupBox && sessionsBox ? Math.max(groupBox.left, sessionsBox.left) : NaN;
     const openGap = contentLeft - start.x;
-    const channelMidpoint = start.x + (openGap / 2);
-    const projectGapArm = laneX - start.x;
-    const sessionGapArm = contentLeft - laneX;
-    const shorterGapArm = Math.min(projectGapArm, sessionGapArm);
-    const gapArmRatio = shorterGapArm > 0
-      ? Math.max(projectGapArm, sessionGapArm) / shorterGapArm : Infinity;
+    const sourceRun = laneX - start.x;
+    const underlineRun = end.x - laneX;
+    const horizontalRunRatio = sourceRun > 0 ? underlineRun / sourceRun : Infinity;
+    const projectPaneRight = projectVisibilityClip?.right ?? NaN;
+    const trackerPaneRight = groupVisibilityClip?.right ?? NaN;
+    const projectEntryInset = projectPaneRight - start.x;
+    const trackerEndInset = trackerPaneRight - end.x;
     const projectSlice = visibleSlice(project, projectVisibilityClip);
     const nextGroup = group ? groups[groups.indexOf(group) + 1] : null;
     const nextGroupBox = nextGroup?.getBoundingClientRect();
@@ -461,10 +462,8 @@ const inspectExpression = `(() => {
     ] : [];
     return {
       identity: identity(path), d, length: path.getTotalLength(), start, end, laneX, baselineY, segments,
-      contentLeft, openGap, channelMidpoint, projectGapArm, sessionGapArm, gapArmRatio,
-      centeredLane: Number.isFinite(channelMidpoint) && openGap > 0
-        && Math.abs(laneX - channelMidpoint) <= (openGap * .2) + .5,
-      balancedGapArms: Number.isFinite(gapArmRatio) && gapArmRatio <= 2.25,
+      contentLeft, openGap, sourceRun, underlineRun, horizontalRunRatio,
+      projectPaneRight, trackerPaneRight, projectEntryInset, trackerEndInset,
       strokeWidth: Number.parseFloat(style.strokeWidth), stroke: style.stroke,
       opacity: Number.parseFloat(style.opacity), display: style.display, visibility: style.visibility,
       vectorEffect: style.vectorEffect, lineJoin: style.strokeLinejoin, lineCap: style.strokeLinecap,
@@ -681,8 +680,27 @@ function assertOverview(state, expected) {
     "every overview relationship has horizontal/vertical bends and no diagonal or curved segment");
   assert.ok(state.connectorPaths.every((route) => route.startAttached && route.laneInChannel),
     "each route starts at its matching project center and enters a gutter-only vertical lane");
-  assert.ok(state.connectorPaths.every((route) => route.centeredLane && route.balancedGapArms),
-    "each vertical lane stays near its real open-gap midpoint so the two gap arms remain intentionally comparable");
+  const projectChannelEdge = state.projectVisibilityClip.right - .75;
+  const laneOrigin = Math.min(...state.connectorPaths.map((route) => route.laneX));
+  const targetLaneOrigin = projectChannelEdge + 2;
+  assert.ok(Math.abs(laneOrigin - targetLaneOrigin) <= .2,
+    "the vertical lane bundle begins at the project-side gutter edge rather than migrating toward the channel midpoint");
+  assert.ok(state.connectorPaths.every((route) => route.projectEntryInset >= Math.min(24, (state.projectVisibilityClip.right - state.projectVisibilityClip.left) * .12)
+    && route.trackerEndInset >= Math.min(24, (state.groupVisibilityClip.right - state.groupVisibilityClip.left) * .12)),
+    "overview endpoint extents leave material project- and tracker-side insets without moving the lane origin");
+  if (diagnose) {
+    const disproportionate = state.connectorPaths.filter((route) => route.sourceRun < 24
+      || !Number.isFinite(route.horizontalRunRatio) || route.horizontalRunRatio > 5)
+      .map(({ identity, d, sourceRun, underlineRun, horizontalRunRatio,
+        projectEntryInset, trackerEndInset, laneX }) => ({
+        identity, d, sourceRun, underlineRun, horizontalRunRatio,
+        projectEntryInset, trackerEndInset, laneX,
+      }));
+    if (disproportionate.length) console.error("disproportionate connector runs", disproportionate);
+  }
+  assert.ok(state.connectorPaths.every((route) => route.sourceRun >= 24
+    && Number.isFinite(route.horizontalRunRatio) && route.horizontalRunRatio <= 5),
+    "project-side runs are materially longer and full-group underlines are no longer wildly disproportionate");
   if (diagnose) {
     const invalid = state.connectorPaths.filter((route) => !route.underlineAttached || !route.baselineClear)
       .map(({ identity, d, underlineAttached, baselineClear, start, laneX, baselineY, end }) => (
