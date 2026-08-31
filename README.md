@@ -1,16 +1,16 @@
-# @hypermemetic-ai/qq-ui
+# `@hypermemetic-ai/qq-ui`
 
-Private, server-rendered Cordis plugin for the qq operator console. The package is ESM; its main entry point and root export are [`src/plugin.mjs`](src/plugin.mjs).
+Server-rendered Cordis plugin for the qq operator console. This is a private ESM package; its primary entry point is [`src/plugin.mjs`](src/plugin.mjs).
 
-## Setup and commands
+## Run the established checks
 
-[`package.json`](package.json) does not prescribe a package manager or declare a `start` script. It depends on `@hypermemetic-ai/qq-core` through `file:../qq-core`, so installation requires that sibling layout.
+The package declares no `start` script. Its complete check suite is:
 
 ```sh
 npm test
 ```
 
-The test script syntax-checks [`src/plugin.mjs`](src/plugin.mjs) and [`assets/browser-v9.js`](assets/browser-v9.js), then runs the repository's proof scripts. Useful declared subsets and reports are:
+Focused package scripts are also available:
 
 ```sh
 npm run prove:sessions-rendered
@@ -20,25 +20,28 @@ npm run prove:prompt-geometry
 npm run latency:report
 ```
 
-Run `npm test` before handing off a change; the targeted commands are narrower feedback loops, not replacements for the full suite.
+The dependency on `@hypermemetic-ai/qq-core` is declared as `file:../qq-core`, so dependency installation requires that sibling path. No package-manager-specific install command is declared.
 
-## System map
+## Repository map
 
-| Boundary | Start here |
-| --- | --- |
-| Cordis package integration | [`src/plugin.mjs`](src/plugin.mjs), the package main and root export |
-| HTTP application | [`src/http-app.mjs`](src/http-app.mjs), also exported as `./http` |
-| Server rendering | [`src/render.mjs`](src/render.mjs), also exported as `./render` |
-| Markdown | [`src/markdown.mjs`](src/markdown.mjs), also exported as `./markdown` |
-| Browser behavior and presentation | [`assets/browser-v9.js`](assets/browser-v9.js) and [`assets/console.css`](assets/console.css) |
+- [`src/plugin.mjs`](src/plugin.mjs) — package main export and Cordis plugin entry point.
+- [`src/http-app.mjs`](src/http-app.mjs) — public `./http` export and the most imported relative module; start here for HTTP-facing work.
+- [`src/render.mjs`](src/render.mjs) — public `./render` export and another central, frequently changed module; start here for server-rendered output.
+- [`src/markdown.mjs`](src/markdown.mjs) — public `./markdown` export.
+- [`assets/browser-v9.js`](assets/browser-v9.js) and [`assets/console.css`](assets/console.css) — prominent browser and styling change points. The test script syntax-checks `browser-v9.js`; older versioned assets remain tracked, so do not assume every similarly named asset is current.
+- [`scripts/`](scripts/prove-sessions-rendered.mjs) — executable proof scripts. `npm test` runs the declared suite; individual script names are the best routing index for focused checks.
+- [`vendor-pins.json`](vendor-pins.json) and [`vendor/`](vendor/htmx-2.0.10.min.js) — tracked vendor pins, artifacts, and licenses.
 
-`src/http-app.mjs` and `src/render.mjs` have the highest relative-module fan-in, and both are frequent change points. Treat them as central boundaries: check their callers and run the full suite when changing them.
+The package exposes only `.`, `./http`, `./render`, and `./markdown`; treat those declared exports as its public module boundary.
 
-## Route a change
+## Route common changes
 
-- **Package entry points or integration:** begin with [`src/plugin.mjs`](src/plugin.mjs) and the exports in [`package.json`](package.json).
-- **HTTP or rendered output:** begin with [`src/http-app.mjs`](src/http-app.mjs) and [`src/render.mjs`](src/render.mjs); related proof coverage includes [`scripts/prove-root-routing.mjs`](scripts/prove-root-routing.mjs), [`scripts/prove-selective-render-cache.mjs`](scripts/prove-selective-render-cache.mjs), and [`scripts/prove-sessions-rendered.mjs`](scripts/prove-sessions-rendered.mjs).
-- **Browser interaction or geometry:** begin with [`assets/browser-v9.js`](assets/browser-v9.js) and [`assets/console.css`](assets/console.css); use the declared prompt correlation and geometry commands above for focused checks.
-- **Latency instrumentation or reporting:** begin with [`src/latency-store.mjs`](src/latency-store.mjs) and [`scripts/report-ui-latency.mjs`](scripts/report-ui-latency.mjs); see [`wiki/latency-roadmap.md`](wiki/latency-roadmap.md).
+| Change area | Start with | Nearby focused evidence |
+| --- | --- | --- |
+| HTTP and root/workflow routing | [`src/http-app.mjs`](src/http-app.mjs) | [`prove-root-routing.mjs`](scripts/prove-root-routing.mjs), [`prove-workflow-selection-route.mjs`](scripts/prove-workflow-selection-route.mjs) |
+| Rendered sessions and dashboard UI | [`src/render.mjs`](src/render.mjs) | [`prove-sessions-rendered.mjs`](scripts/prove-sessions-rendered.mjs), [`prove-dashboard-usage.mjs`](scripts/prove-dashboard-usage.mjs), [`prove-dashboard-live-tracker.mjs`](scripts/prove-dashboard-live-tracker.mjs) |
+| Browser interaction and presentation | [`assets/browser-v9.js`](assets/browser-v9.js), [`assets/console.css`](assets/console.css) | [`prove-prompt-correlation-browser.mjs`](scripts/prove-prompt-correlation-browser.mjs), [`prove-prompt-geometry-browser.mjs`](scripts/prove-prompt-geometry-browser.mjs), [`prove-visual-latency.mjs`](scripts/prove-visual-latency.mjs) |
+| Plugin and console-menu integration | [`src/plugin.mjs`](src/plugin.mjs), [`src/console-menu.mjs`](src/console-menu.mjs) | [`prove-console-menu-contributions.mjs`](scripts/prove-console-menu-contributions.mjs), [`prove-plugin-context-cards.mjs`](scripts/prove-plugin-context-cards.mjs) |
+| Latency storage and reporting | [`src/latency-store.mjs`](src/latency-store.mjs), [`scripts/report-ui-latency.mjs`](scripts/report-ui-latency.mjs) | [`wiki/latency-roadmap.md`](wiki/latency-roadmap.md), [`prove-passive-latency.mjs`](scripts/prove-passive-latency.mjs) |
 
-For repository-maintained context, continue with the [`wiki` index](wiki/index.md) and the [operator-console notes](wiki/operator-console.md).
+For broader repository detail, continue with the [`wiki` index](wiki/index.md) and the [operator-console notes](wiki/operator-console.md).
