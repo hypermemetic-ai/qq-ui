@@ -1178,6 +1178,12 @@ export function renderProjectRail(snapshot, paths, inert = false) {
 }
 
 function renderWorkflowMenu(snapshot, paths) {
+  const navigation = (Array.isArray(snapshot?.consoleMenu) ? snapshot.consoleMenu : [])
+    .filter((item) => item?.kind === "navigation"
+      && typeof item.label === "string"
+      && typeof item.href === "string")
+    .map((item) => `<a class="console-menu-choice" role="menuitem" href="${escapeHtml(item.href)}" data-native-navigation="true">${escapeHtml(item.label)}</a>`)
+    .join("");
   const names = (Array.isArray(snapshot?.workflows) ? snapshot.workflows : [])
     .map(workflowName)
     .filter((name) => name && name !== "none" && name !== "base");
@@ -1200,6 +1206,7 @@ function renderWorkflowMenu(snapshot, paths) {
     <summary aria-label="Console menu" aria-haspopup="menu" aria-keyshortcuts="W">${escapeHtml(summary)}</summary>
     <div class="console-menu-list" role="menu" aria-label="Console actions">
       <a class="console-menu-choice usage-choice" role="menuitem" href="#session-usage" aria-controls="session-usage" aria-expanded="false">usage</a>
+      ${navigation}
       ${workflows}
     </div>
   </details>`;
@@ -2200,6 +2207,13 @@ export function regionFingerprints(snapshot) {
       liveTrackerFingerprint(snapshot?.dashboard),
       snapshot?.sessionMode ?? "",
       (snapshot?.workflows ?? []).join(","),
+      (snapshot?.consoleMenu ?? []).map((item) => [
+        item?.kind ?? "",
+        item?.id ?? "",
+        item?.label ?? "",
+        item?.href ?? "",
+        item?.order ?? "",
+      ]),
     ]),
     usage: JSON.stringify(usageFingerprint(snapshot?.dashboard)),
     transcript: JSON.stringify([

@@ -4456,7 +4456,7 @@
 
   document.addEventListener("pointerdown", (event) => {
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
-    if (!(link instanceof HTMLAnchorElement)) return;
+    if (!(link instanceof HTMLAnchorElement) || link.hasAttribute("data-native-navigation")) return;
     const picker = link.matches(`.active-project-item, .projects-choice, ${LIVE_SESSION_PICKER}`);
     if (picker) return;
     const url = consolePageUrl(link.href);
@@ -4467,7 +4467,8 @@
   document.addEventListener("click", (event) => {
     if (event.defaultPrevented || modifiedClick(event)) return;
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
-    if (!(link instanceof HTMLAnchorElement) || (link.target && link.target !== "_self") || link.hasAttribute("download")) return;
+    if (!(link instanceof HTMLAnchorElement) || (link.target && link.target !== "_self")
+      || link.hasAttribute("download") || link.hasAttribute("data-native-navigation")) return;
     const url = consolePageUrl(link.href);
     const picker = link.matches(`.active-project-item, .projects-choice, ${LIVE_SESSION_PICKER}`);
     if (!url) return;

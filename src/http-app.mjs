@@ -1062,6 +1062,7 @@ export function createConsoleHandler(backend, options = {}) {
   const workflowsFor = typeof options.workflowsFor === "function" ? options.workflowsFor : null;
   const completeWorkflows = typeof options.completeWorkflows === "function" ? options.completeWorkflows : null;
   const readDashboard = typeof options.dashboardFor === "function" ? options.dashboardFor : null;
+  const readConsoleMenu = typeof options.consoleMenuFor === "function" ? options.consoleMenuFor : null;
 
   async function settledOptionalSheets(readers) {
     const outcomes = await Promise.allSettled(readers.map(({ read }) =>
@@ -1097,6 +1098,7 @@ export function createConsoleHandler(backend, options = {}) {
       });
     }
     if (workflowsFor) readers.push({ key: "workflows", read: () => workflowsFor(snapshot.id) });
+    if (readConsoleMenu) readers.push({ key: "consoleMenu", read: () => readConsoleMenu(snapshot.id) });
 
     // These optional facades are independent. allSettled isolates failure while
     // descriptor order keeps the resulting snapshot merge deterministic.
@@ -1348,7 +1350,7 @@ export function createConsoleHandler(backend, options = {}) {
 
   const SHEET_KEYS = Object.freeze([
     "caseFile", "offer", "approval", "loginSheet", "overlay", "progress",
-    "sessionMode", "workflows", "activeProjects", "findWork", "dashboard",
+    "sessionMode", "workflows", "consoleMenu", "activeProjects", "findWork", "dashboard",
   ]);
 
   function sheetFields(snapshot) {
@@ -1372,7 +1374,7 @@ export function createConsoleHandler(backend, options = {}) {
     const hasSheets = Boolean(
       typeof backend.list === "function"
       || readCaseFile || readOffer || readOverlay || readProgress || readApproval || readLoginSheet
-      || inFindMode || sessionModeFor || workflowsFor || readDashboard,
+      || inFindMode || sessionModeFor || workflowsFor || readDashboard || readConsoleMenu,
     );
     let cancelled = false;
     let sheets = sheetFields(initialSnapshot);

@@ -1,8 +1,10 @@
 import { createApprovalAnswerer } from "./approval.mjs";
+import { createConsoleMenuRegistry } from "./console-menu.mjs";
 import { createConsoleHandler, createRootRedirectHandler } from "./http-app.mjs";
 
 export const name = "qq-ui";
 export const inject = ["qq-core", "webServer"];
+export const provide = "qq-ui";
 
 /** Mount the server-rendered operator surface over the qq session service. */
 export function apply(ctx, config) {
@@ -11,6 +13,8 @@ export function apply(ctx, config) {
   }
   const qq = ctx.get("qq-core");
   if (!qq) throw new Error("qq-ui: qq service is unavailable");
+  const consoleMenu = createConsoleMenuRegistry();
+  ctx.provide("qq-ui", Object.freeze({ consoleMenu }));
   const workflowsOf = () => ctx.get?.("qq-workflows", false) ?? null;
   const dashboardOf = () => ctx.get?.("qq-dashboard", false) ?? null;
   const modelsOf = () => ctx.get?.("qq-models", false) ?? null;
@@ -48,6 +52,7 @@ export function apply(ctx, config) {
     overlayFor: (sessionId) => finderOf()?.overlayFor?.(sessionId),
     chooseOverlay: (sessionId, form) => finderOf()?.chooseOverlay?.(sessionId, form),
     progressFor: () => mediaOf()?.progressFor?.(),
+    consoleMenuFor: consoleMenu.items,
     inFindMode: (sessionId) => {
       if (finderOf()?.inFindMode?.(sessionId) === true) return true;
       return workflowsOf()?.workflows?.selected?.(sessionId) === "find";

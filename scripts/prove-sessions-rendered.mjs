@@ -837,6 +837,25 @@ try {
   const desktop = await launchChrome("/many");
   await desktop.cdp.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await waitForPaint(desktop.cdp);
+  report.nativeNavigationEscape = await desktop.cdp.evaluate(`(() => {
+    const link = document.createElement('a');
+    link.href = '/external-provider#preserved';
+    link.dataset.nativeNavigation = 'true';
+    let intercepted = null;
+    link.addEventListener('click', (event) => {
+      intercepted = event.defaultPrevented;
+      event.preventDefault();
+    }, { once: true });
+    document.body.append(link);
+    link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+    const result = { intercepted, href: link.getAttribute('href') };
+    link.remove();
+    return result;
+  })()`);
+  assert.deepEqual(report.nativeNavigationEscape, {
+    intercepted: false,
+    href: "/external-provider#preserved",
+  }, "native-navigation links bypass console-page adoption and preserve their fragment");
   report.menuClosed = await menuState(desktop.cdp);
   assert.deepEqual({
     exists: report.menuClosed.exists,
