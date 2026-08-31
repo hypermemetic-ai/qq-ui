@@ -2954,21 +2954,10 @@ body.document-page {
 
 .nav-mode .session-heading-start > .session-id { display: none; }
 
-.pwa-switcher-header { display: none; }
-
 @media (max-width: 42rem) {
-  /* Narrow navigation is a single, opaque app screen. The conversation and
-     composer leave both the visual surface and keyboard order while it is open. */
-  body.nav-mode { grid-template-rows: minmax(0, 1fr); }
-  .nav-mode #session-panel > :not(#session-chrome),
-  .nav-mode .session-heading > .session-heading-end,
-  .nav-mode .session-heading-start > :not(.session-traversal),
-  .nav-mode #session-chrome > .notice,
-  .nav-mode #session-chrome > .turn-error { display: none !important; }
-  .nav-mode .session-heading { position: static; display: block; }
-  .nav-mode .session-heading-start { display: contents; }
+  /* Preserve the app's original translucent nav layer. Sessions remain the
+     primary narrow surface without removing the conversation or composer. */
   .nav-mode .session-connectors { display: none !important; }
-
   .nav-mode .session-traversal {
     visibility: visible;
     position: fixed;
@@ -2977,83 +2966,27 @@ body.document-page {
     display: flex;
     width: 100%;
     max-width: none;
-    height: 100dvh;
     min-height: 100%;
     flex: none;
     flex-direction: column;
     flex-wrap: nowrap;
     align-items: stretch;
     justify-content: flex-start;
-    gap: 0;
+    gap: .1rem;
     overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior: contain;
-    scroll-padding-block: calc(max(1rem, env(safe-area-inset-top)) + 5rem) calc(5.25rem + env(safe-area-inset-bottom));
-    padding: 0 max(1rem, env(safe-area-inset-right)) calc(5.25rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
-    background: #000;
+    scroll-padding-block: calc(max(.35rem, env(safe-area-inset-top)) + 3rem) 7.25rem;
+    padding: calc(max(.35rem, env(safe-area-inset-top)) + 3rem)
+      max(.85rem, env(safe-area-inset-right))
+      7.25rem
+      max(.85rem, env(safe-area-inset-left));
+    background: transparent;
     pointer-events: auto;
   }
-
-  .nav-mode .pwa-switcher-header {
-    position: sticky;
-    z-index: 2;
-    top: 0;
-    display: flex;
-    min-height: calc(4.85rem + env(safe-area-inset-top));
-    flex: none;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-inline: calc(-1 * max(1rem, env(safe-area-inset-left))) calc(-1 * max(1rem, env(safe-area-inset-right)));
-    padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) .85rem max(1rem, env(safe-area-inset-left));
-    border-bottom: 1px solid #1c1c1c;
-    background: rgba(0, 0, 0, .96);
-  }
-  .nav-mode .pwa-switcher-heading { min-width: 0; }
-  .nav-mode .pwa-switcher-kicker {
-    display: block;
-    margin-bottom: .16rem;
-    color: #656565;
-    font-size: .66rem;
-    font-weight: 620;
-    letter-spacing: .1em;
-    line-height: 1;
-    text-transform: uppercase;
-  }
-  .nav-mode .pwa-switcher-title {
-    margin: 0;
-    overflow: hidden;
-    color: #f1f1f1;
-    font-size: 1.35rem;
-    font-weight: 650;
-    letter-spacing: -.018em;
-    line-height: 1.12;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .nav-mode .pwa-switcher-close {
-    display: grid;
-    width: 2.75rem;
-    min-width: 2.75rem;
-    height: 2.75rem;
-    padding: 0;
-    place-items: center;
-    border: 1px solid #262626;
-    border-radius: .35rem;
-    background: #0b0b0b;
-    color: #a8a8a8;
-    cursor: pointer;
-  }
-  .nav-mode .pwa-switcher-close:hover,
-  .nav-mode .pwa-switcher-close:focus-visible {
-    border-color: #4a4a4a;
-    color: #fff;
-    outline: none;
-  }
-
   .nav-mode .live-tracker[data-overview="true"] {
     justify-content: flex-start;
-    gap: 0;
+    gap: .1rem;
     overflow-x: hidden;
     overflow-y: auto;
   }
@@ -3062,30 +2995,28 @@ body.document-page {
     display: block;
     width: 100%;
     flex: none;
-    padding: 1.05rem 0 .65rem;
-    border-bottom: 1px solid #171717;
+    padding: .25rem 0 .2rem;
+    border: 0;
   }
-  .nav-mode .live-tracker-project:last-of-type { border-bottom: 0; }
   .nav-mode .live-tracker-project-name,
   .nav-mode .live-tracker[data-overview="true"] .live-tracker-project-name {
     position: static;
     width: auto;
     height: auto;
-    margin: 0 0 .42rem;
-    padding: 0 .75rem;
+    margin: 0 0 .15rem .15rem;
+    padding: 0;
     overflow: visible;
     clip: auto;
     clip-path: none;
     border: 0;
-    color: #777;
+    color: #555;
     font-size: .7rem;
-    font-weight: 650;
-    letter-spacing: .085em;
-    line-height: 1.25;
-    text-transform: uppercase;
+    font-weight: var(--chrome-weight);
+    letter-spacing: var(--chrome-tracking);
+    line-height: 1.2;
+    text-transform: lowercase;
     white-space: normal;
   }
-  .nav-mode .live-tracker-folder::before { color: #444; }
   .nav-mode .live-tracker-sessions,
   .nav-mode .live-tracker[data-overview="true"] .live-tracker-sessions,
   .nav-mode .live-tracker-sessions-hierarchical {
@@ -3094,213 +3025,187 @@ body.document-page {
     min-width: 0;
     flex-direction: column;
     align-items: stretch;
-    gap: .12rem;
+    gap: .05rem;
   }
   .nav-mode .live-tracker-row { width: 100%; }
   .nav-mode .live-tracker-session {
-    position: relative;
     display: flex;
     width: 100%;
-    min-height: 3.25rem;
-    flex-direction: column;
-    align-items: flex-start;
-    justify-content: center;
-    gap: .16rem;
-    padding: .54rem .75rem;
-    border-radius: .28rem;
+    min-height: 2.75rem;
+    padding: .3rem .15rem;
+    border-radius: 0;
     background: transparent;
-    color: #b0b0b0;
-    line-height: 1.12;
+    color: #777;
   }
   .nav-mode .live-tracker-session:hover,
   .nav-mode .live-tracker-session:focus-visible {
-    background: #0d0d0d;
+    background: transparent;
     color: #fff;
-    outline: 1px solid #333;
-    outline-offset: -1px;
+    outline: none;
   }
   .nav-mode .live-tracker-session-current {
-    background: #151515;
-    box-shadow: inset 2px 0 #bdbdbd;
-    color: #fff;
+    background: transparent;
+    box-shadow: none;
+    color: #f2f2f2;
   }
   .nav-mode .live-tracker-face {
-    font-size: 1rem;
-    font-weight: 650;
-    letter-spacing: .005em;
+    font-size: var(--chrome-size);
+    font-weight: var(--chrome-emphasis);
+    letter-spacing: var(--chrome-tracking);
   }
   .nav-mode .live-tracker-label,
   .nav-mode .live-tracker-state {
-    color: #707070;
-    font-size: .72rem;
-    letter-spacing: .015em;
-    line-height: 1.15;
+    color: #686868;
+    font-size: .62rem;
+    font-weight: 480;
+    letter-spacing: .02em;
   }
   .nav-mode .live-tracker-session-current .live-tracker-label,
-  .nav-mode .live-tracker-session-current .live-tracker-state { color: #9a9a9a; }
-  .nav-mode .live-tracker-activity[data-activity="working"] { color: #cacaca; }
-
-  /* Subagents retain a full target and hierarchy through indentation/type, not
-     through project-style relationship paths. */
-  .nav-mode .live-tracker-depth-1 .live-tracker-session,
-  .nav-mode .live-tracker-depth-2 .live-tracker-session,
-  .nav-mode .live-tracker-depth-3 .live-tracker-session,
+  .nav-mode .live-tracker-session-current .live-tracker-state { color: #888; }
+  .nav-mode .live-tracker-depth-1 .live-tracker-session { width: calc(100% - .65rem); margin-inline-start: .65rem; }
+  .nav-mode .live-tracker-depth-2 .live-tracker-session { width: calc(100% - 1.3rem); margin-inline-start: 1.3rem; }
+  .nav-mode .live-tracker-depth-3 .live-tracker-session { width: calc(100% - 1.95rem); margin-inline-start: 1.95rem; }
   .nav-mode .live-tracker-depth-4 .live-tracker-session,
   .nav-mode .live-tracker-depth-5 .live-tracker-session,
   .nav-mode .live-tracker-depth-6 .live-tracker-session,
   .nav-mode .live-tracker-depth-7 .live-tracker-session,
   .nav-mode .live-tracker-depth-8 .live-tracker-session {
-    width: calc(100% - 1rem);
-    min-height: 3rem;
-    margin-inline-start: 1rem;
+    width: calc(100% - 2.6rem);
+    margin-inline-start: 2.6rem;
   }
   .nav-mode .live-tracker-child-strip .live-tracker-session {
-    min-height: 3rem;
-    padding: .48rem .75rem;
+    min-height: 2.75rem;
+    padding: .3rem .15rem;
+    overflow: hidden;
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
     justify-content: center;
-    gap: .14rem;
-    color: #929292;
+    gap: .08rem;
+    color: #686868;
   }
   .nav-mode .live-tracker-child-strip .live-tracker-session::before { display: none; }
   .nav-mode .live-tracker-child-strip .live-tracker-face {
     color: inherit;
-    font-size: .86rem;
-    font-weight: 580;
+    font-size: var(--chrome-size);
+    font-weight: var(--chrome-weight);
   }
-  .nav-mode .live-tracker-child-strip .live-tracker-label,
-  .nav-mode .live-tracker-child-strip .live-tracker-state { color: #626262; }
   .nav-mode .live-tracker-child-strip .live-tracker-session-current {
-    background: #121212;
-    box-shadow: inset 2px 0 #858585;
-    color: #d6d6d6;
+    background: transparent;
+    box-shadow: none;
+    color: #d0d0d0;
   }
   .nav-mode .live-tracker-message,
   .nav-mode .live-tracker-filter-empty {
-    padding: 1.5rem .75rem;
+    padding: .7rem .15rem;
     color: #777;
     font-size: .9rem;
     white-space: normal;
   }
+  .nav-mode .session-traversal .new-session {
+    display: flex;
+    width: 100%;
+    flex: none;
+    margin: .2rem 0 0;
+  }
+  .nav-mode .session-traversal .new-session button {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: flex-start;
+    padding: .3rem .15rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: #454545;
+    cursor: pointer;
+  }
+  .nav-mode .session-traversal .new-session button:hover,
+  .nav-mode .session-traversal .new-session button:focus-visible {
+    color: #fff;
+    outline: none;
+  }
+  .nav-mode .session-traversal .new-session button .banner-mark {
+    display: block;
+    width: 1.1rem;
+    height: 1.1rem;
+  }
 
-  /* The safe-area dock is project context. It scrolls only horizontally; the
-     session surface above remains the sole vertical scroll plane. */
+  /* Project selection is quiet context at the top edge, not a second pane or
+     permanent dock. The native horizontal scroller owns touches in this strip. */
   .nav-mode .project-rail {
     display: flex;
     position: fixed;
     z-index: 8;
-    inset: auto 0 0;
+    inset: 0 0 auto;
     width: 100%;
-    height: calc(4.25rem + env(safe-area-inset-bottom));
+    min-height: calc(max(.35rem, env(safe-area-inset-top)) + 2.75rem);
     flex-direction: row;
-    align-items: stretch;
-    padding: .55rem max(.75rem, env(safe-area-inset-right)) max(.55rem, env(safe-area-inset-bottom)) max(.75rem, env(safe-area-inset-left));
+    align-items: flex-end;
+    padding: max(.35rem, env(safe-area-inset-top))
+      max(.65rem, env(safe-area-inset-right))
+      0
+      max(.65rem, env(safe-area-inset-left));
     overflow: hidden;
-    border-top: 1px solid #202020;
-    border-right: 0;
-    background: rgba(7, 7, 7, .98);
-    box-shadow: 0 -.6rem 1.6rem rgba(0, 0, 0, .32);
+    border: 0;
+    background: transparent;
+    box-shadow: none;
     transform: none;
     visibility: visible;
     pointer-events: auto;
   }
   .nav-mode .project-rail .active-projects {
     display: flex;
-    width: auto;
+    width: 100%;
     min-width: 0;
     max-height: none;
-    flex: 1 1 auto;
     align-items: center;
-    gap: .2rem;
+    gap: .1rem;
     overflow-x: auto;
     overflow-y: hidden;
     overscroll-behavior-inline: contain;
+    touch-action: pan-x;
     pointer-events: auto;
     scrollbar-width: none;
   }
   .nav-mode .project-rail .active-projects::-webkit-scrollbar { display: none; }
   .nav-mode .project-rail .active-projects ol {
     display: flex;
+    width: max-content;
     flex: none;
     flex-direction: row;
-    gap: .2rem;
+    gap: .1rem;
   }
   .nav-mode .project-rail .active-projects li { flex: none; }
   .nav-mode .project-rail .projects-session-item,
   .nav-mode .project-rail .active-project-item {
     width: auto;
-    justify-content: center;
     min-height: 2.75rem;
-    margin: 0;
-    padding: .55rem .78rem;
-    border: 0;
-    border-radius: .3rem;
-    background: transparent;
-    color: #6f6f6f;
-    font-size: .78rem;
-    font-weight: 600;
-    letter-spacing: .025em;
-  }
-  .nav-mode .project-rail .projects-session-item {
-    position: sticky;
-    z-index: 1;
-    left: 0;
     flex: none;
-    background: #070707;
-    color: #9b9b9b;
+    justify-content: flex-start;
+    margin: 0;
+    padding: .3rem .45rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: #454545;
+    font-size: var(--chrome-size);
+    font-weight: var(--chrome-emphasis);
+    letter-spacing: var(--chrome-tracking);
+    text-transform: lowercase;
   }
-  .nav-mode .project-rail .active-project-current {
-    background: #1a1a1a;
-    color: #f2f2f2;
-  }
+  .nav-mode .project-rail .active-project-current { background: transparent; color: #f2f2f2; }
   .nav-mode .project-rail .active-project-item:hover,
   .nav-mode .project-rail .active-project-item:focus-visible {
-    background: #141414;
-    color: #fff;
-    outline: 1px solid #3a3a3a;
-    outline-offset: -1px;
-  }
-  .nav-mode .project-rail .session-background-actions,
-  .nav-mode .project-rail .inactive-project-tree { display: none; }
-
-  /* Keep the create action outside the horizontal scroller. It owns real dock
-     width instead of visually overlaying (and blocking) a project target. */
-  .nav-mode .project-rail > .new-session {
-    display: flex;
-    position: relative;
-    z-index: 2;
-    width: 2.75rem;
-    height: 2.75rem;
-    flex: 0 0 2.75rem;
-    align-self: center;
-    margin: 0 0 0 .2rem;
-  }
-  .nav-mode .project-rail > .new-session button {
-    display: grid;
-    width: 2.75rem;
-    min-width: 2.75rem;
-    min-height: 2.75rem;
-    padding: 0;
-    place-items: center;
-    border: 1px solid #303030;
-    border-radius: .3rem;
-    background: #181818;
-    color: #d0d0d0;
-    cursor: pointer;
-  }
-  .nav-mode .project-rail > .new-session button:hover,
-  .nav-mode .project-rail > .new-session button:focus-visible {
-    border-color: #555;
+    background: transparent;
     color: #fff;
     outline: none;
   }
-  .nav-mode .project-rail > .new-session button .banner-mark {
-    display: block;
-    width: 1.15rem;
-    height: 1.15rem;
-  }
+  .nav-mode .project-rail .session-background-actions,
+  .nav-mode .project-rail .inactive-project-tree { display: none; }
 }
+
 
 .project-rail { display: none; }
 

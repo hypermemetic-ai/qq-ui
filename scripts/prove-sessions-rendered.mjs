@@ -82,6 +82,7 @@ const sourceProjects = [
   { key: "p:studio:west", name: "studio", label: "Studio", folder: "west", folderLabel: "West", sessions: [idleRow(21, "studio-west")] },
   { key: "p:beta:", name: "beta", label: "Beta", folder: "", folderLabel: "", sessions: [idleRow(32, "beta-arch")] },
   { key: "p:alpha:", name: "alpha", label: "Alpha", folder: "", folderLabel: "", sessions: alphaSessions },
+  { key: "p:alpha-archive-with-an-unusually-long-name:", name: "alpha-archive-with-an-unusually-long-name", label: "Alpha archive with an unusually long project label", folder: "", folderLabel: "", sessions: [] },
   { key: "p:mu:", name: "mu", label: "Mu", folder: "", folderLabel: "", sessions: [idleRow(22, "mu-arch")] },
   { key: "p:studio:east", name: "studio", label: "Studio", folder: "east", folderLabel: "East", sessions: [idleRow(23, "studio-east")] },
   { key: "p:kappa:", name: "kappa", label: "Kappa", folder: "", folderLabel: "", sessions: [idleRow(24, "kappa-arch")] },
@@ -548,8 +549,6 @@ const inspectExpression = `(() => {
   const trackerStyle = groupPort ? getComputedStyle(groupPort) : null;
   const trackerRect = elementRect(groupPort);
   const railRect = elementRect(rail);
-  const switcherHeader = groupPort?.querySelector('.pwa-switcher-header');
-  const switcherClose = groupPort?.querySelector('.pwa-switcher-close');
   const visibleSessionRows = visibleGroups.flatMap((group) => [...group.querySelectorAll('.live-tracker-session')]);
   const rowMetrics = visibleSessionRows.map((row) => {
     const box = row.getBoundingClientRect();
@@ -614,6 +613,13 @@ const inspectExpression = `(() => {
     streamUrl: stream?.getAttribute('sse-connect') || '',
     trackerRect,
     railRect,
+    bodyOverlayBackground: getComputedStyle(document.body, '::before').backgroundColor,
+    trackerBackground: trackerStyle?.backgroundColor || '',
+    railBackground: railStyle?.backgroundColor || '',
+    railBoxShadow: railStyle?.boxShadow || '',
+    railBorderTopWidth: Number.parseFloat(railStyle?.borderTopWidth || '0'),
+    railBorderBottomWidth: Number.parseFloat(railStyle?.borderBottomWidth || '0'),
+    bespokeSwitcherChrome: document.querySelectorAll('.pwa-switcher-header, .pwa-switcher-kicker, .pwa-switcher-title, .pwa-switcher-close').length,
     trackerOverflowY: trackerStyle?.overflowY || '',
     projectOverflowX: projectPort ? getComputedStyle(projectPort).overflowX : '',
     projectOverflowY: projectPort ? getComputedStyle(projectPort).overflowY : '',
@@ -621,13 +627,6 @@ const inspectExpression = `(() => {
     composerDisplay: composerStyle?.display || '',
     transcriptDisplay: getComputedStyle(document.querySelector('#transcript')).display,
     childrenDisplay: getComputedStyle(document.querySelector('#session-children')).display,
-    switcher: {
-      title: switcherHeader?.querySelector('.pwa-switcher-title')?.textContent.trim() || '',
-      headerRect: elementRect(switcherHeader),
-      closeRect: elementRect(switcherClose),
-      closeLabel: switcherClose?.getAttribute('aria-label') || '',
-      closeVisible: switcherClose ? getComputedStyle(switcherClose).display !== 'none' : false,
-    },
     dockLabels: [...document.querySelectorAll('.project-rail .active-project-item')].map((item) => item.textContent.trim()),
     dockCurrentLabels: [...document.querySelectorAll('.project-rail .active-project-current')].map((item) => item.textContent.trim()),
     activeElement: document.activeElement?.className || document.activeElement?.id || document.activeElement?.tagName || '',
@@ -684,6 +683,8 @@ const inspectExpression = `(() => {
     groupSequence: groups.map(identity),
     groupHeadings: groups.map((group) => group.querySelector('.live-tracker-project-name')?.textContent.trim() || ''),
     visibleGroups: visibleGroups.map(identity),
+    emptyMessages: visibleGroups.flatMap((group) => [...group.querySelectorAll('.live-tracker-project-empty')])
+      .map((node) => node.textContent.trim()),
     projectVisualTops: projects.map((item) => item.offsetTop),
     groupVisualTops: visibleGroups.map((group) => group.offsetTop),
     headingVisibility,
@@ -756,7 +757,7 @@ function assertNoCenterDivider(state) {
   assert.equal(state.railBorderRightWidth, 0,
     "narrow installed-app dock has no obsolete full-height center divider");
 }
-function assertPwaSessionSurface(state, { overview = false } = {}) {
+function assertPwaSessionSurface(state) {
   if (!state.narrowNav) return;
   assert.equal(state.connectorPaths.length, 0, "narrow PWA renders no project relationship paths");
   assert.ok(state.connectorElements === 0 || state.connectorLayerHidden,
@@ -765,44 +766,51 @@ function assertPwaSessionSurface(state, { overview = false } = {}) {
     && Math.abs(state.trackerRect.right - state.viewportWidth) < 1,
   "session surface spans the full viewport rather than a half pane");
   assert.equal(state.trackerOverflowY, "auto", "session surface owns vertical scrolling");
-  assert.equal(state.projectOverflowY, "hidden", "bottom project dock never creates a second vertical scroll plane");
+  assert.equal(state.projectOverflowY, "hidden", "project context never creates a second vertical scroll plane");
   assert.ok(state.configuredVerticalScrollers.includes("live-session-list"),
     "the full-width session list is a configured scroll plane");
-  assert.equal(state.composerDisplay, "none", "composer is removed while the switcher owns the screen");
-  assert.equal(state.transcriptDisplay, "none", "covered conversation content leaves the keyboard and visual order");
-  assert.equal(state.childrenDisplay, "none", "covered child chrome leaves the keyboard and visual order");
+  assert.match(state.bodyOverlayBackground, /^rgba\(0, 0, 0, 0\.9[0-9]*\)$/,
+    "the established translucent black body overlay remains visible");
+  assert.equal(state.trackerBackground, "rgba(0, 0, 0, 0)",
+    "the full-width session foreground remains transparent");
+  assert.equal(state.railBackground, "rgba(0, 0, 0, 0)",
+    "project context dissolves into the transparent overlay");
+  assert.equal(state.railBoxShadow, "none", "project context has no dock shadow");
+  assert.equal(state.railBorderTopWidth + state.railBorderBottomWidth, 0,
+    "project context has no dock divider borders");
+  assert.notEqual(state.composerDisplay, "none", "composer remains in the visual and keyboard tree");
+  assert.notEqual(state.transcriptDisplay, "none", "conversation remains in the visual tree beneath the overlay");
+  assert.ok(state.composerRect?.width >= state.viewportWidth - 1 && state.composerRect?.height > 40,
+    "the established composer remains visibly layered above the overlay");
+  assert.ok(state.composerCoversTracker, "tracker scrolling accounts for the retained composer layer");
   assert.ok(state.railRect && Math.abs(state.railRect.left) < 1
     && Math.abs(state.railRect.right - state.viewportWidth) < 1
-    && Math.abs(state.railRect.bottom - state.viewportHeight) < 1,
-  "project navigation is a full-width bottom safe-area dock");
-  assert.equal(state.projectOverflowX, "auto", "project dock can scroll horizontally for many projects");
-  assert.equal(state.switcher.closeLabel, "Return to conversation");
-  assert.ok(state.switcher.closeVisible && state.switcher.closeRect?.width >= 44 && state.switcher.closeRect?.height >= 44,
-    "switcher has a labelled thumb-sized return action");
-  const selectedHeading = state.groupHeadings.find((_, index) => state.visibleGroups.includes(state.groupSequence[index])) || "";
-  const normalizedPlace = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
-  assert.equal(normalizedPlace(state.switcher.title), normalizedPlace(overview ? "All sessions" : selectedHeading),
-    "switcher title reflects overview or selected project/folder context");
+    && Math.abs(state.railRect.top) < 1
+    && state.railRect.bottom < state.composerRect.top,
+  "project navigation is a compact full-width top-edge context strip");
+  assert.equal(state.projectOverflowX, "auto", "project context can scroll horizontally for many projects");
+  assert.equal(state.bespokeSwitcherChrome, 0,
+    "narrow navigation has no bespoke title bar, kicker, or boxed close button");
   assert.ok(state.headingVisibility.every((heading) => heading.text && heading.id && heading.labelled
     && heading.position === "static" && heading.width > 40 && heading.height > 8
     && heading.overflow === "visible"),
-  "PWA project/folder headings are explicitly visible while retaining labelled sections");
-  assert.ok(state.rowMetrics.length > 0 && state.rowMetrics.every((row) => row.height >= 48 && row.height <= 56.5),
-    "every visible root and subagent session has an approximately 48–56px target");
-  assert.ok(state.rowMetrics.every((row) => row.width >= row.groupWidth - (row.depth ? 17 : 1)),
+  "PWA project/folder headings are visibly grouped while retaining labelled sections");
+  assert.ok(state.rowMetrics.every((row) => row.height >= 44 && row.height <= 46),
+    "every visible root and subagent session has a compact 44px target");
+  assert.ok(state.rowMetrics.every((row) => row.width >= row.groupWidth - (row.depth ? 43 : 1)),
     "session targets consume the available row width, with only deliberate child indentation");
+  if (state.rowMetrics.length === 0) assert.deepEqual(state.emptyMessages, ["no live sessions"],
+    "an empty filtered group keeps its quiet explicit empty state");
   const current = state.rowMetrics.find((row) => row.current);
-  if (current) assert.ok(current.background !== "rgba(0, 0, 0, 0)" && current.boxShadow !== "none",
-    "current session has an unmistakable quiet surface and inset marker");
+  if (current) assert.ok(current.background === "rgba(0, 0, 0, 0)" && current.boxShadow === "none",
+    "current session uses contrast/type rather than a filled card or inset stripe");
   const childRow = state.rowMetrics.find((row) => row.depth > 0);
-  if (childRow) assert.ok(childRow.left - childRow.groupLeft >= 15,
-    "subagent session is visibly nested beneath its parent without shrinking its target");
-  assert.ok(state.dockLabels[0] === "projects", "dock preserves the projects overview affordance");
-  assert.equal(state.dockCurrentLabels.length, 1, "dock exposes exactly one current filter context");
-  if (overview) assert.deepEqual(state.dockCurrentLabels, ["projects"],
-    "overview keeps the projects affordance unmistakably current");
-  else assert.notEqual(state.dockCurrentLabels[0], "projects",
-    "filtered view marks its project rather than the all-project affordance");
+  if (childRow) assert.ok(childRow.left - childRow.groupLeft >= 10,
+    "subagent session is visibly nested beneath its parent without losing its row target");
+  assert.ok(state.dockLabels[0] === "projects", "project strip preserves the real Projects action");
+  assert.ok(state.dockCurrentLabels.length <= 1, "project strip exposes at most one real current context");
+  if (!state.overview) assert.notEqual(state.dockCurrentLabels[0], "projects",
+    "filtered view marks its project rather than redefining Projects as all sessions");
   assertNoCenterDivider(state);
 }
 function assertSelected(state, expected, selected = "alpha\n") {
@@ -820,36 +828,32 @@ function assertSelected(state, expected, selected = "alpha\n") {
   assertPwaSessionSurface(state);
   assertNoCenterDivider(state);
 }
-function assertNewSessionDock(state, { safeBottom = 0 } = {}) {
+function assertNewSessionInContext(state) {
   const create = state.newSession;
   assert.ok(state.narrowNav && create.count === 1 && create.visibleCount === 1,
     "filtered narrow PWA exposes exactly one visible New session action");
-  assert.equal(create.host, "project-rail",
-    "New session is a direct dock child instead of being trapped below the dock stacking context");
-  assert.ok(create.rect && create.rect.width >= 44 && create.rect.height >= 44,
-    "New session has a full 44px thumb target");
+  assert.equal(create.host, "live-session-list",
+    "New session remains inside the relevant filtered session content");
+  assert.ok(create.rect && create.rect.width >= state.viewportWidth - 40 && create.rect.height >= 44,
+    "New session is a flat full-row 44px touch target");
   if (diagnose && !create.topmost) console.error("New session hit-test diagnostics", {
     viewport: { width: state.viewportWidth, height: state.viewportHeight },
-    rail: state.railRect, create: create.rect, padding: create.railPadding,
+    tracker: state.trackerRect, create: create.rect,
     found: create.topmostNode || "nothing",
   });
   assert.ok(create.topmost,
     `New session is the topmost hit target at its visible center (found ${create.topmostNode || "nothing"})`);
-  assert.ok(state.railRect && create.rect.left >= state.railRect.left - .5
-    && create.rect.right <= state.railRect.right + .5
-    && create.rect.top >= state.railRect.top - .5 && create.rect.bottom <= state.railRect.bottom + .5,
-  "New session stays wholly inside the bottom dock");
+  assert.ok(create.rect.left >= state.trackerRect.left - .5 && create.rect.right <= state.trackerRect.right + .5,
+    "New session stays wholly inside the full-width tracker");
+  assert.ok(create.rect.bottom <= state.composerRect.top + .5,
+    "New session stays in scrollable content above the retained composer");
   assert.deepEqual(create.dockOverlap, [],
-    "the dedicated create-action column does not overlap any project dock entry");
-  if (diagnose && !create.dockHits.every((entry) => entry.hit)) console.error("Project dock hit-test diagnostics", {
+    "the in-context create action does not overlap project strip entries");
+  if (diagnose && !create.dockHits.every((entry) => entry.hit)) console.error("Project strip hit-test diagnostics", {
     scroll: state.scroll, hits: create.dockHits, create: create.rect, rail: state.railRect,
   });
-  assert.ok(create.dockHits.length > 0 && create.dockHits.every((entry) => entry.hit),
-    "every fully visible project dock entry remains its own topmost hit target");
-  assert.ok((create.railPadding?.bottom ?? 0) + .5 >= safeBottom,
-    "dock padding honors the emulated bottom safe area");
-  assert.ok(create.rect.bottom <= state.viewportHeight - safeBottom + .5,
-    "New session remains above the bottom safe area");
+  assert.ok(create.dockHits.every((entry) => entry.hit),
+    "every fully visible project strip entry remains its own topmost hit target");
 }
 
 function assertOverview(state, expected) {
@@ -860,7 +864,7 @@ function assertOverview(state, expected) {
   assertNoCenterDivider(state);
   assert.equal(state.horizontalOverflow, false, "switcher creates no horizontal viewport overflow");
   if (state.narrowNav) {
-    assert.deepEqual(state.projectSequence, expected, "project dock identities retain canonical order");
+    assert.deepEqual(state.projectSequence, expected, "project strip identities retain canonical order");
     assert.deepEqual(state.groupSequence, expected, "session groups retain canonical project order");
     assert.deepEqual(state.visibleGroups, expected, "overview exposes every group in one reading order");
     assertPwaSessionSurface(state, { overview: true });
@@ -1313,22 +1317,22 @@ try {
   report.pwaSelected = await inspect(smallPwa.cdp, "pwa-selected");
   assert.ok(report.pwaSelected.standalone && report.pwaSelected.navMode, "selected screenshot is installed-PWA navigation");
   assertSelected(report.pwaSelected, expectedSmall);
-  assert.match(report.pwaSelected.activeElement, /pwa-switcher-close/,
-    "opening narrow navigation places focus on the labelled return action");
   await openOverview(smallPwa.cdp);
   report.pwaSmallOverview = await inspect(smallPwa.cdp, "pwa-small-overview");
   assertOverview(report.pwaSmallOverview, expectedSmall);
   assert.equal(report.pwaSmallOverview.connectorPaths.length, 0,
     "small PWA overview contains no relationship visualization");
   report.pwaOverviewAccessibility = await accessibleSwitcherState(smallPwa.cdp);
-  assert.equal(report.pwaOverviewAccessibility.returnButtons, 1,
-    "accessibility tree exposes one labelled return action");
+  assert.equal(report.pwaOverviewAccessibility.returnButtons, 0,
+    "accessibility tree has no redundant bespoke return header action");
   const accessibleHeadings = report.pwaOverviewAccessibility.headings.map((name) => name.toLowerCase());
-  assert.ok(accessibleHeadings.includes("all sessions")
-    && ["alpha", "beta", "delta", "epsilon"].every((name) => accessibleHeadings.includes(name)),
-  "accessibility tree exposes screen and visible project section headings");
-  assert.deepEqual(report.pwaOverviewAccessibility.textboxes, [],
-    "hidden conversation composer is absent from the switcher accessibility tree");
+  assert.ok(smallProjects.every((project) => accessibleHeadings.includes(
+    `${project.label}${project.folderLabel ? ` / ${project.folderLabel}` : ""}`.toLowerCase(),
+  )), "accessibility tree exposes every visible project/folder section heading");
+  assert.ok(!accessibleHeadings.includes("all sessions"),
+    "accessibility tree has no redundant all-sessions screen title");
+  assert.equal(report.pwaOverviewAccessibility.textboxes.length, 1,
+    "the retained conversation composer remains available to accessibility APIs");
   await pressKey(smallPwa.cdp, "Escape");
   report.smallClosedAfter = await inspect(smallPwa.cdp, "small-closed-after", { capture: false });
   assert.equal(report.smallClosedAfter.connectorPaths.length, 0, "closing narrow navigation suppresses relationship routes");
@@ -1340,8 +1344,8 @@ try {
   await smallPwa.cdp.evaluate(`document.querySelector('.active-project-item[data-project="beta"][data-folder=""]')?.click()`);
   report.pwaReselected = await inspect(smallPwa.cdp, "pwa-reselected");
   assertSelected(report.pwaReselected, expectedSmall, "beta\n");
-  assertNewSessionDock(report.pwaReselected, { safeBottom: 24 });
-  assert.ok(report.pwaReselected.navMode, "project filter keeps the opaque switcher open");
+  assertNewSessionInContext(report.pwaReselected);
+  assert.ok(report.pwaReselected.navMode, "project filter keeps the translucent switcher open");
   assert.equal(report.pwaReselected.streamUrl, streamBeforeProjectFilter,
     "project filter does not initiate a live session switch");
   assert.equal(report.pwaReselected.locationPath, locationBeforeProjectFilter,
@@ -1353,7 +1357,7 @@ try {
   })()`);
   report.pwaFilteredLiveSwap = await inspect(smallPwa.cdp, "pwa-filtered-live-swap", { capture: false });
   assertSelected(report.pwaFilteredLiveSwap, expectedSmall, "beta\n");
-  assertNewSessionDock(report.pwaFilteredLiveSwap, { safeBottom: 24 });
+  assertNewSessionInContext(report.pwaFilteredLiveSwap);
   assert.equal(await accessibleNewSessionCount(smallPwa.cdp), 1,
     "live chrome replacement preserves exactly one accessible filtered-project New session action");
   await openOverview(smallPwa.cdp);
@@ -1364,16 +1368,16 @@ try {
   await smallPwa.cdp.evaluate(`document.querySelector('.active-project-item[data-project="beta"][data-folder=""]')?.click()`);
   report.pwaReselectedAfterLiveSwap = await inspect(smallPwa.cdp, "pwa-reselected-after-live-swap", { capture: false });
   assertSelected(report.pwaReselectedAfterLiveSwap, expectedSmall, "beta\n");
-  assertNewSessionDock(report.pwaReselectedAfterLiveSwap, { safeBottom: 24 });
+  assertNewSessionInContext(report.pwaReselectedAfterLiveSwap);
   await smallPwa.cdp.evaluate(`(() => {
     window.__newSessionSubmissions = [];
-    const form = document.querySelector('#project-rail > form.new-session');
+    const form = document.querySelector('.live-tracker > form.new-session');
     form?.addEventListener('submit', (event) => {
       event.preventDefault();
       window.__newSessionSubmissions.push({ action: new URL(form.action).pathname, method: form.method });
     }, { once: true });
   })()`);
-  report.pwaNewSessionTouchHit = await touchTap(smallPwa.cdp, "#project-rail > form.new-session button");
+  report.pwaNewSessionTouchHit = await touchTap(smallPwa.cdp, ".live-tracker > form.new-session button");
   report.pwaNewSessionTouchSubmit = await smallPwa.cdp.evaluate(`({
     submissions: window.__newSessionSubmissions,
     navMode: document.body.classList.contains('nav-mode'),
@@ -1385,20 +1389,16 @@ try {
   assert.equal(report.pwaNewSessionTouchSubmit.navMode, false,
     "initiating New session dismisses the PWA switcher through its existing navigation lifecycle");
   assert.equal(report.pwaNewSessionTouchSubmit.host, "live-session-list",
-    "closing the narrow switcher restores the form to its desktop/server tracker structure");
+    "New session keeps its native server tracker structure across dismissal");
   await openNavigation(smallPwa.cdp);
   await waitForPaint(smallPwa.cdp);
   await smallPwa.cdp.evaluate(`document.querySelector('.projects-session-item')?.click()`);
-  report.pwaOverviewReentered = await inspect(smallPwa.cdp, "pwa-overview-reentered", { capture: false });
-  assertOverview(report.pwaOverviewReentered, expectedSmall);
-  assert.ok(report.pwaOverviewReentered.navMode,
-    "projects dock overview keeps the opaque switcher open");
-  assert.equal(report.pwaOverviewReentered.streamUrl, streamBeforeProjectFilter,
-    "projects dock overview does not initiate a live session switch");
-  assert.equal(report.pwaOverviewReentered.locationPath, locationBeforeProjectFilter,
-    "projects dock overview does not navigate away from the current conversation");
-  await smallPwa.cdp.evaluate(`document.querySelector('.pwa-switcher-close')?.click()`);
   await waitForPaint(smallPwa.cdp);
+  report.pwaProjectsActivated = await inspect(smallPwa.cdp, "pwa-projects-activated", { capture: false });
+  assert.equal(report.pwaProjectsActivated.navMode, false,
+    "the real Projects action dismisses narrow navigation like other destinations");
+  assert.equal(report.pwaProjectsActivated.locationPath, "/qq/projects",
+    "Projects genuinely navigates to its server-provided Projects context");
   await smallPwa.cdp.evaluate(`document.querySelector('.console-menu > summary').click(); document.querySelector('.usage-choice').click()`);
   report.pwaUsagePortrait = await usageLayout(smallPwa.cdp, "pwa-usage-portrait");
   assertUsageLayout(report.pwaUsagePortrait, { narrow: true });
@@ -1452,20 +1452,30 @@ try {
     "many project context never creates a second vertical plane");
   assert.ok(report.pwaManyOverview.scroll.projectScrollWidth > report.pwaManyOverview.scroll.projectWidth,
     "many project filters overflow horizontally in the thumb dock");
+  const emptyLongIdentity = "alpha-archive-with-an-unusually-long-name\n";
+  await manyPwa.cdp.evaluate(`document.querySelector('.active-project-item[data-project="alpha-archive-with-an-unusually-long-name"]')?.click()`);
+  report.pwaEmptyLongFiltered = await inspect(manyPwa.cdp, "pwa-empty-long-filtered");
+  assertSelected(report.pwaEmptyLongFiltered, expectedMany, emptyLongIdentity);
+  assertNewSessionInContext(report.pwaEmptyLongFiltered);
+  assert.deepEqual(report.pwaEmptyLongFiltered.emptyMessages, ["no live sessions"],
+    "empty long-label project remains explicit and can create its first session");
+  assert.equal(report.pwaEmptyLongFiltered.horizontalOverflow, false,
+    "long project labels wrap or scroll locally without widening the viewport");
+  await openOverview(manyPwa.cdp);
   await manyPwa.cdp.evaluate(`document.querySelector('.active-projects').scrollLeft = 0`);
   await touchSwipe(manyPwa.cdp, ".active-projects", { fromX: .8, toX: .25 });
   report.pwaDockTouchLeft = await inspect(manyPwa.cdp, "pwa-dock-touch-left", { capture: false });
   assert.equal(report.pwaDockTouchLeft.navMode, true,
-    "a real leftward touch drag in the overflowing project dock does not dismiss the switcher");
+    "a real leftward touch drag in the overflowing project strip does not dismiss the switcher");
   assert.ok(report.pwaDockTouchLeft.scroll.projectLeft > 20,
-    "a real leftward touch drag scrolls the overflowing project dock toward later projects");
+    "a real leftward touch drag scrolls the overflowing project strip toward later projects");
   const dockLeftAfterForwardSwipe = report.pwaDockTouchLeft.scroll.projectLeft;
   await touchSwipe(manyPwa.cdp, ".active-projects", { fromX: .25, toX: .8 });
   report.pwaDockTouchRight = await inspect(manyPwa.cdp, "pwa-dock-touch-right", { capture: false });
   assert.equal(report.pwaDockTouchRight.navMode, true,
-    "a real rightward touch drag in the overflowing project dock keeps the switcher open");
+    "a real rightward touch drag in the overflowing project strip keeps the switcher open");
   assert.ok(report.pwaDockTouchRight.scroll.projectLeft < dockLeftAfterForwardSwipe,
-    "a real rightward touch drag scrolls the overflowing project dock back toward overview");
+    "a real rightward touch drag scrolls the overflowing project strip back toward overview");
   await manyPwa.cdp.evaluate(`(() => {
     const tracker = document.querySelector('.live-tracker');
     const projects = document.querySelector('.active-projects');
@@ -1485,7 +1495,7 @@ try {
   report.pwaSmallPhone = await inspect(manyPwa.cdp, "pwa-small-phone");
   assertOverview(report.pwaSmallPhone, expectedMany);
   assert.ok(report.pwaSmallPhone.navMode && report.pwaSmallPhone.scroll.projectLeft > 20,
-    "small-phone visual state follows a real dock swipe without dismissing the switcher");
+    "small-phone visual state follows a real strip swipe without dismissing the switcher");
   assert.equal(report.pwaSmallPhone.horizontalOverflow, false,
     "small phone keeps session surface and dock within the viewport");
   assert.deepEqual(report.pwaSmallPhone.duplicateStudio, ["studio\neast", "studio\nwest"],
@@ -1493,7 +1503,7 @@ try {
   await manyPwa.cdp.evaluate(`document.querySelector('.active-project-item[data-project="alpha"][data-folder=""]')?.click()`);
   report.pwaSmallFiltered = await inspect(manyPwa.cdp, "pwa-small-filtered");
   assertSelected(report.pwaSmallFiltered, expectedMany, "alpha\n");
-  assertNewSessionDock(report.pwaSmallFiltered, { safeBottom: 20 });
+  assertNewSessionInContext(report.pwaSmallFiltered);
   assert.equal(report.pwaSmallFiltered.horizontalOverflow, false,
     "small filtered switcher keeps its action and dock within the viewport");
   await openOverview(manyPwa.cdp);
@@ -1506,22 +1516,22 @@ try {
   report.pwaRotated = await inspect(manyPwa.cdp, "pwa-rotated");
   assertOverview(report.pwaRotated, expectedMany);
   assert.ok(report.pwaRotated.navMode && report.pwaRotated.scroll.projectLeft > 20,
-    "rotated-phone visual state follows a real dock swipe without dismissing the switcher");
+    "rotated-phone visual state follows a real strip swipe without dismissing the switcher");
   assert.equal(report.pwaRotated.connectorPaths.length, 0,
-    "rotated PWA overview remains connector-free and composer-free");
+    "rotated PWA overview remains connector-free while retaining the composer");
   await manyPwa.cdp.evaluate(`document.querySelector('.active-project-item[data-project="studio"][data-folder="east"]')?.click()`);
   report.pwaFolderSelected = await inspect(manyPwa.cdp, "pwa-folder-selected");
   assertSelected(report.pwaFolderSelected, expectedMany, "studio\neast");
-  assertNewSessionDock(report.pwaFolderSelected, { safeBottom: 20 });
+  assertNewSessionInContext(report.pwaFolderSelected);
   assert.equal(report.pwaFolderSelected.horizontalOverflow, false,
     "rotated filtered switcher keeps its action and dock within the viewport");
   await openOverview(manyPwa.cdp);
   report.pwaFolderOverviewReentered = await inspect(manyPwa.cdp, "pwa-folder-overview-reentered", { capture: false });
   assertOverview(report.pwaFolderOverviewReentered, expectedMany);
-  await touchSwipe(manyPwa.cdp, ".pwa-switcher-heading", { fromX: .8, toX: .25 });
+  await touchSwipe(manyPwa.cdp, ".live-tracker", { fromX: .8, toX: .25 });
   report.pwaOrdinarySwipeClose = await inspect(manyPwa.cdp, "pwa-ordinary-swipe-close", { capture: false });
   assert.equal(report.pwaOrdinarySwipeClose.navMode, false,
-    "ordinary swipe-left-to-close remains available outside the project dock");
+    "ordinary swipe-left-to-close remains available outside the project strip");
   await closeChrome(manyPwa);
 
   await writeFile(join(artifacts, "report.json"), `${JSON.stringify(report, null, 2)}\n`);

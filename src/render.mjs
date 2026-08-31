@@ -786,27 +786,15 @@ function renderLiveTrackerRow(row, paths, selectedId) {
     </a></li>`;
 }
 
-function pwaSwitcherHeader(title = "Sessions") {
-  return `<header class="pwa-switcher-header">
-    <div class="pwa-switcher-heading">
-      <span class="pwa-switcher-kicker">switch session</span>
-      <h2 class="pwa-switcher-title">${escapeHtml(title)}</h2>
-    </div>
-    <button class="pwa-switcher-close" type="button" aria-label="Return to conversation">
-      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="m14.5 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </button>
-  </header>`;
-}
-
 function renderLiveTracker(snapshot, paths, create) {
   const dashboard = snapshot?.dashboard;
   const valid = dashboard?.schema === "qq.dashboard/v1" && Array.isArray(dashboard.projects) && paths?.switchSession;
   if (!valid) {
-    return `<nav id="live-session-list" class="session-traversal live-tracker live-tracker-unavailable" aria-label="Live session tracker" aria-keyshortcuts="ArrowLeft ArrowRight">${pwaSwitcherHeader()}<span class="live-tracker-message">live tracking unavailable</span>${create}</nav>`;
+    return `<nav id="live-session-list" class="session-traversal live-tracker live-tracker-unavailable" aria-label="Live session tracker" aria-keyshortcuts="ArrowLeft ArrowRight"><span class="live-tracker-message">live tracking unavailable</span>${create}</nav>`;
   }
   const projects = orderedProjectPlaces(dashboard.projects);
   if (projects.length === 0) {
-    return `<nav id="live-session-list" class="session-traversal live-tracker live-tracker-empty" aria-label="Live session tracker" aria-keyshortcuts="ArrowLeft ArrowRight">${pwaSwitcherHeader()}<span class="live-tracker-message">no live sessions</span>${create}</nav>`;
+    return `<nav id="live-session-list" class="session-traversal live-tracker live-tracker-empty" aria-label="Live session tracker" aria-keyshortcuts="ArrowLeft ArrowRight"><span class="live-tracker-message">no live sessions</span>${create}</nav>`;
   }
   const selectedId = String(snapshot?.id ?? "");
   const overview = snapshot?.scope === "projects";
@@ -835,8 +823,7 @@ function renderLiveTracker(snapshot, paths, create) {
   const trackerState = overview
     ? 'aria-label="All project sessions" aria-keyshortcuts="ArrowLeft ArrowRight" data-overview="true"'
     : `aria-label="${escapeHtml(selectedPlaceLabel)} sessions" aria-keyshortcuts="ArrowLeft ArrowRight" data-filter-project="${escapeHtml(selectedProject.name)}" data-filter-folder="${escapeHtml(selectedProject.folder ?? "")}"`;
-  const switcherTitle = overview ? "All sessions" : selectedPlaceLabel;
-  return `<nav id="live-session-list" class="session-traversal live-tracker" ${trackerState}>${pwaSwitcherHeader(switcherTitle)}${groups}<span class="live-tracker-filter-empty" hidden>no live sessions</span>${create}</nav>`;
+  return `<nav id="live-session-list" class="session-traversal live-tracker" ${trackerState}>${groups}<span class="live-tracker-filter-empty" hidden>no live sessions</span>${create}</nav>`;
 }
 
 function sessionNavigation(snapshot, paths) {
