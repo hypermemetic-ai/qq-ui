@@ -58,8 +58,20 @@ export function apply(ctx, config) {
       return workflowsOf()?.workflows?.selected?.(sessionId) === "find";
     },
     workflowsFor: () => {
-      const names = workflowsOf()?.workflows?.names?.();
-      return Array.isArray(names) ? names : [];
+      const facade = workflowsOf()?.workflows;
+      if (!facade || typeof facade.names !== "function") return null;
+      const names = facade.names();
+      return Array.isArray(names) ? names : null;
+    },
+    chooseWorkflow: (sessionId, workflow) => {
+      const facade = workflowsOf()?.workflows;
+      const choose = workflow === "none" ? facade?.clear : facade?.select;
+      if (typeof choose !== "function") {
+        const error = new Error("workflow selector is unavailable");
+        error.status = 503;
+        throw error;
+      }
+      return choose.call(facade, sessionId, ...(workflow === "none" ? [] : [workflow]));
     },
     sessionModeFor: (sessionId) => {
       const facade = workflowsOf()?.workflows;

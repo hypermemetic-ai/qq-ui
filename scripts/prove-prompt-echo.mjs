@@ -665,6 +665,7 @@ const paths = {
   events: `/qq/session/${sessionId}/events`,
   interrupt: `/qq/session/${sessionId}/interrupt`,
   prompt: `/qq/session/${sessionId}/prompt`,
+  workflow: `/qq/session/${sessionId}/workflow`,
   queue: `/qq/session/${sessionId}/queue`,
   close: `/qq/session/${sessionId}/close`,
 };

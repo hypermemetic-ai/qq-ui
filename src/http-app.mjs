@@ -739,6 +739,7 @@ function routes(basePath, sessionId, project, folder) {
       events: sessionId ? `${canonical}/events` : "",
       interrupt: sessionId ? `${canonical}/interrupt` : "",
       prompt: sessionId ? `${canonical}/prompt` : "",
+      workflow: sessionId ? `${canonical}/workflow` : "",
       queue: sessionId ? `${canonical}/queue` : "",
       offer: sessionId ? `${canonical}/offer` : "",
       approval: sessionId ? `${canonical}/approval` : "",
@@ -761,6 +762,7 @@ function routes(basePath, sessionId, project, folder) {
     events: `${canonical}/events`,
     interrupt: `${canonical}/interrupt`,
     prompt: `${canonical}/prompt`,
+    workflow: `${canonical}/workflow`,
     queue: `${canonical}/queue`,
     offer: `${canonical}/offer`,
     approval: `${canonical}/approval`,
@@ -1060,6 +1062,7 @@ export function createConsoleHandler(backend, options = {}) {
   const inFindMode = typeof options.inFindMode === "function" ? options.inFindMode : null;
   const sessionModeFor = typeof options.sessionModeFor === "function" ? options.sessionModeFor : null;
   const workflowsFor = typeof options.workflowsFor === "function" ? options.workflowsFor : null;
+  const chooseWorkflow = typeof options.chooseWorkflow === "function" ? options.chooseWorkflow : null;
   const completeWorkflows = typeof options.completeWorkflows === "function" ? options.completeWorkflows : null;
   const readDashboard = typeof options.dashboardFor === "function" ? options.dashboardFor : null;
   const readConsoleMenu = typeof options.consoleMenuFor === "function" ? options.consoleMenuFor : null;
@@ -2681,6 +2684,58 @@ export function createConsoleHandler(backend, options = {}) {
         );
       } catch (error) {
         text(res, errorStatus(error), errorMessage(error));
+      }
+      return;
+    }
+
+    if (selected?.action === "workflow") {
+      if (req.method !== "POST") {
+        write(res, 405, { Allow: "POST", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
+        return;
+      }
+      try {
+        if (!sameOrigin(req)) {
+          const error = new Error("Cross-origin form submission refused");
+          error.status = 403;
+          throw error;
+        }
+        await assertChairMutation(selected.sessionId);
+        if (!workflowsFor || !chooseWorkflow) {
+          const error = new Error("workflow selector is unavailable");
+          error.status = 503;
+          throw error;
+        }
+        const form = await readForm(req);
+        const workflow = String(form.get("workflow") ?? "").trim();
+        if (!/^[a-z][a-z0-9-]{0,31}$/.test(workflow)) {
+          const error = new Error("unknown workflow selection");
+          error.status = 400;
+          throw error;
+        }
+        const available = await workflowsFor(selected.sessionId);
+        if (!Array.isArray(available)) {
+          const error = new Error("workflow selector is unavailable");
+          error.status = 503;
+          throw error;
+        }
+        if (workflow !== "none" && !available.includes(workflow)) {
+          const error = new Error("unknown workflow selection");
+          error.status = 400;
+          throw error;
+        }
+        await chooseWorkflow(selected.sessionId, workflow);
+        await mutationResponse(req, res, selected.sessionId);
+      } catch (error) {
+        const status = errorStatus(error);
+        if (isHtmx(req) && status !== 403) {
+          try {
+            await mutationResponse(req, res, selected.sessionId, errorMessage(error));
+            return;
+          } catch {
+            // Fall through when the DSH session itself cannot be read.
+          }
+        }
+        text(res, status, errorMessage(error));
       }
       return;
     }

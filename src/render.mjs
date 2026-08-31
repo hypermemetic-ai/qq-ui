@@ -955,16 +955,16 @@ function renderSlashNotice(notice, paths, nodes = []) {
     const kind = / selected$/.test(text) || text === "none selected" ? "notice-ok" : "notice";
     return `<p class="${kind}" role="status">${escapeHtml(text)}</p>`;
   }
-  const action = escapeHtml(paths.prompt ?? "");
+  const action = escapeHtml(paths.workflow ?? "");
   const buttons = [
     ...names.map((name) => {
       const current = name === selected ? " workflows-current" : "";
-      return `<button class="offer-choice workflows-choice${current}" type="submit" name="prompt" value="/workflows ${escapeHtml(name)}">${escapeHtml(name)}</button>`;
+      return `<button class="offer-choice workflows-choice${current}" type="submit" name="workflow" value="${escapeHtml(name)}">${escapeHtml(name)}</button>`;
     }),
     ...(unbound
       ? [`<p class="workflows-unbound" role="status">${escapeHtml(`${unbound} (selected, unbound)`)}</p>`]
       : []),
-    `<button class="offer-choice workflows-choice workflows-none" type="submit" name="prompt" value="/workflows none">none</button>`,
+    `<button class="offer-choice workflows-choice workflows-none" type="submit" name="workflow" value="none">none</button>`,
   ].join("");
   return `<aside class="offer-popup workflows-popup" role="dialog" aria-modal="true" aria-labelledby="workflows-heading">
     <div class="offer-sheet">
@@ -1188,10 +1188,10 @@ function renderWorkflowMenu(snapshot, paths) {
     .map(workflowName)
     .filter((name) => name && name !== "none" && name !== "base");
   const selected = workflowName(snapshot?.sessionMode);
-  const action = paths.prompt ? escapeHtml(paths.prompt) : "";
+  const action = paths.workflow ? escapeHtml(paths.workflow) : "";
   const buttons = names.map((name) => {
     const current = name === selected ? " workflows-current" : "";
-    return `<button class="workflows-choice${current}" role="menuitem" type="submit" name="prompt" value="/workflows ${escapeHtml(name)}">${escapeHtml(name)}</button>`;
+    return `<button class="workflows-choice${current}" role="menuitem" type="submit" name="workflow" value="${escapeHtml(name)}">${escapeHtml(name)}</button>`;
   }).join("");
   const workflows = action && buttons
     ? `<form class="workflows-menu-list" action="${action}" method="post"

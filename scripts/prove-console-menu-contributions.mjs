@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { createConsoleMenuRegistry } from "../src/console-menu.mjs";
 import { createConsoleHandler } from "../src/http-app.mjs";
 import { apply, provide } from "../src/plugin.mjs";
-import { regionFingerprints, renderChrome } from "../src/render.mjs";
+import { regionFingerprints, renderChrome, renderPopups } from "../src/render.mjs";
 
 const registry = createConsoleMenuRegistry();
 assert.ok(Object.isFrozen(registry));
@@ -80,6 +80,7 @@ const paths = {
   projectsBase: "/qq/project",
   projectsSession: "/qq/projects",
   prompt: `/qq/session/${snapshot.id}/prompt`,
+  workflow: `/qq/session/${snapshot.id}/workflow`,
   close: `/qq/session/${snapshot.id}/close`,
   switchSession: "/qq/sessions/open",
 };
@@ -87,10 +88,16 @@ const chrome = renderChrome(snapshot, paths);
 const usageAt = chrome.indexOf(">usage</a>");
 const alphaAt = chrome.indexOf("Alpha &amp; &lt;tool&gt;");
 const sts2At = chrome.indexOf("StS2 Companion");
-const workflowAt = chrome.indexOf('value="/workflows architect"');
+const workflowAt = chrome.indexOf('name="workflow" value="architect"');
 assert.ok(usageAt >= 0 && alphaAt > usageAt && sts2At > alphaAt && workflowAt > sts2At,
   "shell action, sorted navigation, and workflow action keep their semantic order");
 assert.match(chrome, /<a class="console-menu-choice" role="menuitem" href="\/sts2" data-native-navigation="true">StS2 Companion<\/a>/);
+assert.doesNotMatch(chrome, /\/workflows architect/);
+const workflowPopup = renderPopups(snapshot, paths, "architect (selected)\nfind\nbase");
+assert.match(workflowPopup, new RegExp(`action="/qq/session/${snapshot.id}/workflow"`));
+assert.match(workflowPopup, /name="workflow" value="none"/);
+assert.doesNotMatch(workflowPopup, /value="\/workflows/,
+  "workflow list popups use the same provider route as the console menu");
 assert.doesNotMatch(chrome, /mutated|attacker\.invalid/);
 const emptyChrome = renderChrome({ ...snapshot, consoleMenu: [] }, paths);
 assert.doesNotMatch(emptyChrome, /StS2 Companion|Alpha &amp;/,

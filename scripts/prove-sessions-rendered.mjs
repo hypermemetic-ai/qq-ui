@@ -172,6 +172,7 @@ const paths = {
   switchSession: "/qq/sessions/open",
   close: `/qq/session/${architectB}/close`,
   prompt: `/qq/session/${architectB}/prompt`,
+  workflow: `/qq/session/${architectB}/workflow`,
   interrupt: `/qq/session/${architectB}/interrupt`,
 };
 const assetPaths = {
@@ -871,9 +872,9 @@ try {
     summaryLabel: "Console menu",
     actionText: "usage",
     actionTag: "A",
-    workflowValues: ["/workflows architect", "/workflows iterate", "/workflows find"],
+    workflowValues: ["architect", "iterate", "find"],
     formMethod: "post",
-  }, "general menu retains exact workflow submissions and adds one non-submit usage action");
+  }, "general menu retains typed workflow submissions and adds one non-submit usage action");
   await desktop.cdp.evaluate(`document.querySelector('.console-menu > summary').focus()`);
   await pressKey(desktop.cdp, "Enter");
   report.menuKeyboardOpen = await menuState(desktop.cdp);
@@ -883,12 +884,12 @@ try {
     const form = document.querySelector('.workflows-menu-list');
     form.addEventListener('submit', (event) => {
       event.preventDefault();
-      window.__workflowSubmission = event.submitter?.name === 'prompt' ? event.submitter.value : null;
+      window.__workflowSubmission = event.submitter?.name === 'workflow' ? event.submitter.value : null;
     }, { capture: true, once: true });
   })()`);
   await pressKey(desktop.cdp, "Enter");
-  assert.equal(await desktop.cdp.evaluate(`window.__workflowSubmission`), "/workflows architect",
-    "keyboard activation still submits the exact current workflow form value");
+  assert.equal(await desktop.cdp.evaluate(`window.__workflowSubmission`), "architect",
+    "keyboard activation submits the typed current workflow value");
   await pressKey(desktop.cdp, "ArrowUp");
   report.menuUsageFocused = await menuState(desktop.cdp);
   assert.ok(String(report.menuUsageFocused.focused).includes("usage-choice"), "arrow traversal includes usage");
