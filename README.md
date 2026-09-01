@@ -1,47 +1,51 @@
 # `@hypermemetic-ai/qq-ui`
 
-Server-rendered Cordis plugin for the qq operator console. This is a private ESM package; its primary entry point is [`src/plugin.mjs`](src/plugin.mjs).
+Private ESM package providing the server-rendered Cordis plugin for the qq operator console. Its package entry is [`src/plugin.mjs`](src/plugin.mjs), with additional exports for HTTP, rendering, and Markdown concerns.
 
-## Run the established checks
+## Run and verify
 
-The package declares no `start` script. Its complete check suite is:
+The package metadata does not define install or start scripts. It declares `@hypermemetic-ai/qq-core` as the local dependency `file:../qq-core`, so that sibling layout is part of dependency setup.
 
 ```sh
 npm test
 ```
 
-Focused package scripts are also available:
+The full test script syntax-checks the plugin and current browser bundle, then runs the repository's proof scripts. Focused package scripts are also available:
 
-```sh
-npm run prove:sessions-rendered
-npm run prove:prompt-echo
-npm run prove:prompt-correlation
-npm run prove:prompt-geometry
-npm run latency:report
-```
+| Command | Scope |
+| --- | --- |
+| `npm run prove:sessions-rendered` | Rendered sessions |
+| `npm run prove:prompt-echo` | Prompt echo |
+| `npm run prove:prompt-correlation` | Browser prompt correlation |
+| `npm run prove:prompt-geometry` | Browser prompt geometry |
+| `npm run latency:report` | UI latency report |
 
-The dependency on `@hypermemetic-ai/qq-core` is declared as `file:../qq-core`, so dependency installation requires that sibling path. No package-manager-specific install command is declared.
+## System map
 
-## Repository map
+| Boundary | Start here |
+| --- | --- |
+| Plugin/package entry | [`src/plugin.mjs`](src/plugin.mjs) is both `main` and the `.` export. |
+| HTTP application | [`src/http-app.mjs`](src/http-app.mjs) is the `./http` export and the most widely imported relative module. |
+| Server rendering | [`src/render.mjs`](src/render.mjs) is the `./render` export, a high-fan-in module, and the most frequently changed source file. |
+| Markdown | [`src/markdown.mjs`](src/markdown.mjs) is the `./markdown` export. |
+| Browser presentation | [`assets/browser-v9.js`](assets/browser-v9.js) and [`assets/console.css`](assets/console.css) are the most frequently changed browser-side paths; the full test script explicitly syntax-checks `browser-v9.js`. |
 
-- [`src/plugin.mjs`](src/plugin.mjs) — package main export and Cordis plugin entry point.
-- [`src/http-app.mjs`](src/http-app.mjs) — public `./http` export and the most imported relative module; start here for HTTP-facing work.
-- [`src/render.mjs`](src/render.mjs) — public `./render` export and another central, frequently changed module; start here for server-rendered output.
-- [`src/markdown.mjs`](src/markdown.mjs) — public `./markdown` export.
-- [`assets/browser-v9.js`](assets/browser-v9.js) and [`assets/console.css`](assets/console.css) — prominent browser and styling change points. The test script syntax-checks `browser-v9.js`; older versioned assets remain tracked, so do not assume every similarly named asset is current.
-- [`scripts/`](scripts/prove-sessions-rendered.mjs) — executable proof scripts. `npm test` runs the declared suite; individual script names are the best routing index for focused checks.
-- [`vendor-pins.json`](vendor-pins.json) and [`vendor/`](vendor/htmx-2.0.10.min.js) — tracked vendor pins, artifacts, and licenses.
+The package publishes `assets/`, `src/`, [`scripts/report-ui-latency.mjs`](scripts/report-ui-latency.mjs), `vendor/`, and [`vendor-pins.json`](vendor-pins.json) in addition to this README. Runtime behavior beyond the declared exports and scripts is not established by package metadata; follow the focused sources and proofs below rather than assuming an undocumented start flow.
 
-The package exposes only `.`, `./http`, `./render`, and `./markdown`; treat those declared exports as its public module boundary.
+## Route a change
 
-## Route common changes
-
-| Change area | Start with | Nearby focused evidence |
+| Change area | Canonical starting point | Focused verification |
 | --- | --- | --- |
-| HTTP and root/workflow routing | [`src/http-app.mjs`](src/http-app.mjs) | [`prove-root-routing.mjs`](scripts/prove-root-routing.mjs), [`prove-workflow-selection-route.mjs`](scripts/prove-workflow-selection-route.mjs) |
-| Rendered sessions and dashboard UI | [`src/render.mjs`](src/render.mjs) | [`prove-sessions-rendered.mjs`](scripts/prove-sessions-rendered.mjs), [`prove-dashboard-usage.mjs`](scripts/prove-dashboard-usage.mjs), [`prove-dashboard-live-tracker.mjs`](scripts/prove-dashboard-live-tracker.mjs) |
-| Browser interaction and presentation | [`assets/browser-v9.js`](assets/browser-v9.js), [`assets/console.css`](assets/console.css) | [`prove-prompt-correlation-browser.mjs`](scripts/prove-prompt-correlation-browser.mjs), [`prove-prompt-geometry-browser.mjs`](scripts/prove-prompt-geometry-browser.mjs), [`prove-visual-latency.mjs`](scripts/prove-visual-latency.mjs) |
-| Plugin and console-menu integration | [`src/plugin.mjs`](src/plugin.mjs), [`src/console-menu.mjs`](src/console-menu.mjs) | [`prove-console-menu-contributions.mjs`](scripts/prove-console-menu-contributions.mjs), [`prove-plugin-context-cards.mjs`](scripts/prove-plugin-context-cards.mjs) |
-| Latency storage and reporting | [`src/latency-store.mjs`](src/latency-store.mjs), [`scripts/report-ui-latency.mjs`](scripts/report-ui-latency.mjs) | [`wiki/latency-roadmap.md`](wiki/latency-roadmap.md), [`prove-passive-latency.mjs`](scripts/prove-passive-latency.mjs) |
+| HTTP and root/workflow routing | [`src/http-app.mjs`](src/http-app.mjs) | [`scripts/prove-root-routing.mjs`](scripts/prove-root-routing.mjs), [`scripts/prove-workflow-selection-route.mjs`](scripts/prove-workflow-selection-route.mjs) |
+| Rendering and session projection | [`src/render.mjs`](src/render.mjs) | [`scripts/prove-sessions-rendered.mjs`](scripts/prove-sessions-rendered.mjs), [`scripts/prove-transcript-projection.mjs`](scripts/prove-transcript-projection.mjs), [`scripts/prove-selective-render-cache.mjs`](scripts/prove-selective-render-cache.mjs) |
+| Browser prompt interaction or geometry | [`assets/browser-v9.js`](assets/browser-v9.js), [`assets/console.css`](assets/console.css) | [`scripts/prove-prompt-correlation-browser.mjs`](scripts/prove-prompt-correlation-browser.mjs), [`scripts/prove-prompt-geometry-browser.mjs`](scripts/prove-prompt-geometry-browser.mjs) |
+| UI latency | [`src/latency-store.mjs`](src/latency-store.mjs), [`scripts/report-ui-latency.mjs`](scripts/report-ui-latency.mjs) | [`scripts/prove-visual-latency.mjs`](scripts/prove-visual-latency.mjs), [`scripts/prove-passive-latency.mjs`](scripts/prove-passive-latency.mjs) |
 
-For broader repository detail, continue with the [`wiki` index](wiki/index.md) and the [operator-console notes](wiki/operator-console.md).
+Run `npm test` after focused verification because it is the package's aggregate check.
+
+## Further detail
+
+- [`wiki/operator-console.md`](wiki/operator-console.md) — operator-console documentation
+- [`wiki/latency-roadmap.md`](wiki/latency-roadmap.md) — latency roadmap
+- [`wiki/index.md`](wiki/index.md) — repository documentation index
+- [`package.json`](package.json) — exports, dependencies, shipped files, and exact script definitions
