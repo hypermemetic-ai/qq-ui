@@ -15,7 +15,7 @@ The current console is an ESM Cordis plugin implemented with JavaScript template
 Simplification must happen on two independent axes:
 
 1. **Operational ownership.** One supported DSH client runtime owns transport, discovery, reconnect and repair, session/workspace lifecycle, event ordering, caches and projections, prompt/interactions, attachments, and cross-client synchronization. QQ Core does not add a second socket, transcript reducer, retry loop, ordering layer, or optimistic durable model.
-2. **UI delivery and composition.** QQ Core replaces the implicit protocol among handlers, rendered partials, HTMX swaps, DOM selectors, responsive panels, feature handlers, and service-worker state with explicit routes, outlets, commands, capabilities, and plugin lifecycles. Moving the same orchestration into framework effects is not simplification.
+2. **UI delivery and composition.** QQ Core replaces the implicit protocol among handlers, rendered partials, HTMX swaps, DOM selectors, responsive panels, feature handlers, and service-worker state with explicit routes, outlets, commands, capabilities, and Cordis-managed contribution lifecycles. Moving the same orchestration into framework effects is not simplification.
 
 The target topology is a QQ Core client shell and feature set consuming one supported DSH runtime directly, with only a small same-machine service or desktop bridge for genuinely QQ-specific capabilities. It is not a second presentation server or client runtime.
 
@@ -27,25 +27,25 @@ QQ Core runs on the same machine and relies on Tailscale for authentication. Do 
 
 ## Core, shell, and UI feature plugins
 
-“UI feature plugin” below means the proposed internal UI extension unit. It is distinct from the repository’s current `@hypermemetic-ai/qq-ui` Cordis plugin and from optional Cordis services/providers.
+“UI feature plugin” below is a descriptive subset of Cordis plugins, not a new extension unit or runtime. `@hypermemetic-ai/qq-ui` remains the Cordis shell and contribution host; other Cordis plugins register UI against capabilities that it provides. Optional providers such as `image-finder`, `qq-workflows`, `qq-dashboard`, `qq-models`, `media-box`, and `approval` already participate through this host model. The current `consoleMenu` capability on the provided `qq-ui` service—validated registration with an idempotent disposer and no disposed item retained by SSR—is the first live example of the contract to extend.
 
-**The QQ Core kernel is deliberately small.** It owns bootstrap; the supported DSH/runtime adapter; UI feature-plugin discovery and lifecycle; route/outlet composition; command dispatch; visual tokens and shared primitives; and failure/diagnostic boundaries. It may expose common session/workspace projections, but only as views over the official runtime source. The adapter exposes official observable sources, actions, and pure selectors; it contains no cache, reducer, event listener, retry, deduplication, ordering, or optimistic reconciliation layer.
+**The QQ Core kernel inside `qq-ui` is deliberately small.** It owns browser bootstrap; the supported DSH/runtime adapter; route/outlet composition; command dispatch; visual tokens and shared primitives; contribution validation/diagnostics; and failure boundaries. It does not discover, install, enable, or reload Cordis plugins. Cordis owns plugin discovery, configuration, injection, disposal, and reapplication. The kernel may expose common session/workspace projections, but only as views over the official runtime source. The adapter exposes official observable sources, actions, and pure selectors; it contains no cache, reducer, event listener, retry, deduplication, ordering, or optimistic reconciliation layer.
 
-**The QQ Core shell is product infrastructure.** It owns application navigation and responsive layout, named contribution surfaces, keyboard/keymap policy, focus and gesture coordination, browser-history policy, shared overlays, and consistent project/session identity. The shell should primarily compose contributions—even its first-party pages—rather than encode Find, Usage, STS2, or every future feature in the kernel.
+**The `qq-ui` shell is product infrastructure.** It provides the public capabilities through which Cordis plugins contribute application navigation and responsive layout, named surfaces, commands, keyboard/keymap behavior, focus and gestures, browser-history behavior, shared overlays, and consistent project/session identity. The shell should primarily compose contributions—even its first-party pages—rather than encode Find, Usage, STS2, or every future feature in the kernel.
 
-**UI feature plugins own feature-specific UI and behavior.** Examples include Find, Usage, Spire Companion/STS2, galleries, file views, working-memory documents, and experiments. A plugin may register views, commands, and optional same-machine backend capabilities through public QQ Core contracts. It must not take ownership of DSH operational concerns or reach into another feature’s implementation.
+**UI feature plugins own feature-specific UI and behavior.** They are ordinary Cordis plugins such as Find, Usage, Spire Companion/STS2, galleries, file views, working-memory documents, and experiments. In their Cordis context they may register views, commands, and optional same-machine backend capabilities through public `qq-ui` contracts. They must not take ownership of DSH operational concerns or reach into another feature’s implementation.
 
-“Everything is a plugin” does not mean micro-frontends, iframes, or independently deployed bundles. The least-complex initial assumption is trusted first-party modules in one build, with declarative discovery, runtime enable/disable lifecycle, and module-level HMR. Installing arbitrary new bundles without rebuilding is not an initial requirement. If optional backend endpoints are needed, they use a lifecycle-managed capability/route contract rather than ad hoc shell handlers. Runtime installation, third-party trust, and stronger isolation require concrete use cases before adding that complexity.
+“Everything is a plugin” does not mean micro-frontends, iframes, independently deployed bundles, or a browser-side plugin loader. Trusted feature plugins use the existing Cordis context path. Registration is attached to that context, and Cordis disposal/reapplication removes and recreates the contributions during disablement or HMR. No second discovery, enablement, or runtime bundle-installation mechanism is part of this design. If optional backend endpoints are needed, they use Cordis effects plus a lifecycle-managed `qq-ui` capability/route contract rather than ad hoc shell handlers. The exact transport that publishes contribution changes to an already-running browser remains an implementation decision; it must not become a second plugin lifecycle.
 
 ## Contribution contract
 
-Registrations should be typed and declarative where practical, use stable names and IDs, validate at the boundary, return an idempotent teardown, and be inspectable in diagnostics. The exact manifest/API is open; an illustrative manifest could contribute `routes`, `navigation`, `commands`, `shortcuts`, `gestures`, `panes`, and `headerActions` without prescribing the eventual syntax.
+Registrations should be typed and declarative where practical, use stable names and IDs, validate at the boundary, return an idempotent teardown, and be inspectable in diagnostics. A contributing plugin registers from its Cordis context and binds every returned teardown to that context; `qq-ui` must not retain a contribution after Cordis disposes its owner. The exact API is open; an illustrative registration could contribute `routes`, `navigation`, `commands`, `shortcuts`, `gestures`, `panes`, and `headerActions` without prescribing the eventual syntax.
 
 Named shell surfaces may include navigation items and badges, header actions, routes and full-workspace outlets, panes/tabs, status areas, context menus, overlays/modals/toasts, commands, shortcut and gesture bindings, titles/breadcrumbs, and requested layout/focus modes. Contributions are capabilities, not promises about shell DOM structure.
 
 A visible control, shortcut, command-palette item, and gesture for the same action dispatch the same command with the same enablement, telemetry, and error semantics. User-defined keybindings target stable command IDs, not private event handlers. Conflicts are resolved centrally and visibly.
 
-Cross-plugin imports require an explicit public contract. No plugin may depend on ambient mutable globals or another plugin’s private store, selectors, CSS, or route internals. Disabling or deleting a plugin removes its routes, commands, bindings, state subscriptions, backend capabilities, and visual contributions. Each route/outlet and asynchronous contribution has a failure boundary so one plugin can fail without taking down the reliable shell.
+Cross-plugin imports require an explicit public contract. No plugin may depend on ambient mutable globals or another plugin’s private store, selectors, CSS, or route internals. Disposing, disabling, or deleting a plugin through Cordis removes its routes, commands, bindings, state subscriptions, backend capabilities, and visual contributions. Optional service facades are looked up on demand rather than captured across reloads. Each route/outlet and asynchronous contribution has a failure boundary so one plugin can fail without taking down the reliable shell.
 
 ### DOM ownership invariant
 
@@ -72,13 +72,13 @@ A plugin addition or change is acceptable when:
 
 - its feature code and tests are local to its module, with cross-plugin use limited to declared public contracts;
 - registration uses stable IDs and named surfaces, validates inputs, and has deterministic, idempotent teardown;
-- deleting or disabling it leaves no routes, controls, subscriptions, timers, keybindings, styles, endpoints, or persisted-state debris;
+- Cordis disposal or disablement leaves no routes, controls, subscriptions, timers, keybindings, styles, endpoints, mounted DOM, resources, service facades, or persisted-state debris;
 - controls, shortcuts, and gestures converge on stable commands, and custom keybindings can be resolved centrally;
 - durable data has one authoritative owner; the plugin adds no transport, runtime cache, event repair, or duplicate presentation/server state;
 - DOM access stays within its mounted root, while shell effects use public capabilities;
 - loading, empty, error, and asynchronous failures are contained by an appropriate boundary and do not block core navigation/session use;
 - desktop keyboard/focus behavior and mobile navigation/gesture behavior remain coherent and accessible;
-- HMR preserves the short edit-feedback loop without duplicate registration, stale closures, listeners, or state; and
+- HMR uses Cordis disposal and reapplication, preserving the short edit-feedback loop without duplicate registrations, stale closures, listeners, DOM, resources, service facades, or state; and
 - contract tests cover contributed surfaces and teardown, while the smallest representative end-to-end path proves integration.
 
 ## Migration posture
@@ -95,11 +95,11 @@ Research correction: an earlier architecture pass failed to discover the operato
 
 The following must be decided explicitly through spikes and representative plugins:
 
-- exact manifest, registration, adapter, and contribution API shapes;
+- exact Cordis-facing registration, adapter, and contribution API shapes;
 - the initial named-surface catalog and rules for extending it;
 - state ownership, URL/history behavior, persistence locations, and schema migration;
 - server/client rendering boundaries, framework and build tooling, and how server-first startup is preserved where valuable;
-- plugin discovery, enablement, optional backend capability endpoints, and whether runtime installation ever becomes a requirement;
+- the transport and invalidation protocol for reflecting Cordis contribution changes in a running browser, plus optional backend capability endpoint shapes;
 - trusted-code assumptions and the isolation level beyond route/outlet error boundaries;
 - API compatibility/versioning and deprecation policy for QQ Core, plugins, and the DSH adapter;
 - contract, accessibility, responsive, multi-context, teardown, and HMR test tooling; and
