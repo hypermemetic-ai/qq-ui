@@ -358,197 +358,49 @@ const inspectExpression = `(() => {
   const visibleGroups = groups.filter((group) => !group.hidden);
   const projectPort = document.querySelector('.active-projects');
   const groupPort = document.querySelector('.live-tracker');
-  const composerShell = document.querySelector('#session-composer');
   const rail = document.querySelector('#project-rail');
   const railStyle = rail ? getComputedStyle(rail) : null;
   const createForms = [...(groupPort?.querySelectorAll('form.new-session') ?? [])];
   const createButtons = createForms.flatMap((form) => [...form.querySelectorAll('button[type="submit"]')]);
-  const clientRect = (node) => {
-    const box = node?.getBoundingClientRect();
-    return box ? {
-      left: box.left + (node.clientLeft || 0), top: box.top + (node.clientTop || 0),
-      right: box.left + (node.clientLeft || 0) + node.clientWidth,
-      bottom: box.top + (node.clientTop || 0) + node.clientHeight,
-    } : null;
-  };
   const elementRect = (node) => {
     const box = node?.getBoundingClientRect();
     return box ? { left: box.left, top: box.top, right: box.right, bottom: box.bottom, width: box.width, height: box.height } : null;
   };
-  const projectVisibilityClip = clientRect(projectPort);
-  const rawGroupVisibilityClip = clientRect(groupPort);
-  const composerRect = elementRect(composerShell);
   const narrowNav = document.body.classList.contains('nav-mode')
     && !matchMedia('(min-width: 42.01rem)').matches;
-  const composerStyle = composerShell ? getComputedStyle(composerShell) : null;
-  const composerCoversTracker = Boolean(narrowNav && rawGroupVisibilityClip && composerRect
-    && composerStyle?.display !== 'none' && composerStyle?.visibility !== 'hidden'
-    && composerRect.width > 0 && composerRect.height > 0
-    && composerRect.left < rawGroupVisibilityClip.right && composerRect.right > rawGroupVisibilityClip.left
-    && composerRect.top < rawGroupVisibilityClip.bottom && composerRect.bottom > rawGroupVisibilityClip.top);
-  const groupVisibilityClip = rawGroupVisibilityClip ? {
-    ...rawGroupVisibilityClip,
-    bottom: composerCoversTracker
-      ? Math.max(rawGroupVisibilityClip.top, Math.min(rawGroupVisibilityClip.bottom, composerRect.top))
-      : rawGroupVisibilityClip.bottom,
-  } : null;
-  const visibleSlice = (node, clip) => {
-    const box = node?.getBoundingClientRect();
-    if (!box || !clip) return null;
-    const slice = {
-      left: Math.max(box.left, clip.left), top: Math.max(box.top, clip.top),
-      right: Math.min(box.right, clip.right), bottom: Math.min(box.bottom, clip.bottom),
-    };
-    const meaningfulHeight = Math.min(12, Math.max(4, box.height * .35));
-    return slice.right - slice.left >= 8 && slice.bottom - slice.top >= meaningfulHeight ? slice : null;
-  };
   const groupByIdentity = new Map(groups.map((group) => [identity(group), group]));
-  const connectorPairVisible = (project, groupClip) => {
+  const projectRows = projects.map((project) => project.closest('li'));
+  const projectTops = projectRows.map((row) => row?.offsetTop ?? 0);
+  const groupTops = visibleGroups.map((group) => group.offsetTop);
+  const projectFlowTops = projectRows.map((row) => elementRect(row)?.top ?? 0);
+  const groupFlowTops = visibleGroups.map((group) => elementRect(group)?.top ?? 0);
+  const projectOrigin = projectFlowTops[0] ?? 0;
+  const groupOrigin = groupFlowTops[0] ?? 0;
+  const allocations = projects.map((project, index) => {
     const group = groupByIdentity.get(identity(project));
-    const projectBox = project?.getBoundingClientRect();
-    const groupBox = group?.getBoundingClientRect();
-    const sessionsBox = group?.querySelector('.live-tracker-sessions')?.getBoundingClientRect();
-    const projectSlice = visibleSlice(project, projectVisibilityClip);
-    const groupSlice = visibleSlice(group, groupClip);
-    if (group?.hidden || !projectBox || !groupBox || !sessionsBox || !projectSlice || !groupSlice) return false;
-    const sourceX = projectBox.right - .75;
-    const sourceY = (projectBox.top + projectBox.bottom) / 2;
-    const contentLeft = Math.max(groupBox.left, sessionsBox.left);
-    const spineX = contentLeft - 4;
-    const groupTop = Math.max(groupSlice.top, sessionsBox.top);
-    const groupBottom = Math.min(groupSlice.bottom, sessionsBox.bottom);
-    const spineInset = Math.min(3, Math.max(0, (groupBottom - groupTop - 8) / 2));
-    const spineTop = groupTop + spineInset;
-    const spineBottom = groupBottom - spineInset;
-    return sourceY >= projectSlice.top - .01 && sourceY <= projectSlice.bottom + .01
-      && spineBottom - spineTop >= 8 && spineX - sourceX >= 4
-      && sessionsBox.right > sessionsBox.left;
-  };
-  const visiblePairSequenceFor = (groupClip) => projects.flatMap((project) => (
-    connectorPairVisible(project, groupClip) ? [identity(project)] : []
-  ));
-  const rawVisiblePairSequence = visiblePairSequenceFor(rawGroupVisibilityClip);
-  const visiblePairSequence = visiblePairSequenceFor(groupVisibilityClip);
-  const composerOccludedPairSequence = rawVisiblePairSequence
-    .filter((identity) => !visiblePairSequence.includes(identity));
-  const layer = document.querySelector('#session-connectors');
-  const paths = [...document.querySelectorAll('#session-connectors path[data-project][data-folder]')];
-  const route = (path) => {
-    const d = path.getAttribute('d') || '';
-    const style = getComputedStyle(path);
-    const project = projects.find((candidate) => identity(candidate) === identity(path));
-    const group = groupByIdentity.get(identity(path));
-    const projectBox = project?.getBoundingClientRect();
-    const groupBox = group?.getBoundingClientRect();
-    const sessionsBox = group?.querySelector('.live-tracker-sessions')?.getBoundingClientRect();
-    const contentLeft = groupBox && sessionsBox ? Math.max(groupBox.left, sessionsBox.left) : NaN;
-    const spineX = contentLeft - 4;
-    const groupTop = sessionsBox && groupVisibilityClip
-      ? Math.max(sessionsBox.top, groupVisibilityClip.top) : NaN;
-    const groupBottom = sessionsBox && groupVisibilityClip
-      ? Math.min(sessionsBox.bottom, groupVisibilityClip.bottom) : NaN;
-    const spineInset = Math.min(3, Math.max(0, (groupBottom - groupTop - 8) / 2));
-    const spineTop = groupTop + spineInset;
-    const spineBottom = groupBottom - spineInset;
-    const spineHeight = spineBottom - spineTop;
-    const length = path.getTotalLength();
-    const incomingLength = Math.max(0, length - spineHeight);
-    const pointAt = (distance) => {
-      const point = path.getPointAtLength(Math.max(0, Math.min(length, distance)));
-      return { x: point.x, y: point.y };
-    };
-    const start = pointAt(0);
-    const join = pointAt(Math.max(0, incomingLength - .05));
-    const spineStart = pointAt(Math.min(length, incomingLength + .05));
-    const end = pointAt(length);
-    const sampleRange = (from, to, name) => {
-      if (!(to > from)) return [];
-      const distances = [from];
-      for (let distance = from + 2; distance < to; distance += 2) distances.push(distance);
-      distances.push(to);
-      const points = distances.map(pointAt);
-      return points.slice(1).map((point, index) => ({ from: points[index], to: point, name }));
-    };
-    const segments = [
-      ...sampleRange(0, Math.max(0, incomingLength - .05), 'incoming'),
-      ...sampleRange(Math.min(length, incomingLength + .05), length, 'spine'),
-    ];
-    const sampledPoints = segments.flatMap((segment) => [segment.from, segment.to]);
-    const projectSlice = visibleSlice(project, projectVisibilityClip);
-    const joinY = join.y;
+    const projectRow = projectRows[index];
+    const projectBox = elementRect(projectRow);
+    const groupBox = elementRect(group);
     return {
-      identity: identity(path), d, length, start, end, joinY,
-      spineX, spineTop, spineBottom, spineHeight, segments,
-      contentLeft,
-      strokeWidth: Number.parseFloat(style.strokeWidth), stroke: style.stroke,
-      opacity: Number.parseFloat(style.opacity), display: style.display, visibility: style.visibility,
-      vectorEffect: style.vectorEffect, lineJoin: style.strokeLinejoin, lineCap: style.strokeLinecap,
-      startAttached: Boolean(projectBox && projectSlice)
-        && Math.abs(start.x - projectBox.right) <= 2
-        && Math.abs(start.y - ((projectBox.top + projectBox.bottom) / 2)) <= 1
-        && start.y >= projectSlice.top - 1 && start.y <= projectSlice.bottom + 1,
-      joinAttached: Math.abs(join.x - spineX) <= .15
-        && joinY >= spineTop - .15 && joinY <= spineBottom + .15,
-      spineAttached: Boolean(groupBox && sessionsBox)
-        && contentLeft - spineX >= 3 && contentLeft - spineX <= 5
-        && Math.abs(spineStart.x - spineX) <= .15
-        && Math.abs(spineStart.y - spineTop) <= .15
-        && Math.abs(end.x - spineX) <= .15
-        && Math.abs(end.y - spineBottom) <= .15,
-      noGroupUnderline: Boolean(sessionsBox) && sampledPoints.length > 0
-        && sampledPoints.every((point) => point.x <= spineX + .15),
-      insideVisibility: Boolean(projectVisibilityClip && groupVisibilityClip && sessionsBox)
-        && start.y >= projectVisibilityClip.top - 1 && start.y <= projectVisibilityClip.bottom + 1
-        && joinY >= groupVisibilityClip.top - 1 && joinY <= groupVisibilityClip.bottom + 1
-        && spineTop >= groupVisibilityClip.top - 1 && spineBottom <= groupVisibilityClip.bottom + 1
-        && spineX >= groupVisibilityClip.left - 5 && spineX <= groupVisibilityClip.right + 1
-        && (!composerCoversTracker || sampledPoints.every((point) => point.y <= composerRect.top + 1)),
+      identity: identity(project),
+      projectHeight: projectBox?.height ?? 0,
+      groupHeight: groupBox?.height ?? 0,
+      projectTop: projectBox?.top ?? 0,
+      groupTop: groupBox?.top ?? 0,
+      normalizedProjectTop: (projectBox?.top ?? 0) + (projectPort?.scrollTop ?? 0),
+      normalizedGroupTop: (groupBox?.top ?? 0) + (groupPort?.scrollTop ?? 0),
+      projectOffset: (projectBox?.top ?? 0) - projectOrigin,
+      groupOffset: (groupBox?.top ?? 0) - groupOrigin,
     };
-  };
-  const routes = paths.map(route);
-  const cross = (a, b, c) => ((b.x - a.x) * (c.y - a.y)) - ((b.y - a.y) * (c.x - a.x));
-  const within = (value, start, end) => value >= Math.min(start, end) - .05
-    && value <= Math.max(start, end) + .05;
-  const onSegment = (point, segment) => Math.abs(cross(segment.from, segment.to, point)) <= .05
-    && within(point.x, segment.from.x, segment.to.x)
-    && within(point.y, segment.from.y, segment.to.y);
-  const segmentConflict = (left, right) => {
-    const leftFrom = cross(left.from, left.to, right.from);
-    const leftTo = cross(left.from, left.to, right.to);
-    const rightFrom = cross(right.from, right.to, left.from);
-    const rightTo = cross(right.from, right.to, left.to);
-    const collinear = Math.abs(leftFrom) <= .05 && Math.abs(leftTo) <= .05
-      && Math.abs(rightFrom) <= .05 && Math.abs(rightTo) <= .05;
-    if (collinear) {
-      const overlaps = within(left.from.x, right.from.x, right.to.x)
-        || within(left.to.x, right.from.x, right.to.x)
-        || within(right.from.x, left.from.x, left.to.x)
-        || within(right.to.x, left.from.x, left.to.x);
-      const overlapsY = within(left.from.y, right.from.y, right.to.y)
-        || within(left.to.y, right.from.y, right.to.y)
-        || within(right.from.y, left.from.y, left.to.y)
-        || within(right.to.y, left.from.y, left.to.y);
-      return overlaps && overlapsY ? 'coincident' : '';
-    }
-    const crosses = ((leftFrom < -.05 && leftTo > .05) || (leftFrom > .05 && leftTo < -.05))
-      && ((rightFrom < -.05 && rightTo > .05) || (rightFrom > .05 && rightTo < -.05));
-    return crosses || onSegment(right.from, left) || onSegment(right.to, left)
-      || onSegment(left.from, right) || onSegment(left.to, right) ? 'intersection' : '';
-  };
-  const routeConflicts = [];
-  for (let left = 0; left < routes.length; left += 1) {
-    for (let right = left + 1; right < routes.length; right += 1) {
-      for (const leftSegment of routes[left].segments) {
-        for (const rightSegment of routes[right].segments) {
-          const kind = segmentConflict(leftSegment, rightSegment);
-          if (kind) routeConflicts.push({
-            left: routes[left].identity, leftSegment: leftSegment.name,
-            right: routes[right].identity, rightSegment: rightSegment.name, kind,
-          });
-        }
-      }
-    }
-  }
+  });
+  const projectHeading = document.querySelector('.project-rail .projects-session-item');
+  const firstProjectRow = projectRows[0];
+  const headingBox = elementRect(projectHeading);
+  const firstProjectBox = elementRect(firstProjectRow);
+  const headingAfter = projectHeading ? getComputedStyle(projectHeading, '::after') : null;
+  const projectList = projectPort?.querySelector(':scope > ol');
+  const projectListStyle = projectList ? getComputedStyle(projectList) : null;
+  const groupPortStyle = groupPort ? getComputedStyle(groupPort) : null;
   const alphaGroup = groups.find((group) => group.dataset.project === 'alpha' && (group.dataset.folder || '') === '');
   const child = alphaGroup?.querySelector('.live-tracker-child-strip .live-tracker-session');
   const childStyle = child ? getComputedStyle(child) : null;
@@ -586,26 +438,23 @@ const inspectExpression = `(() => {
       action: createForms[0] ? new URL(createForms[0].action, location.href).pathname : '',
       method: createForms[0]?.method || '',
     },
-    connectorElements: document.querySelectorAll('#session-connectors').length,
-    connectorLayerHidden: !layer || getComputedStyle(layer).display === 'none' || getComputedStyle(layer).visibility === 'hidden',
-    connectorPointerEvents: layer ? getComputedStyle(layer).pointerEvents : '',
-    connectorPaths: routes,
-    connectorPathIdentities: routes.map((entry) => entry.identity),
-    projectVisibilityClip,
-    rawGroupVisibilityClip,
-    groupVisibilityClip,
-    composerRect,
-    composerCoversTracker,
-    rawVisiblePairSequence,
-    visiblePairSequence,
-    composerOccludedPairSequence,
-    routeConflicts,
+    connectorElements: document.querySelectorAll('#session-connectors, .session-connectors').length,
+    connectorPaths: document.querySelectorAll('#session-connectors path, .session-connectors path').length,
+    allocations,
+    projectGap: Number.parseFloat(projectListStyle?.rowGap || '0'),
+    groupGap: Number.parseFloat(groupPortStyle?.rowGap || '0'),
+    projectHeading: {
+      text: projectHeading?.textContent.trim() || '',
+      beforeProjects: Boolean(headingBox && firstProjectBox && headingBox.top < firstProjectBox.top),
+      afterContent: headingAfter?.content || '',
+      afterBorderBottom: Number.parseFloat(headingAfter?.borderBottomWidth || '0'),
+    },
     projectSequence: projects.map(identity),
     groupSequence: groups.map(identity),
     groupHeadings: groups.map((group) => group.querySelector('.live-tracker-project-name')?.textContent.trim() || ''),
     visibleGroups: visibleGroups.map(identity),
-    projectVisualTops: projects.map((item) => item.offsetTop),
-    groupVisualTops: visibleGroups.map((group) => group.offsetTop),
+    projectVisualTops: projectTops,
+    groupVisualTops: groupTops,
     headingVisibility,
     alphaRows: alphaGroup ? [...alphaGroup.querySelectorAll('.live-tracker-session')].map((row) => ({ id: row.dataset.sessionId, depth: Number(row.dataset.depth) })) : [],
     duplicateStudio: groups.filter((group) => group.dataset.project === 'studio').map(identity),
@@ -632,6 +481,10 @@ const inspectExpression = `(() => {
       projectTop: projectPort?.scrollTop || 0,
       projectHeight: projectPort?.clientHeight || 0,
       projectScrollHeight: projectPort?.scrollHeight || 0,
+      projectPortTop: elementRect(projectPort)?.top ?? 0,
+      projectPortBottom: elementRect(projectPort)?.bottom ?? 0,
+      lastProjectTop: elementRect(projectRows.at(-1))?.top ?? 0,
+      lastProjectBottom: elementRect(projectRows.at(-1))?.bottom ?? 0,
       trackerTop: groupPort?.scrollTop || 0,
       trackerHeight: groupPort?.clientHeight || 0,
       trackerScrollHeight: groupPort?.scrollHeight || 0,
@@ -671,9 +524,8 @@ function assertNoCenterDivider(state) {
     "narrow installed-app project/session split has no full-height center divider");
 }
 function assertSelected(state, expected, selected = "alpha\n") {
-  assert.equal(state.connectorPaths.length, 0, "selected mode has zero project connector paths");
-  assert.ok(state.connectorElements === 0 || state.connectorLayerHidden,
-    "selected mode removes or hides an empty connector layer");
+  assert.equal(state.connectorPaths, 0, "selected mode has zero project connector paths");
+  assert.equal(state.connectorElements, 0, "selected mode has no connector layer");
   assert.equal(state.overview, false, "one project group is selected");
   assert.deepEqual(state.projectSequence, expected, "left DOM/reading order is canonical");
   assert.deepEqual(state.groupSequence, expected, "right DOM/reading order matches the left exactly");
@@ -690,50 +542,29 @@ function assertOverview(state, expected) {
     count: 0, visibleCount: 0, tabbableCount: 0, labelledCount: 0, action: "", method: "",
   }, "all-project overview has no rendered, visible, interactive, or accessibility-exposed add-session control");
   assertNoCenterDivider(state);
-  assert.equal(state.horizontalOverflow, false, "connector routing and its viewport SVG create no horizontal overflow");
-  assert.equal(state.connectorElements, 1, "overview has one viewport connector layer");
-  assert.equal(state.connectorPointerEvents, "none", "relationship routes never intercept full-row interaction");
-  assert.deepEqual(state.connectorPathIdentities, state.visiblePairSequence,
-    "overview has exactly one route for each meaningfully visible authoritative pair");
-  assert.ok(state.connectorPaths.length > 0, "overview normally exposes visible relationship routes");
-  assert.ok(state.connectorPaths.every((route) => route.display !== "none" && route.visibility === "visible" && route.opacity > 0),
-    "every emitted relationship route is normally visible without hover or focus");
-  assert.ok(state.connectorPaths.every((route) => route.strokeWidth > 0 && route.strokeWidth <= 1
-    && route.vectorEffect === "non-scaling-stroke" && route.lineJoin === "miter" && route.lineCap === "butt"),
-  "all relationship routes retain square, non-scaling quiet hairline styling");
-  assert.ok(state.connectorPaths.every((route) => route.startAttached),
-    "each route starts at the center of its matching visible project choice");
+  assert.equal(state.horizontalOverflow, false, "grouped allocation creates no horizontal overflow");
+  assert.equal(state.connectorElements, 0, "overview has no connector layer");
+  assert.equal(state.connectorPaths, 0, "overview has no connector paths");
+  assert.equal(state.allocations.length, expected.length,
+    "every project has one folder-aware session-group allocation");
+  assert.ok(state.allocations.every((pair) => pair.identity
+    && Math.abs(pair.projectHeight - pair.groupHeight) <= .75),
+  "each project wrapper receives the exact height of its corresponding session group");
   if (diagnose) {
-    const invalid = state.connectorPaths.filter((route) => !route.joinAttached || !route.spineAttached
-      || !route.noGroupUnderline || route.spineHeight < 8
-      || Math.abs(route.joinY - ((route.spineTop + route.spineBottom) / 2)) > 2.1)
-      .map(({ identity, d, joinAttached, spineAttached, noGroupUnderline, joinY,
-        spineX, spineTop, spineBottom, spineHeight, contentLeft }) => ({
-        identity, d, joinAttached, spineAttached, noGroupUnderline, joinY,
-        spineX, spineTop, spineBottom, spineHeight, contentLeft,
-      }));
-    if (invalid.length) console.error("invalid connector spines", invalid);
-  }
-  assert.ok(state.connectorPaths.every((route) => route.joinAttached && route.spineAttached
-    && route.spineHeight >= 8
-    && Math.abs(route.joinY - ((route.spineTop + route.spineBottom) / 2)) <= 2.1),
-    "each project route joins one quiet vertical spine immediately left of and across its matching session rows");
-  assert.ok(state.connectorPaths.every((route) => route.noGroupUnderline),
-    "no connector has a horizontal underline beneath or across its session group");
-  if (diagnose) {
-    const invalid = state.connectorPaths.filter((route) => !route.insideVisibility)
-      .map(({ identity, d, start, joinY, spineX, spineTop, spineBottom }) => (
-        { identity, d, start, joinY, spineX, spineTop, spineBottom }
-      ));
-    if (invalid.length) console.error("connector visibility escapes", {
-      invalid, projectVisibilityClip: state.projectVisibilityClip,
-      groupVisibilityClip: state.groupVisibilityClip, composerRect: state.composerRect,
+    const invalid = state.allocations.filter((pair) => Math.abs(pair.projectOffset - pair.groupOffset) > .75);
+    if (invalid.length) console.error("project/session allocation mismatch", {
+      projectGap: state.projectGap, groupGap: state.groupGap, invalid,
     });
   }
-  assert.ok(state.connectorPaths.every((route) => route.insideVisibility),
-    "routes remain in their project/tracker bands and above actual composer occlusion");
-  assert.deepEqual(state.routeConflicts, [],
-    "rendered project-to-group routes have no coincident segments or pairwise intersections");
+  assert.ok(state.allocations.every((pair) => Math.abs(pair.projectOffset - pair.groupOffset) <= .75),
+    "project and session groups share the same cumulative vertical rhythm");
+  assert.ok(state.allocations.every((pair) => Math.abs(pair.normalizedProjectTop - pair.normalizedGroupTop) <= 2),
+    "corresponding groups align within the shared block independent of pane scroll position");
+  assert.ok(state.projectGap > 0 && Math.abs(state.projectGap - state.groupGap) <= .1,
+    "project groups reuse the Sessions whitespace gap without separators");
+  assert.deepEqual(state.projectHeading, {
+    text: "projects", beforeProjects: true, afterContent: "none", afterBorderBottom: 0,
+  }, "projects remains the first column label without its obsolete divider");
   assert.deepEqual(state.projectSequence, expected, "left project identities keep canonical order");
   assert.deepEqual(state.groupSequence, expected, "right group identities exactly match canonical left order");
   assert.deepEqual(state.visibleGroups, expected, "overview exposes every group in reading order");
@@ -850,7 +681,7 @@ try {
   report.pwaInitialOverviewClosed = await inspect(initialOverviewPwa.cdp, "pwa-initial-overview-closed", { capture: false });
   assert.equal(report.pwaInitialOverviewClosed.overview, true, "initial projects-scope render remains in overview during client startup");
   assert.equal(report.pwaInitialOverviewClosed.newSession.count, 0, "initial overview markup and startup expose no add control");
-  assert.equal(report.pwaInitialOverviewClosed.connectorPaths.length, 0, "closed initial narrow navigation has no routes");
+  assert.equal(report.pwaInitialOverviewClosed.connectorPaths, 0, "closed initial narrow navigation has no connector remnants");
   await openNavigation(initialOverviewPwa.cdp);
   report.pwaInitialOverview = await inspect(initialOverviewPwa.cdp, "pwa-initial-overview");
   assertOverview(report.pwaInitialOverview, expectedSmall);
@@ -996,17 +827,8 @@ try {
   assert.match(report.desktopOverview.child?.elapsed ?? "", /^\d+[mh]$/, "child keeps its own elapsed time");
   assert.equal(report.desktopOverview.child?.elapsedOwner, 1, "elapsed metadata belongs to the child row");
   assert.equal(report.desktopOverview.idleParentElapsedCount, 0, "idle architect does not inherit delegated elapsed time");
-  await desktop.cdp.evaluate(`(() => {
-    const tracker = document.querySelector('.live-tracker');
-    const project = document.querySelector('.active-project-item[data-project="alpha"][data-folder=""]');
-    const group = document.querySelector('.live-tracker-project[data-project="alpha"][data-folder=""]');
-    const projectBox = project.getBoundingClientRect();
-    const sessionsBox = group.querySelector('.live-tracker-sessions').getBoundingClientRect();
-    tracker.scrollTop += ((sessionsBox.top + sessionsBox.bottom) / 2)
-      - ((projectBox.top + projectBox.bottom) / 2);
-  })()`);
-  report.desktopSpineAligned = await inspect(desktop.cdp, "desktop-spine-aligned", { capture: false });
-  assertOverview(report.desktopSpineAligned, expectedMany);
+  report.desktopGroupAligned = await inspect(desktop.cdp, "desktop-group-aligned", { capture: false });
+  assertOverview(report.desktopGroupAligned, expectedMany);
   await desktop.cdp.evaluate(`(() => {
     const tracker = document.querySelector('.live-tracker');
     const projects = document.querySelector('.active-projects');
@@ -1015,10 +837,27 @@ try {
   })()`);
   report.desktopScrolled = await inspect(desktop.cdp, "desktop-scrolled", { capture: false });
   assertOverview(report.desktopScrolled, expectedMany);
-  assert.ok(report.desktopScrolled.scroll.trackerTop > 0, "session groups scroll independently");
+  assert.ok(report.desktopScrolled.scroll.trackerScrollHeight > report.desktopScrolled.scroll.trackerHeight
+    && report.desktopScrolled.scroll.projectScrollHeight > report.desktopScrolled.scroll.projectHeight,
+  "many-project overview constrains both desktop columns to independent scrollports");
+  assert.ok(report.desktopScrolled.scroll.trackerTop > 0 && report.desktopScrolled.scroll.projectTop > 0,
+    "later session groups and project links are independently reachable on desktop");
   await desktop.cdp.send("Emulation.setDeviceMetricsOverride", { width: 1120, height: 720, deviceScaleFactor: 1, mobile: false });
   report.desktopResized = await inspect(desktop.cdp, "desktop-resized", { capture: false });
   assertOverview(report.desktopResized, expectedMany);
+  assert.ok(report.desktopResized.scroll.projectScrollHeight > report.desktopResized.scroll.projectHeight,
+    "1120x720 desktop overview keeps the many-project list inside a scrollport");
+  await desktop.cdp.evaluate(`(() => {
+    const projects = document.querySelector('.active-projects');
+    projects.scrollTop = projects.scrollHeight - projects.clientHeight;
+  })()`);
+  report.desktopProjectsBottom = await inspect(desktop.cdp, "desktop-projects-bottom", { capture: false });
+  assert.equal(report.desktopProjectsBottom.scroll.projectTop,
+    report.desktopProjectsBottom.scroll.projectScrollHeight - report.desktopProjectsBottom.scroll.projectHeight,
+  "desktop Projects reaches its maximum scroll offset");
+  assert.ok(report.desktopProjectsBottom.scroll.lastProjectTop >= report.desktopProjectsBottom.scroll.projectPortTop
+    && report.desktopProjectsBottom.scroll.lastProjectBottom <= report.desktopProjectsBottom.scroll.projectPortBottom + 1,
+  "the final desktop project link is fully reachable inside the viewport");
   await desktop.cdp.evaluate(`(() => {
     const serverOverviewChrome = document.querySelector('#session-chrome').cloneNode(true);
     document.querySelector('.active-project-item[data-project="studio"][data-folder="east"]')?.click();
@@ -1046,7 +885,7 @@ try {
   });
   await waitForPaint(smallPwa.cdp);
   report.smallClosed = await inspect(smallPwa.cdp, "small-closed", { capture: false });
-  assert.equal(report.smallClosed.connectorPaths.length, 0, "closed narrow navigation suppresses relationship routes");
+  assert.equal(report.smallClosed.connectorPaths, 0, "closed narrow navigation has no connector remnants");
   await openNavigation(smallPwa.cdp);
   report.pwaSelected = await inspect(smallPwa.cdp, "pwa-selected");
   assert.ok(report.pwaSelected.standalone && report.pwaSelected.navMode, "selected screenshot is installed-PWA navigation");
@@ -1054,19 +893,15 @@ try {
   await openOverview(smallPwa.cdp);
   report.pwaSmallOverview = await inspect(smallPwa.cdp, "pwa-small-overview");
   assertOverview(report.pwaSmallOverview, expectedSmall);
-  assert.deepEqual(report.pwaSmallOverview.connectorPathIdentities, expectedSmall,
-    "small overview connects every meaningfully visible pair, including epsilon");
-  const epsilonRoute = report.pwaSmallOverview.connectorPaths.find((route) => route.identity === "epsilon\n");
-  assert.ok(epsilonRoute, "epsilon has its required project-to-group relationship line");
-  assert.ok(epsilonRoute.spineBottom > report.pwaSmallOverview.projectVisibilityClip.bottom,
-    "epsilon’s group spine remains visible below the shorter centered left project list");
-  assert.ok(report.pwaSmallOverview.composerCoversTracker
-    && Math.abs(report.pwaSmallOverview.groupVisibilityClip.bottom - report.pwaSmallOverview.composerRect.top) < .01
-    && epsilonRoute.spineBottom < report.pwaSmallOverview.composerRect.top,
-  "small overview clips the right tracker at the actual composer while retaining epsilon’s spine above it");
+  assert.deepEqual(report.pwaSmallOverview.allocations.map((pair) => pair.identity), expectedSmall,
+    "small overview groups every project with its folder-aware Sessions allocation");
+  const epsilonAllocation = report.pwaSmallOverview.allocations.find((pair) => pair.identity === "epsilon\n");
+  assert.ok(epsilonAllocation
+    && Math.abs(epsilonAllocation.projectHeight - epsilonAllocation.groupHeight) <= .75,
+  "the final empty project keeps the whitespace allocated by its session group");
   await smallPwa.cdp.evaluate(`document.body.click()`);
   report.smallClosedAfter = await inspect(smallPwa.cdp, "small-closed-after", { capture: false });
-  assert.equal(report.smallClosedAfter.connectorPaths.length, 0, "closing narrow navigation suppresses relationship routes");
+  assert.equal(report.smallClosedAfter.connectorPaths, 0, "closing narrow navigation has no connector remnants");
   await openNavigation(smallPwa.cdp);
   report.smallReopened = await inspect(smallPwa.cdp, "small-reopened", { capture: false });
   assertOverview(report.smallReopened, expectedSmall);
@@ -1101,11 +936,6 @@ try {
   await openOverview(manyPwa.cdp);
   report.pwaManyOverview = await inspect(manyPwa.cdp, "pwa-many-overview");
   assertOverview(report.pwaManyOverview, expectedMany);
-  assert.ok(report.pwaManyOverview.composerOccludedPairSequence.length > 0,
-    "portrait fixture includes a project-visible group hidden by the actual composer");
-  assert.ok(report.pwaManyOverview.composerOccludedPairSequence.every((identity) =>
-    !report.pwaManyOverview.connectorPathIdentities.includes(identity)),
-  "portrait overview omits every pair whose right group surface is composer-occluded");
   await manyPwa.cdp.evaluate(`(() => {
     const tracker = document.querySelector('.live-tracker');
     const projects = document.querySelector('.active-projects');
@@ -1124,9 +954,9 @@ try {
   })()`);
   report.pwaDuplicateFolders = await inspect(manyPwa.cdp, "pwa-duplicate-folders", { capture: false });
   assertOverview(report.pwaDuplicateFolders, expectedMany);
-  assert.deepEqual(report.pwaDuplicateFolders.connectorPathIdentities.filter((identity) => identity.startsWith("studio\n")),
+  assert.deepEqual(report.pwaDuplicateFolders.allocations.map((pair) => pair.identity).filter((identity) => identity.startsWith("studio\n")),
     ["studio\neast", "studio\nwest"],
-    "duplicate names route independently to the correct authoritative folder groups");
+    "duplicate names allocate independently to their folder-aware session groups");
   await manyPwa.cdp.evaluate(`(() => {
     document.querySelector('.live-tracker').scrollTop = 165;
     document.querySelector('.active-projects').scrollTop = 110;
@@ -1136,9 +966,6 @@ try {
   });
   report.pwaRotated = await inspect(manyPwa.cdp, "pwa-rotated");
   assertOverview(report.pwaRotated, expectedMany);
-  assert.ok(report.pwaRotated.composerOccludedPairSequence.every((identity) =>
-    !report.pwaRotated.connectorPathIdentities.includes(identity)),
-  "rotated overview omits every pair whose right group surface is composer-occluded");
   await manyPwa.cdp.evaluate(`document.querySelector('.active-project-item[data-project="studio"][data-folder="east"]')?.click()`);
   report.pwaFolderSelected = await inspect(manyPwa.cdp, "pwa-folder-selected", { capture: false });
   assertSelected(report.pwaFolderSelected, expectedMany, "studio\neast");
