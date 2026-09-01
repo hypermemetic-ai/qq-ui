@@ -2377,7 +2377,7 @@
     for (const choice of document.querySelectorAll(".projects-choice[data-project]")) {
       retargetProjectLink(choice, currentKey, currentHref);
     }
-    scheduleSessionConnectors();
+    scheduleProjectGroupLayout();
   };
   const activeProjectKeys = () => new Set(activeProjectItems().map((item) => projectIdentity(activeProjectEntry(item))));
   const appendActiveProject = (entry) => {
@@ -2391,7 +2391,7 @@
     const key = projectIdentity(entry);
     const item = activeProjectItems().find((candidate) => projectIdentity(activeProjectEntry(candidate)) === key);
     item?.closest("li")?.remove();
-    scheduleSessionConnectors();
+    scheduleProjectGroupLayout();
   };
   const responseHasSession = (response) => {
     if (response.status === 404) return false;
@@ -2965,182 +2965,76 @@
     } catch { /* use the console default */ }
     return "/qq";
   };
-  const SESSION_CONNECTOR_ID = "session-connectors";
-  const SESSION_CONNECTOR_SOURCE_INSET = 0.75;
-  const SESSION_CONNECTOR_SPINE_INSET = 3;
-  const SESSION_CONNECTOR_SPINE_MIN_HEIGHT = 8;
-  const SESSION_CONNECTOR_SPINE_GAP = 4;
-  const SESSION_CONNECTOR_NS = "http://www.w3.org/2000/svg";
-  let sessionConnectorFrame = 0;
-  let sessionConnectorResizeObserver = null;
-  let sessionConnectorObserved = [];
-  const removeSessionConnectors = () => {
-    document.getElementById(SESSION_CONNECTOR_ID)?.remove();
-  };
-  const sessionConnectorRect = (node) => {
-    if (!(node instanceof HTMLElement)) return null;
-    const rect = node.getBoundingClientRect();
-    return {
-      left: rect.left + node.clientLeft,
-      top: rect.top + node.clientTop,
-      right: rect.left + node.clientLeft + node.clientWidth,
-      bottom: rect.top + node.clientTop + node.clientHeight,
-    };
-  };
-  const sessionTrackerConnectorRect = (tracker) => {
-    const clip = sessionConnectorRect(tracker);
-    if (!clip || !navMode() || desktopChair()) return clip;
-    const composerShell = document.querySelector("#session-composer");
-    if (!(composerShell instanceof HTMLElement)) return clip;
-    const style = getComputedStyle(composerShell);
-    const composer = composerShell.getBoundingClientRect();
-    const coversTracker = style.display !== "none" && style.visibility !== "hidden"
-      && composer.width > 0 && composer.height > 0
-      && composer.left < clip.right && composer.right > clip.left
-      && composer.top < clip.bottom && composer.bottom > clip.top;
-    return coversTracker ? { ...clip, bottom: Math.max(clip.top, Math.min(clip.bottom, composer.top)) } : clip;
-  };
-  const visibleConnectorSurface = (node, clip) => {
-    if (!(node instanceof HTMLElement) || !clip || node.hidden) return null;
-    const rect = node.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return null;
-    const visible = {
-      left: Math.max(rect.left, clip.left),
-      top: Math.max(rect.top, clip.top),
-      right: Math.min(rect.right, clip.right),
-      bottom: Math.min(rect.bottom, clip.bottom),
-    };
-    const meaningfulHeight = Math.min(12, Math.max(4, rect.height * 0.35));
-    if (visible.right - visible.left < 8 || visible.bottom - visible.top < meaningfulHeight) return null;
-    return { rect, visible };
-  };
-  const sessionConnectorModeVisible = (tracker, rail) => {
-    if (!(tracker instanceof HTMLElement) || !(rail instanceof HTMLElement)) return false;
-    if (tracker.dataset.overview !== "true") return false;
-    if (!desktopChair() && !navMode()) return false;
-    const trackerStyle = getComputedStyle(tracker);
-    const railStyle = getComputedStyle(rail);
-    return trackerStyle.display !== "none" && trackerStyle.visibility !== "hidden"
-      && railStyle.display !== "none" && railStyle.visibility !== "hidden";
-  };
-  const observeSessionConnectorSurfaces = (nodes) => {
-    if (typeof ResizeObserver !== "function") return;
-    const next = [...new Set(nodes.filter((node) => node instanceof Element))];
-    if (next.length === sessionConnectorObserved.length
-      && next.every((node, index) => node === sessionConnectorObserved[index])) return;
-    if (!sessionConnectorResizeObserver) {
-      sessionConnectorResizeObserver = new ResizeObserver(() => scheduleSessionConnectors());
+  const PROJECT_GROUP_HEIGHT = "--project-group-height";
+  const PROJECT_HEADING_SPACE = "--project-heading-space";
+  let projectGroupLayoutFrame = 0;
+  let projectGroupResizeObserver = null;
+  let projectGroupObserved = [];
+  const projectGroupItems = (rail = document.querySelector("#project-rail")) => rail
+    ? [...rail.querySelectorAll(".active-project-item[data-project]")]
+    : [];
+  const clearProjectGroupLayout = () => {
+    if (projectGroupLayoutFrame) cancelAnimationFrame(projectGroupLayoutFrame);
+    projectGroupLayoutFrame = 0;
+    for (const item of projectGroupItems()) {
+      item.closest("li")?.style.removeProperty(PROJECT_GROUP_HEIGHT);
     }
-    sessionConnectorResizeObserver.disconnect();
-    sessionConnectorObserved = next;
-    for (const node of next) sessionConnectorResizeObserver.observe(node);
+    document.querySelector(".live-tracker")?.style.removeProperty(PROJECT_HEADING_SPACE);
+    projectGroupResizeObserver?.disconnect();
+    projectGroupObserved = [];
   };
-  const sessionConnectorJoin = (spineTop, spineBottom, sourceY) => {
-    const preferred = (spineTop + spineBottom) / 2;
-    if (Math.abs(preferred - sourceY) >= 1) return preferred;
-    return Math.min(spineBottom, Math.max(
-      spineTop,
-      preferred + (preferred >= sourceY ? 2 : -2),
-    ));
+  const observeProjectGroupLayout = (groups) => {
+    if (typeof ResizeObserver !== "function") return;
+    const next = [...new Set(groups.filter((group) => group instanceof Element))];
+    if (next.length === projectGroupObserved.length
+      && next.every((group, index) => group === projectGroupObserved[index])) return;
+    if (!projectGroupResizeObserver) {
+      projectGroupResizeObserver = new ResizeObserver(() => scheduleProjectGroupLayout());
+    }
+    projectGroupResizeObserver.disconnect();
+    projectGroupObserved = next;
+    for (const group of next) projectGroupResizeObserver.observe(group);
   };
-  const paintSessionConnectors = () => {
-    sessionConnectorFrame = 0;
+  const paintProjectGroupLayout = () => {
+    projectGroupLayoutFrame = 0;
+    const tracker = document.querySelector(".live-tracker");
     const rail = document.querySelector("#project-rail");
     const projects = rail?.querySelector(".active-projects");
-    const tracker = document.querySelector(".live-tracker");
-    if (!sessionConnectorModeVisible(tracker, rail)
-      || !(projects instanceof HTMLElement) || !(tracker instanceof HTMLElement)) {
-      removeSessionConnectors();
-      sessionConnectorResizeObserver?.disconnect();
-      sessionConnectorObserved = [];
+    const items = projectGroupItems(rail);
+    for (const item of items) item.closest("li")?.style.removeProperty(PROJECT_GROUP_HEIGHT);
+    tracker?.style.removeProperty(PROJECT_HEADING_SPACE);
+    if (!(tracker instanceof HTMLElement) || !(projects instanceof HTMLElement)
+      || tracker.dataset.overview !== "true" || (!desktopChair() && !navMode())) {
+      projectGroupResizeObserver?.disconnect();
+      projectGroupObserved = [];
       return;
     }
-    const width = document.documentElement.clientWidth;
-    const height = document.documentElement.clientHeight;
-    if (width <= 0 || height <= 0) {
-      removeSessionConnectors();
-      return;
-    }
+    const trackerStyle = getComputedStyle(tracker);
+    const projectsStyle = getComputedStyle(projects);
+    if (trackerStyle.display === "none" || trackerStyle.visibility === "hidden"
+      || projectsStyle.display === "none" || projectsStyle.visibility === "hidden") return;
     const groups = new Map();
     for (const group of tracker.querySelectorAll(".live-tracker-project[data-project]")) {
       if (!group.hidden) groups.set(projectIdentity(group.dataset), group);
     }
-    const routes = [];
-    const projectClip = sessionConnectorRect(projects);
-    const trackerClip = sessionTrackerConnectorRect(tracker);
-    const composerShell = document.querySelector("#session-composer");
-    for (const project of projects.querySelectorAll(".active-project-item[data-project][data-folder]")) {
-      const key = projectIdentity(project.dataset);
-      const group = groups.get(key);
-      const source = visibleConnectorSurface(project, projectClip);
-      const target = visibleConnectorSurface(group, trackerClip);
-      const sessions = group?.querySelector?.(".live-tracker-sessions");
-      if (!key || !source || !target || !(sessions instanceof HTMLElement)) continue;
-      const sessionsRect = sessions.getBoundingClientRect();
-      const start = {
-        x: source.rect.right - SESSION_CONNECTOR_SOURCE_INSET,
-        y: (source.rect.top + source.rect.bottom) / 2,
-      };
-      const contentLeft = Math.max(target.rect.left, sessionsRect.left);
-      const spineX = contentLeft - SESSION_CONNECTOR_SPINE_GAP;
-      const groupTop = Math.max(target.visible.top, sessionsRect.top);
-      const groupBottom = Math.min(target.visible.bottom, sessionsRect.bottom);
-      const spineInset = Math.min(
-        SESSION_CONNECTOR_SPINE_INSET,
-        Math.max(0, (groupBottom - groupTop - SESSION_CONNECTOR_SPINE_MIN_HEIGHT) / 2),
-      );
-      const spineTop = groupTop + spineInset;
-      const spineBottom = groupBottom - spineInset;
-      const joinY = sessionConnectorJoin(spineTop, spineBottom, start.y);
-      const connectorWidth = spineX - start.x;
-      const sourceAnchorVisible = start.y >= source.visible.top - 0.01
-        && start.y <= source.visible.bottom + 0.01;
-      const spineVisible = spineBottom - spineTop >= SESSION_CONNECTOR_SPINE_MIN_HEIGHT
-        && spineTop >= trackerClip.top && spineBottom <= trackerClip.bottom;
-      if (!sourceAnchorVisible || !spineVisible || connectorWidth < 4) continue;
-      routes.push({ project, group, start, joinY, contentLeft, spineX, spineTop, spineBottom });
+    for (const item of items) {
+      const group = groups.get(projectIdentity(item.dataset));
+      const height = group?.getBoundingClientRect?.().height ?? 0;
+      if (height > 0) item.closest("li")?.style.setProperty(PROJECT_GROUP_HEIGHT, `${height}px`);
     }
-    const observe = [rail, projects, tracker, composerShell, ...groups.values()];
-    if (routes.length === 0) {
-      removeSessionConnectors();
-      observeSessionConnectorSurfaces(observe);
-      return;
+    const list = projects.querySelector(":scope > ol");
+    if (list instanceof HTMLElement) {
+      const headingAllocation = list.getBoundingClientRect().top
+        - projects.getBoundingClientRect().top + projects.scrollTop;
+      const gap = Number.parseFloat(trackerStyle.rowGap) || 0;
+      tracker.style.setProperty(PROJECT_HEADING_SPACE, `${Math.max(0, headingAllocation - gap)}px`);
     }
-    let svg = document.getElementById(SESSION_CONNECTOR_ID);
-    if (!(svg instanceof SVGElement)) {
-      removeSessionConnectors();
-      svg = document.createElementNS(SESSION_CONNECTOR_NS, "svg");
-      svg.id = SESSION_CONNECTOR_ID;
-      svg.classList.add("session-connectors");
-      svg.setAttribute("aria-hidden", "true");
-      svg.setAttribute("focusable", "false");
-      document.body.append(svg);
-    }
-    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    svg.setAttribute("width", String(width));
-    svg.setAttribute("height", String(height));
-    svg.replaceChildren(...routes.map(({
-      project, start, joinY, spineX, spineTop, spineBottom,
-    }) => {
-      const path = document.createElementNS(SESSION_CONNECTOR_NS, "path");
-      path.dataset.project = project.dataset.project || "";
-      path.dataset.folder = project.dataset.folder || "";
-      path.setAttribute("d", `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} L ${spineX.toFixed(2)} ${joinY.toFixed(2)} M ${spineX.toFixed(2)} ${spineTop.toFixed(2)} V ${spineBottom.toFixed(2)}`);
-      return path;
-    }));
-    observeSessionConnectorSurfaces(observe);
+    observeProjectGroupLayout([...groups.values()]);
   };
-  function scheduleSessionConnectors() {
-    if (sessionConnectorFrame) return;
-    sessionConnectorFrame = requestAnimationFrame(paintSessionConnectors);
+  function scheduleProjectGroupLayout() {
+    if (projectGroupLayoutFrame) return;
+    projectGroupLayoutFrame = requestAnimationFrame(paintProjectGroupLayout);
   }
-  const suppressSessionConnectors = () => {
-    if (sessionConnectorFrame) cancelAnimationFrame(sessionConnectorFrame);
-    sessionConnectorFrame = 0;
-    removeSessionConnectors();
-    sessionConnectorResizeObserver?.disconnect();
-    sessionConnectorObserved = [];
-  };
 
   const liveTrackerGroups = (tracker = document.querySelector(".live-tracker")) => tracker
     ? [...tracker.querySelectorAll(".live-tracker-project[data-project]")]
@@ -3182,13 +3076,13 @@
     markGroupCurrent(".active-project-item[href]", "active-project-current", null);
     markGroupCurrent(".projects-choice[href]", "projects-choice-current", null);
     if (remember) liveTrackerProjectFilter = LIVE_TRACKER_OVERVIEW;
-    scheduleSessionConnectors();
+    scheduleProjectGroupLayout();
     return true;
   };
   const showLiveTrackerProject = (group, { remember = true, item = null } = {}) => {
     const tracker = document.querySelector(".live-tracker");
     if (!(tracker instanceof HTMLElement)) return false;
-    suppressSessionConnectors();
+    clearProjectGroupLayout();
     const project = String(group?.dataset?.project ?? item?.dataset?.project ?? "");
     const folder = String(group?.dataset?.folder ?? item?.dataset?.folder ?? "");
     if (!project) return false;
@@ -3525,9 +3419,9 @@
   const paintChairMode = (nav, persist = true) => {
     if (nav) document.body.classList.add("nav-mode");
     else document.body.classList.remove("nav-mode");
-    if (nav) scheduleSessionConnectors();
-    else if (!desktopChair()) suppressSessionConnectors();
-    else scheduleSessionConnectors();
+    if (nav) scheduleProjectGroupLayout();
+    else if (!desktopChair()) clearProjectGroupLayout();
+    else scheduleProjectGroupLayout();
     if (nav) {
       overlaySessionId = "";
       pendingCanonical = "";
@@ -4722,7 +4616,6 @@
   });
   document.addEventListener("scroll", (event) => {
     if (event.target?.id === "transcript") onTranscriptUserScroll(event.target);
-    if (event.target?.matches?.(".active-projects, .live-tracker")) scheduleSessionConnectors();
   }, true);
   const visualViewport = window.visualViewport;
   if (visualViewport && typeof visualViewport.addEventListener === "function") {
@@ -5180,15 +5073,12 @@
   for (const eventName of ["htmx:afterSwap", "htmx:sseMessage"]) {
     document.addEventListener(eventName, (event) => {
       const id = swapTargetId(event);
-      if (touchesComposer(id)) {
-        restoreDraft();
-        scheduleSessionConnectors();
-      }
+      if (touchesComposer(id)) restoreDraft();
       if (id === "session-chrome") {
         syncUsageAction();
         syncLiveTrackerElapsed();
         syncLiveTrackerProjectFilter();
-        scheduleSessionConnectors();
+        scheduleProjectGroupLayout();
       }
       if (id === "session-usage") syncUsageAction();
     });
@@ -5202,14 +5092,13 @@
     });
   }
 
-  window.addEventListener("resize", scheduleSessionConnectors, { passive: true });
-  window.addEventListener("orientationchange", scheduleSessionConnectors, { passive: true });
-  window.visualViewport?.addEventListener?.("resize", scheduleSessionConnectors, { passive: true });
-  window.visualViewport?.addEventListener?.("scroll", scheduleSessionConnectors, { passive: true });
-  document.fonts?.ready?.then?.(scheduleSessionConnectors).catch?.(() => {});
+  window.addEventListener("resize", scheduleProjectGroupLayout, { passive: true });
+  window.addEventListener("orientationchange", scheduleProjectGroupLayout, { passive: true });
+  window.visualViewport?.addEventListener?.("resize", scheduleProjectGroupLayout, { passive: true });
+  document.fonts?.ready?.then?.(scheduleProjectGroupLayout).catch?.(() => {});
   window.addEventListener("load", () => {
     restoreTranscriptView();
-    scheduleSessionConnectors();
+    scheduleProjectGroupLayout();
   }, { once: true });
   window.addEventListener("pageshow", () => {
     adoptFileReturnFromWindowName();
@@ -5217,7 +5106,7 @@
     promptEchoes.commission(liveSessionId);
     restorePersistedDraft();
     restoreTranscriptView();
-    scheduleSessionConnectors();
+    scheduleProjectGroupLayout();
   });
 
   const syncInitialChrome = (options = {}) => {
@@ -5236,7 +5125,7 @@
     restoreActiveProjects();
     syncLiveTrackerProjectFilter();
     syncUsageView();
-    scheduleSessionConnectors();
+    scheduleProjectGroupLayout();
     if (!options.skipValidate) void validateRememberedProjects();
     if (drawerIsOpen()) requestAnimationFrame(() => openDrawer({ updateUrl: false, focus: !keepOpenerFocus }));
     restoreFileReturnFromHistory();
