@@ -1,0 +1,75 @@
+{
+  "name": "@hypermemetic-ai/qq-ui-alpha3-spike",
+  "version": "0.0.0-alpha.3-spike",
+  "private": true,
+  "type": "module",
+  "description": "Bounded QQ contribution spike for the stock DSH 0.1.2-alpha.3 Web client.",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/client.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/",
+    "host/",
+    "README.md",
+    "SPIKE_REPORT.md",
+    "package.json"
+  ],
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-theme",
+        "@deepseek-ai/dsh-client-ui-commands"
+      ],
+      "external": [
+        "react"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-commands": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-session": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-theme": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-session": "0.1.2-alpha.3",
+    "react": "18.3.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-commands": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-session": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-theme": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-session": "0.1.2-alpha.3",
+    "@types/react": "18.3.24",
+    "react": "18.3.1",
+    "typescript": "5.9.2"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/check-public-types.mjs",
+    "prove": "node proofs/lifecycle.proof.mjs && node proofs/bundle.proof.mjs && node proofs/public-types-gate.proof.mjs",
+    "watch": "node scripts/watch.mjs"
+  }
+}
