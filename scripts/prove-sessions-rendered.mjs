@@ -481,6 +481,10 @@ const inspectExpression = `(() => {
       projectTop: projectPort?.scrollTop || 0,
       projectHeight: projectPort?.clientHeight || 0,
       projectScrollHeight: projectPort?.scrollHeight || 0,
+      projectPortTop: elementRect(projectPort)?.top ?? 0,
+      projectPortBottom: elementRect(projectPort)?.bottom ?? 0,
+      lastProjectTop: elementRect(projectRows.at(-1))?.top ?? 0,
+      lastProjectBottom: elementRect(projectRows.at(-1))?.bottom ?? 0,
       trackerTop: groupPort?.scrollTop || 0,
       trackerHeight: groupPort?.clientHeight || 0,
       trackerScrollHeight: groupPort?.scrollHeight || 0,
@@ -833,10 +837,27 @@ try {
   })()`);
   report.desktopScrolled = await inspect(desktop.cdp, "desktop-scrolled", { capture: false });
   assertOverview(report.desktopScrolled, expectedMany);
-  assert.ok(report.desktopScrolled.scroll.trackerTop > 0, "session groups scroll independently");
+  assert.ok(report.desktopScrolled.scroll.trackerScrollHeight > report.desktopScrolled.scroll.trackerHeight
+    && report.desktopScrolled.scroll.projectScrollHeight > report.desktopScrolled.scroll.projectHeight,
+  "many-project overview constrains both desktop columns to independent scrollports");
+  assert.ok(report.desktopScrolled.scroll.trackerTop > 0 && report.desktopScrolled.scroll.projectTop > 0,
+    "later session groups and project links are independently reachable on desktop");
   await desktop.cdp.send("Emulation.setDeviceMetricsOverride", { width: 1120, height: 720, deviceScaleFactor: 1, mobile: false });
   report.desktopResized = await inspect(desktop.cdp, "desktop-resized", { capture: false });
   assertOverview(report.desktopResized, expectedMany);
+  assert.ok(report.desktopResized.scroll.projectScrollHeight > report.desktopResized.scroll.projectHeight,
+    "1120x720 desktop overview keeps the many-project list inside a scrollport");
+  await desktop.cdp.evaluate(`(() => {
+    const projects = document.querySelector('.active-projects');
+    projects.scrollTop = projects.scrollHeight - projects.clientHeight;
+  })()`);
+  report.desktopProjectsBottom = await inspect(desktop.cdp, "desktop-projects-bottom", { capture: false });
+  assert.equal(report.desktopProjectsBottom.scroll.projectTop,
+    report.desktopProjectsBottom.scroll.projectScrollHeight - report.desktopProjectsBottom.scroll.projectHeight,
+  "desktop Projects reaches its maximum scroll offset");
+  assert.ok(report.desktopProjectsBottom.scroll.lastProjectTop >= report.desktopProjectsBottom.scroll.projectPortTop
+    && report.desktopProjectsBottom.scroll.lastProjectBottom <= report.desktopProjectsBottom.scroll.projectPortBottom + 1,
+  "the final desktop project link is fully reachable inside the viewport");
   await desktop.cdp.evaluate(`(() => {
     const serverOverviewChrome = document.querySelector('#session-chrome').cloneNode(true);
     document.querySelector('.active-project-item[data-project="studio"][data-folder="east"]')?.click();

@@ -649,6 +649,11 @@ assert.match(groupedProjectStyle, /min-height:\s*0[\s\S]*?flex:\s*1 1 auto/,
   "project labels center within both compact and one-to-many group allocations");
 assert.doesNotMatch(css, /\.project-rail \.projects-session-item::after|\.session-connectors/,
   "overview adds neither a heading divider nor connector lines");
+const desktopProjectPortStyle = css.match(/@media \(min-width: 42\.01rem\) \{\s*body:has\(\.live-tracker\[data-overview="true"\]\) \.project-rail \.active-projects \{([^}]*)\}/)?.[1] ?? "";
+assert.match(desktopProjectPortStyle, /max-height:\s*100%[\s\S]*?overflow-y:\s*auto[\s\S]*?overscroll-behavior:\s*contain/,
+  "desktop overview projects stay reachable in an independently scrolling rail");
+assert.match(desktopProjectPortStyle, /scrollbar-width:\s*none/,
+  "desktop project scrolling retains the quiet tracker presentation");
 assert.match(css, /@media \(max-width: 42rem\) \{[\s\S]*?\.nav-mode \.live-tracker\[data-overview="true"\] \.live-tracker-project \{[^}]*width:\s*min\(calc\(100% - 2rem\), 10rem\)/,
   "narrow Sessions content retains its landed placement and width");
 assert.match(css, /@media \(min-width: 42\.01rem\) \{[\s\S]*?\.live-tracker\[data-overview="true"\] \{[^}]*position:\s*relative[^}]*inset-inline-end:\s*clamp\(2\.5rem, 5vw, 4rem\)[^}]*width:\s*12\.125rem[\s\S]*?\.live-tracker\[data-overview="true"\] \.live-tracker-project \{[^}]*width:\s*9rem/,

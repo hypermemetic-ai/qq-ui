@@ -3676,6 +3676,13 @@ body:has(.live-tracker[data-overview="true"]) .project-rail .active-project-item
 }
 
 @media (min-width: 42.01rem) {
+  body:has(.live-tracker[data-overview="true"]) .project-rail .active-projects {
+    max-height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+  body:has(.live-tracker[data-overview="true"]) .project-rail .active-projects::-webkit-scrollbar { display: none; }
   .live-tracker[data-overview="true"] {
     position: relative;
     inset-inline-end: clamp(2.5rem, 5vw, 4rem);
