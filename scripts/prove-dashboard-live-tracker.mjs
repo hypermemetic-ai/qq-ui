@@ -571,31 +571,41 @@ assert.deepEqual({ ...chooserBehavior }, {
   modifiedKeyboard: false,
   overviewCount: 8,
 }, "only genuine Projects/Sessions background or the focused chooser landmark enters overview across desktop and nav mode");
-const projectGroupSource = browser.match(/const PROJECT_GROUP_HEIGHT[\s\S]*?function scheduleProjectGroupLayout\(\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
-assert.match(projectGroupSource, /PROJECT_GROUP_HEIGHT = "--project-group-height"[\s\S]*?const paintProjectGroupLayout/,
-  "the client owns one small post-layout project grouping pass");
-assert.match(projectGroupSource, /new Map\(\)[\s\S]*?groups\.set\(projectIdentity\(group\.dataset\), group\)/,
-  "visible session groups are indexed by authoritative project plus folder identity");
-assert.match(projectGroupSource, /groups\.get\(projectIdentity\(item\.dataset\)\)[\s\S]*?getBoundingClientRect[\s\S]*?setProperty\(PROJECT_GROUP_HEIGHT/,
-  "each project wrapper receives only its exact corresponding session-group height");
-assert.match(projectGroupSource, /headingAllocation = list\.getBoundingClientRect\(\)\.top[\s\S]*?projects\.scrollTop[\s\S]*?trackerStyle\.rowGap[\s\S]*?setProperty\(PROJECT_HEADING_SPACE/,
-  "the existing projects heading is mirrored by whitespace before the first Sessions group");
-assert.match(projectGroupSource, /new ResizeObserver\(\(\) => scheduleProjectGroupLayout\(\)\)[\s\S]*?observeProjectGroupLayout\(\[\.\.\.groups\.values\(\)\]\)/,
-  "session-group size changes refresh their paired project allocations");
-assert.match(browser, /const showLiveTrackerOverview[\s\S]*?scheduleProjectGroupLayout\(\)[\s\S]*?const showLiveTrackerProject[\s\S]*?clearProjectGroupLayout\(\)/,
-  "overview applies grouping and selected-project mode clears it");
+const connectorSource = browser.match(/const SESSION_CONNECTOR_ID[\s\S]*?function scheduleSessionConnectors\(\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
+assert.match(connectorSource, /SESSION_CONNECTOR_ID = "session-connectors"[\s\S]*?const paintSessionConnectors/,
+  "the client owns a fresh viewport relationship layer after layout exists");
+assert.match(connectorSource, /new Map\(\)[\s\S]*?groups\.set\(projectIdentity\(group\.dataset\), group\)/,
+  "session groups are indexed by authoritative project plus folder identity");
+assert.match(connectorSource, /projectIdentity\(project\.dataset\)[\s\S]*?groups\.get\(key\)/,
+  "each project route resolves only its exact folder-aware group");
+assert.match(connectorSource, /projectClip = sessionConnectorRect\(projects\)[\s\S]*?trackerClip = sessionTrackerConnectorRect\(tracker\)[\s\S]*?visibleConnectorSurface\(project, projectClip\)[\s\S]*?visibleConnectorSurface\(group, trackerClip\)/,
+  "each endpoint is omitted only when it is not meaningfully visible in its own actual pane");
+assert.match(connectorSource, /sessionTrackerConnectorRect[\s\S]*?#session-composer[\s\S]*?Math\.min\(clip\.bottom, composer\.top\)/,
+  "narrow group visibility uses the right tracker band capped by the actual composer");
+assert.doesNotMatch(connectorSource, /targetVerticalScrollport|visibleConnectorSurface\(group, tracker, projects\)/,
+  "right endpoint visibility never proxies through or requires overlap with the left project list");
+assert.match(connectorSource, /sessionConnectorJoin[\s\S]*?preferred = \(spineTop \+ spineBottom\) \/ 2[\s\S]*?Math\.abs\(preferred - sourceY\) >= 1[\s\S]*?preferred >= sourceY \? 2 : -2/,
+  "the project route joins the spine at its stable midpoint and keeps an angular bend on exact source alignment");
+assert.match(connectorSource, /SESSION_CONNECTOR_SOURCE_INSET = 0\.75[\s\S]*?SESSION_CONNECTOR_SPINE_INSET = 3[\s\S]*?SESSION_CONNECTOR_SPINE_MIN_HEIGHT = 8[\s\S]*?spineX = contentLeft - SESSION_CONNECTOR_SPINE_GAP[\s\S]*?groupTop = Math\.max\(target\.visible\.top, sessionsRect\.top\)[\s\S]*?groupBottom = Math\.min\(target\.visible\.bottom, sessionsRect\.bottom\)[\s\S]*?spineTop = groupTop \+ spineInset[\s\S]*?spineBottom = groupBottom - spineInset/,
+  "each endpoint is a modestly inset clipped vertical spine while the project source remains at its edge");
+assert.doesNotMatch(connectorSource, /SESSION_CONNECTOR_BASELINE_GAP|sessionConnectorBaseline|endX|route\.baseline/,
+  "connector geometry contains no below-group baseline or underline endpoint");
+assert.match(browser, /const showLiveTrackerOverview[\s\S]*?scheduleSessionConnectors\(\)[\s\S]*?const showLiveTrackerProject[\s\S]*?suppressSessionConnectors\(\)/,
+  "overview entry schedules routes while single-project entry synchronously removes them");
 assert.match(browser, /const removeLiveTrackerCreate[\s\S]*?create\.remove\(\)[\s\S]*?const ensureLiveTrackerCreate[\s\S]*?create\.method = "post"[\s\S]*?aria-label", "New session"/,
   "client mode transitions remove the overview control node and reconstruct one native labelled POST form on selection");
 assert.match(browser, /const showLiveTrackerOverview[\s\S]*?removeLiveTrackerCreate\(tracker\)[\s\S]*?const showLiveTrackerProject[\s\S]*?ensureLiveTrackerCreate\(tracker, project, folder\)/,
   "overview and selected-project transitions reconcile add-session DOM presence in opposite directions");
 assert.match(browser, /ensureLiveTrackerCreate[\s\S]*?encodeURIComponent\(project\)[\s\S]*?encodeURIComponent\(folder\)[\s\S]*?\/sessions/,
   "the reconstructed selected-project action is project/folder aware");
-assert.match(browser, /new ResizeObserver[\s\S]*?window\.addEventListener\("resize", scheduleProjectGroupLayout[\s\S]*?orientationchange/,
-  "surface resize, viewport resize, and rotation refresh grouped allocation");
-assert.match(browser, /id === "session-chrome"[\s\S]*?syncLiveTrackerProjectFilter\(\)[\s\S]*?scheduleProjectGroupLayout\(\)/,
-  "live chrome replacement restores mode before regrouping Projects");
-assert.doesNotMatch(browser, /SESSION_CONNECTOR|session-connectors|paintSessionConnectors|createElementNS\([^)]*"svg"/,
-  "obsolete viewport connector rendering is fully removed");
+assert.match(browser, /event\.target\?\.matches\?\.\("\.active-projects, \.live-tracker"\)[\s\S]*?scheduleSessionConnectors\(\)/,
+  "independent project and group pane scrolling recomputes relationship geometry");
+assert.match(browser, /new ResizeObserver[\s\S]*?window\.addEventListener\("resize", scheduleSessionConnectors[\s\S]*?orientationchange/,
+  "surface resize, viewport resize, and rotation all recompute relationship geometry");
+assert.match(browser, /id === "session-chrome"[\s\S]*?syncLiveTrackerProjectFilter\(\)[\s\S]*?scheduleSessionConnectors\(\)/,
+  "live chrome replacement restores mode before repainting its routes");
+assert.match(browser, /touchesComposer\(id\)[\s\S]*?restoreDraft\(\)[\s\S]*?scheduleSessionConnectors\(\)/,
+  "live composer replacement recomputes the right-side unobscured band");
 assert.match(browser, /const activeProjectEntry = \(item\) => \(\{[\s\S]*?projectLabel:[\s\S]*?folderLabel:/,
   "client reconciliation retains the labels required by canonical ordering");
 assert.match(browser, /const appendActiveProject = \(entry\) => \{[\s\S]*?restoreActiveProjects\(\)/,
@@ -638,55 +648,47 @@ assert.match(css, /\.nav-mode \.session-traversal \{[^}]*width:\s*50%/,
   "the session pane retains its original half-width");
 assert.match(css, /\.nav-mode \.project-rail \{[^}]*width:\s*50%[^}]*border-right:\s*0/,
   "the narrow installed-app split removes its full-height central divider");
-const projectGroupListStyle = css.match(/body:has\(\.live-tracker\[data-overview="true"\]\) \.project-rail \.active-projects ol \{([^}]*)\}/)?.[1] ?? "";
-assert.match(projectGroupListStyle, /gap:\s*\.9rem/,
-  "Projects reuse the established Sessions group gap");
-const projectGroupRowStyle = css.match(/body:has\(\.live-tracker\[data-overview="true"\]\) \.project-rail \.active-projects ol > li:has\(> \.active-project-item\[data-project\]\) \{([^}]*)\}/)?.[1] ?? "";
-assert.match(projectGroupRowStyle, /display:\s*flex[\s\S]*?height:\s*var\(--project-group-height, 2\.75rem\)/,
-  "each project wrapper consumes its corresponding measured Sessions allocation");
-const groupedProjectStyle = css.match(/body:has\(\.live-tracker\[data-overview="true"\]\) \.project-rail \.active-project-item\[data-project\] \{([^}]*)\}/)?.[1] ?? "";
-assert.match(groupedProjectStyle, /min-height:\s*0[\s\S]*?flex:\s*1 1 auto/,
-  "project labels center within both compact and one-to-many group allocations");
-assert.doesNotMatch(css, /\.project-rail \.projects-session-item::after|\.session-connectors/,
-  "overview adds neither a heading divider nor connector lines");
-const desktopProjectPortStyle = css.match(/@media \(min-width: 42\.01rem\) \{\s*body:has\(\.live-tracker\[data-overview="true"\]\) \.project-rail \.active-projects \{([^}]*)\}/)?.[1] ?? "";
-assert.match(desktopProjectPortStyle, /max-height:\s*100%[\s\S]*?overflow-y:\s*auto[\s\S]*?overscroll-behavior:\s*contain/,
-  "desktop overview projects stay reachable in an independently scrolling rail");
-assert.match(desktopProjectPortStyle, /scrollbar-width:\s*none/,
-  "desktop project scrolling retains the quiet tracker presentation");
+assert.match(css, /body:has\(\.live-tracker\[data-overview="true"\]\) \.project-rail \.active-project-item\[data-project\] \{[^}]*width:\s*calc\(100% - clamp\(2rem, 8vw, 3\.5rem\)\)/,
+  "only overview project entries shorten their semantic attachment extent to lengthen source arms");
 assert.match(css, /@media \(max-width: 42rem\) \{[\s\S]*?\.nav-mode \.live-tracker\[data-overview="true"\] \.live-tracker-project \{[^}]*width:\s*min\(calc\(100% - 2rem\), 10rem\)/,
-  "narrow Sessions content retains its landed placement and width");
+  "narrow overview groups preserve compact row extents beside their vertical spines");
 assert.match(css, /@media \(min-width: 42\.01rem\) \{[\s\S]*?\.live-tracker\[data-overview="true"\] \{[^}]*position:\s*relative[^}]*inset-inline-end:\s*clamp\(2\.5rem, 5vw, 4rem\)[^}]*width:\s*12\.125rem[\s\S]*?\.live-tracker\[data-overview="true"\] \.live-tracker-project \{[^}]*width:\s*9rem/,
-  "desktop Sessions content retains its landed placement and width");
+  "desktop overview shifts and constrains session content while leaving vertical lane allocation untouched");
 assert.doesNotMatch(css, /\.nav-mode \.project-rail \{[^}]*width:\s*42%|\.nav-mode \.session-traversal \{[^}]*width:\s*58%/,
-  "grouping does not alter pane proportions");
+  "the visual correction removes the ornamental pane proportions");
 const railClamp = css.match(/--project-rail-width:\s*clamp\(([\d.]+)rem,\s*([\d.]+)vw,\s*([\d.]+)rem\)/);
-assert.ok(railClamp, "desktop project rail uses its existing bounded responsive proportion");
+assert.ok(railClamp, "desktop project rail uses a bounded responsive proportion");
 const [, railMinRem, railIdealVw, railMaxRem] = railClamp.map(Number);
 assert.deepEqual([railMinRem, railIdealVw, railMaxRem], [8.75, 12.5, 11],
-  "desktop project rail geometry remains unchanged");
+  "desktop project rail is modestly narrower without starving labels");
 const clampedRail = (viewport, minRem, idealVw, maxRem) =>
   Math.min(Math.max(minRem * 16, viewport * idealVw / 100), maxRem * 16);
 for (const viewport of [800, 1024, 1440]) {
   const refined = clampedRail(viewport, railMinRem, railIdealVw, railMaxRem);
   const previous = clampedRail(viewport, 9, 14, 12);
   assert.ok(refined < previous && viewport - refined > viewport - previous,
-    `the landed ${viewport}px desktop rail remains intact`);
+    `the refined ${viewport}px desktop rail returns space to session content`);
 }
 assert.match(css, /width:\s*min\(90ch, calc\(100% - var\(--project-rail-width\) - 2rem\)\)/,
-  "desktop session content geometry remains unchanged");
+  "desktop session content consumes the space released by the narrower rail");
 assert.doesNotMatch(css, /\.live-tracker-session-current\s*\{[^}]*box-shadow/,
   "current sessions keep the original understated treatment without an inset bar");
+const connectorLayerStyle = css.match(/\.session-connectors \{([^}]*)\}/)?.[1] ?? "";
+const connectorPathStyle = css.match(/\.session-connectors path \{([^}]*)\}/)?.[1] ?? "";
+assert.match(connectorLayerStyle, /position:\s*fixed[\s\S]*?pointer-events:\s*none/,
+  "the viewport relationship layer is layout-independent and cannot block full-row interaction");
+const connectorStroke = Number(connectorPathStyle.match(/stroke-width:\s*([\d.]+)px/)?.[1]);
+assert.ok(connectorStroke > 0 && connectorStroke <= 1,
+  "relationship lines are visible hairlines no thicker than one CSS pixel");
+assert.match(connectorPathStyle, /stroke:\s*#[0-9a-f]{6}[\s\S]*?stroke-linecap:\s*butt[\s\S]*?stroke-linejoin:\s*miter[\s\S]*?vector-effect:\s*non-scaling-stroke/i,
+  "relationship lines retain a restrained neutral, square, non-scaling stroke");
+assert.doesNotMatch(connectorPathStyle, /filter|animation|marker|drop-shadow|round/i,
+  "relationship lines add no glow, animation, arrows, dots, or heavy rounding");
 const overviewStyle = css.match(/\.live-tracker\[data-overview="true"\] \{([^}]*)\}/)?.[1] ?? "";
 assert.match(overviewStyle, /flex-direction:\s*column[\s\S]*?gap:\s*\.9rem/,
-  "overview preserves project order and quiet whitespace between adjacent groups");
+  "overview preserves project order and quiet separation between adjacent group spines");
 assert.doesNotMatch(overviewStyle, /background|gradient|border|box-shadow/i,
   "overview grouping adds spacing only, not ornamental chrome");
-const headingSpaceStyle = css.match(/\.live-tracker\[data-overview="true"\]::before \{([^}]*)\}/)?.[1] ?? "";
-assert.match(headingSpaceStyle, /content:\s*""[\s\S]*?flex:\s*0 0 var\(--project-heading-space, 2\.1rem\)/,
-  "Sessions mirror the fixed projects heading with whitespace only");
-assert.doesNotMatch(headingSpaceStyle, /border|background|box-shadow/i,
-  "heading allocation introduces no separator or surface");
 const overviewHeadingStyle = css.match(/\.live-tracker\[data-overview="true"\] \.live-tracker-project-name \{([^}]*)\}/)?.[1] ?? "";
 assert.match(overviewHeadingStyle, /position:\s*absolute[\s\S]*?width:\s*1px[\s\S]*?clip-path:\s*inset\(50%\)/,
   "overview project/folder headings retain semantic text while becoming visually hidden");
