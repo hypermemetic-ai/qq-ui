@@ -1,0 +1,5 @@
+# Apply only to a separate experimental dsh-v0.1.2-alpha.3 Web profile.
+# The host must resolve the local @hypermemetic-ai/qq-ui-alpha3-spike package.
+- insert:
+    - id: qq-ui-alpha3-spike
+      name: '@hypermemetic-ai/qq-ui-alpha3-spike'
