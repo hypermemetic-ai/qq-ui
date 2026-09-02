@@ -5,22 +5,31 @@ This is a separate, presentation-only Cordis package for the bounded
 `@hypermemetic-ai/qq-ui` plugin, mount `/qq`, run a presentation server, or
 change root `DESIGN.md`.
 
-## Current live-gate status (2026-09-01)
+## Current live-gate status (2026-09-02)
 
-**Blocked before host installation.** The implementation run independently
-verified the authoritative source and prepared the isolated harness, but this
-execution environment could not resolve `registry.npmjs.org` (`curl` exit 6;
-npm `ENOTFOUND`). The supplied cache contains only four alpha.3 tarballs and
-the authoritative source has neither `node_modules` nor a built CLI. Therefore:
+**Fresh attempt blocked at the exact public-package install; the live gate did
+not pass.** An architect-side probe reported npm DNS/HTTPS success, but it was
+treated as a lead rather than execution proof. The actual safety-isolated run
+successfully reverified the source and generated 253 exact host overrides, then
+found that its command sandbox had only a loopback interface and no route.
+Fixed-IP HTTPS returned `Network is unreachable`; isolated `npm ping` returned
+`ENOTFOUND`; and `npm install` failed while fetching public package
+`@deepseek-ai/cordis`. Therefore:
 
-- no exact package lock could be generated;
+- neither the spike nor host exact lock exists, and no installed-version audit
+  can run;
 - the genuine public TypeScript contract remains blocked with exit 2;
-- alpha.3 `--help`, config dumps, host boot, rendered QQ contributions, live
-  HMR, real Session, and desktop/mobile product assertions were not run;
-- no screenshots are presented as live evidence.
+- alpha.3 CLI help/config dumps, host boot, rendered QQ contributions, live HMR,
+  a real Session, and desktop/mobile product assertions were not run;
+- Playwright 1.62.1 and Chromium 151.0.7922.34 launched against an inert `data:`
+  page, proving tooling availability only; there is no live product screenshot.
 
-See [`evidence/live-gate-2026-09-01/`](evidence/live-gate-2026-09-01/) for the
-retained logs and [`SPIKE_REPORT.md`](SPIKE_REPORT.md) for the decision.
+Fresh evidence is under
+[`evidence/live-gate-2026-09-02/`](evidence/live-gate-2026-09-02/). The original
+DNS-blocked attempt remains unchanged under
+[`evidence/live-gate-2026-09-01/`](evidence/live-gate-2026-09-01/) so chronology
+is explicit. See [`SPIKE_REPORT.md`](SPIKE_REPORT.md) for the decision and exact
+environmental prerequisite.
 
 ## Exact public contract configuration
 
@@ -110,13 +119,15 @@ Concrete authoritative references at commit
   passed to profile boot.
 
 The CLI's actual `web --help` output still must be captured once the exact CLI
-can be installed; it was blocked here and is not claimed.
+can be installed; both retained implementation attempts stopped before that
+point, so executed help output is not claimed.
 
 ## Safety-guarded disposable harness
 
 Prepare a new, empty root. The script rejects any path not matching
-`/tmp/qq-alpha3-live-<id>`, verifies the exact source commit/tag, copies this
-package to a writable location, writes an exact host manifest, creates isolated
+`/tmp/qq-alpha3-live-<id>` and any symlinked/non-canonical run root, verifies the
+exact source commit/tag, copies this package to a writable location, writes an
+exact host manifest, and creates isolated
 `HOME`/`DSH_HOME`/XDG/cache paths, and emits an execution wrapper that
 removes every ambient variable except a small nonsecret locale/PATH allowlist:
 
@@ -145,7 +156,8 @@ Follow the generated sheet. Important gates:
 
 The harness never reads `/home/qqp/.local/state/qq`, never inherits ambient
 provider credentials, never binds port 3082, and never reuses a browser
-profile. The browser runner rejects port 3082 and every non-loopback URL.
+profile. The browser runner rejects port 3082, every non-loopback URL,
+symlinked/non-canonical writable paths, and paths split across run roots.
 
 ## Real-browser and HMR assertions
 
@@ -206,8 +218,9 @@ The blank precondition comes from authoritative alpha.3 source at commit
   echo, yields a paint, and only then calls `prompt`.
 
 Those source facts define the automation state machine; they do not prove this
-environment rendered it. The retained live run stopped before host installation.
-The browser runner exits 0 only for the complete UI plus exact assistant-marker
+environment rendered it. The latest retained run stopped during public-package
+installation, before a host or Session existed. The browser runner exits 0 only
+for the complete UI plus exact assistant-marker
 path, exits 2 for the structured provider/model blocks above, and exits 1 for an
 assertion defect.
 

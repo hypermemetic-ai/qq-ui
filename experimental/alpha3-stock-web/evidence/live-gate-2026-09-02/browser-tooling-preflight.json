@@ -1,0 +1,9 @@
+{
+  "status": "PASS_TOOLING_ONLY",
+  "playwrightModule": "/home/qqp/.npm/_npx/e41f203b7505f1fb/node_modules/playwright",
+  "executable": "/home/qqp/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome",
+  "browserVersion": "151.0.7922.34",
+  "title": "tooling-only",
+  "text": "Chromium tooling preflight; not product evidence",
+  "productClaims": false
+}

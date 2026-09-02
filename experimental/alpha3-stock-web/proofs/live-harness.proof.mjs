@@ -31,6 +31,40 @@ try {
   assert.equal(isolatedEnv.DSH_HOME, `${isolatedRoot}/dsh-home`);
   assert.equal(isolatedEnv.HOME, `${isolatedRoot}/os-home`);
 
+  const fileRoot = join(scratch, "file-run-root");
+  await writeFile(fileRoot, "not a directory\n");
+  const fileExec = spawnSync(process.execPath, [new URL("../scripts/live/isolated-exec.mjs", import.meta.url).pathname,
+    fileRoot, process.execPath, "-e", "process.stdout.write('must-not-run')"], { encoding: "utf8" });
+  assert.equal(fileExec.status, 2, fileExec.stderr);
+  assert.match(fileExec.stderr, /refusing non-directory/u);
+
+  const redirectedTarget = join(scratch, "redirected-run-root");
+  const linkedRunRoot = `/tmp/qq-alpha3-live-symlink-guard-${process.pid}-${Date.now()}`;
+  await mkdir(redirectedTarget, { recursive: true });
+  for (const child of ["spike", "workspace", "artifacts"]) await mkdir(join(redirectedTarget, child));
+  await symlink(redirectedTarget, linkedRunRoot, "dir");
+  try {
+    const linkedPrepare = run("scripts/live/prepare.mjs", ["--run-root", linkedRunRoot, "--source", scratch]);
+    assert.equal(linkedPrepare.status, 2, linkedPrepare.stderr);
+    assert.match(linkedPrepare.stderr, /refusing symlinked or non-canonical/u);
+
+    const linkedExec = spawnSync(process.execPath, [new URL("../scripts/live/isolated-exec.mjs", import.meta.url).pathname,
+      linkedRunRoot, process.execPath, "-e", "process.stdout.write('must-not-run')"], { encoding: "utf8" });
+    assert.equal(linkedExec.status, 2, linkedExec.stderr);
+    assert.match(linkedExec.stderr, /refusing symlinked or non-canonical/u);
+
+    const linkedBrowser = run("scripts/live/browser.mjs", [
+      "--url", "http://127.0.0.1:49152/isolated",
+      "--spike", `${linkedRunRoot}/spike`,
+      "--workspace", `${linkedRunRoot}/workspace`,
+      "--artifacts", `${linkedRunRoot}/artifacts`,
+    ]);
+    assert.equal(linkedBrowser.status, 2, linkedBrowser.stderr);
+    assert.match(linkedBrowser.stderr, /refusing symlinked or non-canonical/u);
+  } finally {
+    await rm(linkedRunRoot, { force: true });
+  }
+
   const protectedRoot = join(scratch, "browser-guard");
   const guard = run("scripts/live/browser.mjs", [
     "--url", "http://127.0.0.1:3082/protected",
@@ -58,6 +92,20 @@ try {
   ]);
   assert.equal(pathGuard.status, 2, pathGuard.stderr);
   assert.match(pathGuard.stderr, /refusing spike outside \/tmp\/qq-alpha3-live-/u);
+
+  const secondRunRoot = await mkdtemp(join(tmpdir(), "qq-alpha3-live-second-root-"));
+  try {
+    const mixedRootGuard = run("scripts/live/browser.mjs", [
+      "--url", "http://127.0.0.1:49152/isolated",
+      "--spike", `${protectedRoot}/spike`,
+      "--workspace", `${secondRunRoot}/workspace`,
+      "--artifacts", `${secondRunRoot}/artifacts`,
+    ]);
+    assert.equal(mixedRootGuard.status, 2, mixedRootGuard.stderr);
+    assert.match(mixedRootGuard.stderr, /refusing browser paths from different disposable run roots/u);
+  } finally {
+    await rm(secondRunRoot, { recursive: true, force: true });
+  }
 
   // This proof does not substitute for a live browser run. It locks the
   // alpha.3 blank -> rendered Send -> engaging/active interaction ordering.
@@ -225,4 +273,4 @@ try {
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }
-console.log("alpha3 live-harness proof passed: blank-before-Send sequencing, conditional chrome/HMR grading, protected origin, reversible probe, stock pins, drift rejection");
+console.log("alpha3 live-harness proof passed: blank-before-Send sequencing, conditional chrome/HMR grading, protected origin, canonical run roots, reversible probe, stock pins, drift rejection");

@@ -1,0 +1,33 @@
+{
+  "date": "2026-09-02",
+  "gateVerdict": "BLOCKED_BEFORE_PACKAGE_INSTALL_NOT_PASSED",
+  "reportedArchitectRegistryProbe": "PASS_LEAD_NOT_EXECUTION_PROOF",
+  "sourceProvenance": "PASS",
+  "launchSemanticsFromSource": "PASS",
+  "isolatedHarnessPreparation": "PASS",
+  "overrideSynchronization": "PASS_253_EXACT_SOURCE_DERIVED_OVERRIDES",
+  "generatedExactHostManifest": "PASS_DSH_DEPENDENCY_PLUS_253_EXACT_OVERRIDES_NO_LOCK",
+  "canonicalRunRootSymlinkDefense": "PASS_REJECTED_BEFORE_TARGET_MUTATION",
+  "ambientCredentialIsolation": "PASS_ALL_NONALLOWLIST_VARIABLES_REMOVED",
+  "executionNetworkRoute": "BLOCKED_LOOPBACK_ONLY_NETWORK_UNREACHABLE",
+  "publicPackageInstall": "BLOCKED_NPM_ENOTFOUND_AT_DEEPSEEK_AI_CORDIS",
+  "retainedExactSpikeLock": "BLOCKED_INSTALL_FAILED_NO_LOCK",
+  "retainedExactHostLock": "BLOCKED_INSTALL_FAILED_NO_LOCK",
+  "installedAlpha3Inventory": "BLOCKED_NO_INSTALLATION",
+  "strictPublicTypeContract": "BLOCKED_DEPENDENCIES_UNAVAILABLE_EXIT_2",
+  "alpha3CliHelp": "BLOCKED_CLI_UNAVAILABLE",
+  "stockAndPatchedConfigDumps": "BLOCKED_CLI_UNAVAILABLE",
+  "stockHostBoot": "BLOCKED_CLI_UNAVAILABLE",
+  "browserTooling": "PASS_TOOLING_ONLY_PLAYWRIGHT_1_62_1_CHROMIUM_151_0_7922_34",
+  "liveClientAndVisibleContributions": "BLOCKED_NO_HOST",
+  "liveHmrCleanup": "BLOCKED_NO_HOST",
+  "realDshSession": "BLOCKED_NO_HOST_BEFORE_CREDENTIAL_STAGE",
+  "realModelTurn": "BLOCKED_NO_HOST_BEFORE_CREDENTIAL_STAGE_NO_CREDENTIAL_INHERITED",
+  "desktopMobileRenderedProductAssertions": "BLOCKED_NO_HOST",
+  "liveProductScreenshots": [],
+  "toolingOnlyScreenshots": [
+    "browser-tooling-only.png"
+  ],
+  "repositoryLifecycleBundleAndHarnessProofs": "PASS",
+  "rootNpmTest": "PASS_WITH_TEMPORARY_READ_ONLY_DEPENDENCY_LINK_REMOVED"
+}

@@ -1,0 +1,21 @@
+Execution environment and bounded network diagnosis — 2026-09-02
+$ date -u
+2026-09-02T05:50:36Z
+$ uname -srmo
+Linux 6.17.0-1030-oem x86_64 GNU/Linux
+$ node --version; npm --version
+v26.7.0
+11.19.0
+$ ip -brief link
+lo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP> 
+$ ip route show
+$ getent ahosts registry.npmjs.org
+getent_exit=2
+$ curl --noproxy * --resolve registry.npmjs.org:443:104.16.4.34 --head https://registry.npmjs.org/@deepseek-ai%2fdsh
+curl: (7) Failed to connect to registry.npmjs.org:443 after 0 ms: Could not connect to server
+curl_fixed_ip_exit=7
+$ find <research>/npm-packs -maxdepth 1 -type f
+deepseek-ai-dsh-api-session-controller-0.1.2-alpha.3.tgz 173633 bytes
+deepseek-ai-dsh-client-ui-approval-0.1.2-alpha.3.tgz 8649 bytes
+deepseek-ai-dsh-client-ui-conversation-0.1.2-alpha.3.tgz 213673 bytes
+deepseek-ai-dsh-client-ui-layout-0.1.2-alpha.3.tgz 18182 bytes

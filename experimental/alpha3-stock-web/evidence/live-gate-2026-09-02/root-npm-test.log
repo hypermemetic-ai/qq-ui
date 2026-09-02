@@ -1,0 +1,37 @@
+
+> @hypermemetic-ai/qq-ui@0.0.0 test
+> node --check src/plugin.mjs && node --check assets/browser-v9.js && node scripts/prove-provider-failure-diagnostic.mjs && node scripts/prove-console-menu-contributions.mjs && node scripts/prove-workflow-selection-route.mjs && node scripts/prove-live-switch-enrichment.mjs && node scripts/prove-prompt-echo.mjs && node scripts/prove-prompt-correlation-browser.mjs && node scripts/prove-prompt-geometry-browser.mjs && node scripts/prove-server-switch-timings.mjs && node scripts/prove-snapshot-handoff-switch.mjs && node scripts/prove-transcript-projection.mjs && node scripts/prove-selective-render-cache.mjs && node scripts/prove-root-routing.mjs && node scripts/prove-visual-latency.mjs && node scripts/prove-passive-latency.mjs && node scripts/prove-reasoning-transcript-gestures.mjs && node scripts/prove-session-switcher-polish.mjs && node scripts/prove-desktop-case-rail.mjs && node scripts/prove-plugin-context-cards.mjs && node scripts/prove-strip-metadata.mjs && node scripts/prove-dashboard-usage.mjs && node scripts/prove-dashboard-live-tracker.mjs && node scripts/prove-sessions-rendered.mjs && npm run prove:alpha3-stock-web
+
+provider failure diagnostic rendering: ok
+console menu contribution proof passed
+workflow selection route proof passed
+prove-live-switch-enrichment: pass
+prompt echo proof passed
+prompt correlation browser proof passed
+prompt geometry browser proof passed (desktop + Android)
+prove-server-switch-timings: pass
+prove-snapshot-handoff-switch: pass
+transcript projection proof passed
+selective live rendering and settled cache proof passed
+prove-root-routing: stale root p95 0.6ms
+prove-root-routing: pass
+visual latency study proof passed
+passive latency ingestion, retention, and reporter proof passed
+prove-reasoning-transcript-gestures: pass
+prove-session-switcher-polish: pass
+prove-desktop-case-rail: pass
+prove-plugin-context-cards: pass
+prove-strip-metadata: pass
+dashboard usage validation, menu, rendering, and incremental proof passed
+prove-dashboard-live-tracker: pass
+sessions rendered proof passed: /home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-re-architecture-0f4c1901.workspace/.artifacts/sessions-rendered
+
+> @hypermemetic-ai/qq-ui@0.0.0 prove:alpha3-stock-web
+> node experimental/alpha3-stock-web/scripts/build.mjs && node experimental/alpha3-stock-web/proofs/lifecycle.proof.mjs && node experimental/alpha3-stock-web/proofs/bundle.proof.mjs && node experimental/alpha3-stock-web/proofs/public-types-gate.proof.mjs && node experimental/alpha3-stock-web/proofs/live-harness.proof.mjs
+
+alpha3 spike bundle built: 8120 bytes sha256:6f8ca61e9b26557eb1b17974b0f1d58f00da098b4ec1ec5c232b3fdf87d6b1fe
+alpha3 lifecycle proof passed: activation, disposal, reapplication, shared dispatch, no stale registrations
+alpha3 stock-module composition proof passed: one @hypermemetic-ai/qq-ui-alpha3-spike factory, sha256:3bebe811eebcd5c6e29fada5a5a36cbaf4e670395fbf11a10e425b78c39ecd50
+alpha3 public-type dependency gate proof passed: missing/mismatch block, exact set invokes tsc
+alpha3 live-harness proof passed: blank-before-Send sequencing, conditional chrome/HMR grading, protected origin, canonical run roots, reversible probe, stock pins, drift rejection
+npm_test_exit=0
