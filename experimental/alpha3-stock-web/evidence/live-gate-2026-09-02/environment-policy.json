@@ -1,0 +1,16 @@
+{
+  "inherited": [
+    "PATH",
+    "LANG",
+    "LC_ALL"
+  ],
+  "generated": [
+    "HOME",
+    "DSH_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "TMPDIR",
+    "npm_config_cache"
+  ],
+  "allOtherVariables": "removed"
+}

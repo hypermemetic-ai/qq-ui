@@ -1,0 +1,27 @@
+$ node scripts/live/isolated-exec.mjs "$RUN" npm ping --registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=15000
+npm notice PING https://registry.npmjs.org/
+npm error code ENOTFOUND
+npm error syscall getaddrinfo
+npm error errno ENOTFOUND
+npm error network request to https://registry.npmjs.org/-/ping failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org
+npm error network This is a problem related to network connectivity.
+npm error network In most cases you are behind a proxy or have bad network settings.
+npm error network
+npm error network If you are behind a proxy, please make sure that the 'proxy' config is set properly.  See: 'npm help config'
+npm error A complete log of this run can be found in: /tmp/qq-alpha3-live-20260902-tOGSQnO8/npm-cache/_logs/2026-09-02T05_56_23_117Z-debug-0.log
+ping exit=1
+
+$ node scripts/live/isolated-exec.mjs "$RUN" npm install --ignore-scripts --no-audit --no-fund --fetch-retries=0 --fetch-timeout=15000
+npm error code ENOTFOUND
+npm error syscall getaddrinfo
+npm error errno ENOTFOUND
+npm error network request to https://registry.npmjs.org/@deepseek-ai%2fcordis failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org
+npm error network This is a problem related to network connectivity.
+npm error network In most cases you are behind a proxy or have bad network settings.
+npm error network
+npm error network If you are behind a proxy, please make sure that the 'proxy' config is set properly.  See: 'npm help config'
+npm error A complete log of this run can be found in: /tmp/qq-alpha3-live-20260902-tOGSQnO8/npm-cache/_logs/2026-09-02T05_56_23_355Z-debug-0.log
+install exit=1
+
+package-lock.json: ABSENT
+node_modules: ABSENT

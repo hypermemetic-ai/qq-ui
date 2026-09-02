@@ -1,0 +1,18 @@
+{
+  "preparedAt": "2026-09-02T05:56:23.030Z",
+  "source": {
+    "path": "/home/qqp/.local/state/.qq-workflows-research/research-15f22e5b/dsh-alpha3",
+    "commit": "dd6322d604e00eec1ba5e0c8541159906a21094a",
+    "tag": "dsh-v0.1.2-alpha.3"
+  },
+  "runRoot": "/tmp/qq-alpha3-live-20260902-tOGSQnO8",
+  "isolation": {
+    "HOME": "/tmp/qq-alpha3-live-20260902-tOGSQnO8/os-home",
+    "DSH_HOME": "/tmp/qq-alpha3-live-20260902-tOGSQnO8/dsh-home",
+    "npmCache": "/tmp/qq-alpha3-live-20260902-tOGSQnO8/npm-cache",
+    "host": "127.0.0.1",
+    "port": 0,
+    "openBrowser": false
+  },
+  "overrides": 253
+}

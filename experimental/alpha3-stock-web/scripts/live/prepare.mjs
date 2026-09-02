@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { cpSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { disposableRunRoot } from "./run-root.mjs";
 
 const EXPECTED_COMMIT = "dd6322d604e00eec1ba5e0c8541159906a21094a";
 const EXPECTED_TAG = "dsh-v0.1.2-alpha.3";
@@ -20,12 +21,14 @@ for (let i = 2; i < process.argv.length; i += 2) {
   options[key.slice(2)] = value;
 }
 if (!options["run-root"] || !options.source) usage();
-const runRoot = resolve(options["run-root"]);
-const source = realpathSync(options.source);
-if (!runRoot.startsWith("/tmp/qq-alpha3-live-") || basename(runRoot).length <= "qq-alpha3-live-".length) {
-  usage("refusing non-disposable run root; use /tmp/qq-alpha3-live-<unique-id>");
+let runRoot;
+try {
+  runRoot = disposableRunRoot(options["run-root"], { create: true });
+} catch (error) {
+  usage(error.message);
 }
-if (existsSync(runRoot) && readdirSync(runRoot).length > 0) usage(`refusing non-empty run root: ${runRoot}`);
+const source = realpathSync(options.source);
+if (readdirSync(runRoot).length > 0) usage(`refusing non-empty run root: ${runRoot}`);
 const gitEnv = { ...process.env };
 delete gitEnv.GIT_DIR;
 delete gitEnv.GIT_WORK_TREE;

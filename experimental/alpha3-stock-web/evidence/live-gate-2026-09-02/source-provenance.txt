@@ -1,0 +1,12 @@
+Fresh source provenance — 2026-09-02
+$ env -u GIT_DIR -u GIT_WORK_TREE git -C <source> rev-parse HEAD
+dd6322d604e00eec1ba5e0c8541159906a21094a
+$ env -u GIT_DIR -u GIT_WORK_TREE git -C <source> describe --tags --exact-match HEAD
+dsh-v0.1.2-alpha.3
+$ env -u GIT_DIR -u GIT_WORK_TREE git -C <source> status --short
+$ sha256sum <research-handoff>/answer.md
+3975d4dd21f242e2d626a468ad7b5bf0719726cf956217872870aec8c1e76814  /home/qqp/.local/state/.qq-workflows-research/research-9cd44791/answer.md
+$ wc -c <research manifests>
+0 /home/qqp/.local/state/.qq-workflows-research/research-15f22e5b/evidence/manifest.jsonl
+0 /home/qqp/.local/state/.qq-workflows-research/research-9cd44791/evidence/manifest.jsonl
+0 total

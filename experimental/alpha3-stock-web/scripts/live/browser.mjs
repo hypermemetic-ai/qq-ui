@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { assertCanonicalRunPath, disposableRootForPath, disposableRunRoot } from "./run-root.mjs";
 
 const QQ_ID = "@hypermemetic-ai/qq-ui-alpha3-spike";
 const QQ_COMMAND = "qq.session.copy-numbered-identity";
@@ -34,13 +35,29 @@ if (launchUrl.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].inclu
   usage("refusing a non-loopback HTTP live target");
 }
 if (launchUrl.port === "3082") usage("refusing protected legacy port 3082");
-const spike = resolve(options.spike);
-const workspaceRoot = resolve(options.workspace);
-const artifacts = resolve(options.artifacts);
-for (const [label, path] of [["spike", spike], ["workspace", workspaceRoot], ["artifacts", artifacts]]) {
+let spike = resolve(options.spike);
+let workspaceRoot = resolve(options.workspace);
+let artifacts = resolve(options.artifacts);
+const writablePaths = [["spike", spike], ["workspace", workspaceRoot], ["artifacts", artifacts]];
+const runRoots = new Set();
+for (const [label, path] of writablePaths) {
   if (!path.startsWith("/tmp/qq-alpha3-live-")) usage(`refusing ${label} outside /tmp/qq-alpha3-live-*: ${path}`);
+  try {
+    runRoots.add(disposableRootForPath(path));
+  } catch (error) {
+    usage(error.message);
+  }
 }
-mkdirSync(artifacts, { recursive: true, mode: 0o700 });
+if (runRoots.size !== 1) usage("refusing browser paths from different disposable run roots");
+const [runRoot] = runRoots;
+try {
+  disposableRunRoot(runRoot);
+  spike = assertCanonicalRunPath(spike, runRoot, "spike");
+  workspaceRoot = assertCanonicalRunPath(workspaceRoot, runRoot, "workspace");
+  artifacts = assertCanonicalRunPath(artifacts, runRoot, "artifacts");
+} catch (error) {
+  usage(error.message);
+}
 mkdirSync(join(workspaceRoot, "workspace"), { recursive: true, mode: 0o700 });
 const require = createRequire(import.meta.url);
 const playwrightRoot = options.playwright ? resolve(options.playwright) : "playwright";

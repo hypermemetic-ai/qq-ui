@@ -1,6 +1,6 @@
 # DSH `0.1.2-alpha.3` stock-Web composition live-gate report
 
-Status date: 2026-09-01
+Status date: 2026-09-02
 
 Gate verdict: **BLOCKED before host installation; not passed**
 
@@ -12,9 +12,10 @@ The live gate does not supply enough evidence to approve an architecture
 revision. **A (stock DSH root + additive QQ Core contributions) remains the
 best next candidate**, because its public-contract and repository lifecycle
 proofs require the least QQ ownership. It is not yet live-proven. Re-run this
-same gate in an environment that can resolve npm and retain the resulting exact
-locks; only a complete host/browser/HMR/session result should trigger a proposal
-to revise root `DESIGN.md`.
+same gate in an implementation execution context with working non-loopback
+egress plus DNS/HTTPS access to npm (or a complete verifiable public cache), and
+retain the resulting exact locks. Only a complete host/browser/HMR/session
+result should trigger a proposal to revise root `DESIGN.md`.
 
 **B (QQ shell + supported stock conversation island) remains the fallback** if
 A cannot meet the product's shell needs after upstream seams are added.
@@ -34,11 +35,14 @@ was treated only as leads. Its supplied SHA-256 was independently confirmed as
 and its `evidence/manifest.jsonl` has zero lines. No executed/PASS claim was
 copied from it.
 
-Implementation evidence is retained under
-[`evidence/live-gate-2026-09-01/`](evidence/live-gate-2026-09-01/), including
-source excerpts with line numbers, DNS/npm logs, proof output, browser-tooling
-preflight, a machine-readable status matrix, and hashes. There are no host logs
-or screenshots because no host boot occurred; a fake/static substitute was not
+Implementation evidence is retained chronologically under both
+[`evidence/live-gate-2026-09-01/`](evidence/live-gate-2026-09-01/) and the fresh
+[`evidence/live-gate-2026-09-02/`](evidence/live-gate-2026-09-02/). The latter
+contains source excerpts with line numbers, isolated npm/debug logs, interface
+and route diagnosis, proof output, a machine-readable status matrix, and hashes.
+There are no host logs or live product screenshots because no host boot
+occurred. The one image is explicitly an inert-page browser-tooling preflight;
+it is not used as product evidence, and no fake/static product substitute was
 used.
 
 ## Authoritative source and launcher semantics
@@ -77,8 +81,8 @@ This is sourced, not inferred:
 
 The exact CLI's rendered `dsh web --help` remains **blocked**: no alpha.3 CLI is
 installed, the immutable source has no built `apps/cli/lib/bin.js` and no
-`node_modules`, and the registry is unavailable. The report does not pretend
-source text is executed help output.
+`node_modules`, and this execution sandbox cannot reach the registry. The report
+does not pretend source text is executed help output.
 
 ## Isolated execution attempt
 
@@ -89,6 +93,8 @@ The implementation used only task-owned paths and loopback assumptions:
   context;
 - `127.0.0.1`, OS-assigned port 0, and no browser auto-open;
 - hard refusal of protected legacy port 3082 in browser automation;
+- canonical, non-symlink run roots and browser writable paths all constrained to
+  one run root;
 - an isolated execution wrapper that drops all ambient variables except
   PATH/locale and generates only task-owned HOME/DSH_HOME/XDG/tmp/npm paths;
 - no read or copy from `/home/qqp/.local/state/qq` (only its existence was
@@ -147,46 +153,59 @@ install. The implementation made these corrections:
    transition, conditionally grades active chrome/HMR, and requires an exact
    rendered assistant marker for a model-turn pass. The repository proof locks
    that ordering and rejects private-state/controller shortcuts.
+12. Fixed a live-rerun safety defect: lexical prefix checks accepted a symlinked
+   `/tmp/qq-alpha3-live-*` root. Preparation, isolated execution, and browser
+   writable paths now require canonical non-symlink roots before mutation; the
+   browser also requires one shared run root. A regression proof verifies that
+   a symlink is rejected without creating state in its target.
 
 The configured public contract still cannot honestly be called passing. A real
 install and compiler invocation are required.
 
 ## Exact dependency/lock outcome
 
-Observed runtime tools were Node `v26.7.0`, npm `11.19.0`, and pnpm `11.18.0`.
-The package now has 35 exact dev dependencies, exact peers, and no caret/tilde
-direct pin. All DSH overrides are `0.1.2-alpha.3`.
+The fresh run observed Node `v26.7.0` and npm `11.19.0`. The package has 35 exact
+dev dependencies, exact peers, no caret/tilde direct pin, and 253 source-derived
+DSH overrides fixed at `0.1.2-alpha.3`.
 
-The independent install attempt was:
+A separate architect-side probe reported successful DNS, HTTPS metadata, and
+`npm ping`. Because it retained no package install for this execution, that was
+a useful rerun trigger but not a gate PASS. The safety-isolated implementation
+run executed:
 
 ```sh
-HOME=<task-home> npm_config_cache=<task-cache> \
-  npm install --ignore-scripts --no-audit --no-fund
+npm ping --registry=https://registry.npmjs.org \
+  --fetch-retries=0 --fetch-timeout=15000
+npm install --ignore-scripts --no-audit --no-fund \
+  --fetch-retries=0 --fetch-timeout=15000
 ```
 
-It produced no resolver output, lock, or `node_modules` before the 52-second
-bound. Independent diagnosis then showed:
+Its independently retained diagnosis is narrower and reproducible:
 
 ```text
-getent registry.npmjs.org   no address
-curl registry metadata     exit 6, Could not resolve host
-npm --loglevel silly ping   ENOTFOUND on attempts 1 and 2
+ip -brief link                         lo only
+ip route show                          empty
+getent ahosts registry.npmjs.org       exit 2
+fixed-IP HTTPS to 104.16.4.34:443      exit 7, Network is unreachable
+isolated npm ping                      exit 1, ENOTFOUND
+isolated npm install                   exit 1, ENOTFOUND at @deepseek-ai/cordis
 ```
 
-The immutable local npm cache has four alpha.3 tarballs only. No other exact
-alpha.3 installed CLI/closure was found; all discovered DSH binaries were
-`0.1.0-rc.7`. Therefore:
+The only supplied package cache remains four alpha.3 tarballs, not a complete
+closure. The failed install created neither a lock nor `node_modules`. Therefore:
 
-- `package-lock.json`: **BLOCKED, not generated**;
-- installed DSH inventory: **BLOCKED, no installation**;
-- `node scripts/check-public-types.mjs`: **BLOCKED, exit 2**;
+- spike and host `package-lock.json`: **BLOCKED, not generated**;
+- installed DSH inventory / zero-alpha.4 audit: **BLOCKED, no installation**;
+- `node scripts/check-public-types.mjs`: **BLOCKED, exit 2** with all 35 exact
+  dependencies reported absent;
 - strict TypeScript compile: **not invoked**;
-- no `--legacy-peer-deps`, `--force`, mock declarations, mock compiler, or
-  `skipLibCheck` escape was used.
+- no `--legacy-peer-deps`, `--force`, source-built substitute, mock declarations,
+  mock compiler, or `skipLibCheck` escape was used.
 
-The retained first-run path uses exact overrides to generate a lock; all repeat
-runs switch to `npm ci`. A lock must be reviewed and landed before this gate can
-pass.
+The 2026-09-01 DNS failure remains retained separately; the 2026-09-02 evidence
+adds the successful isolated preparation, bounded real install attempt, npm
+debug logs, and loopback-only route diagnosis. The first network-enabled run
+must generate and retain a reviewed lock; repeat runs then switch to `npm ci`.
 
 ## Browser and HMR path
 
@@ -197,9 +216,9 @@ Playwright 1.62.1
 Chromium 151.0.7922.34
 ```
 
-A tooling-only run opened Chromium against an intentionally unused loopback
-port and received `net::ERR_CONNECTION_REFUSED`, proving browser execution and
-cleanup—not product rendering.
+The fresh tooling-only run opened Chromium against an inert `data:` page and
+captured `browser-tooling-only.png`. This proves browser execution and screenshot
+capability—not a stock host, QQ rendering, responsive product behavior, or HMR.
 
 The maintained browser script accepts only loopback HTTP, rejects port 3082,
 and requires all writable paths below the disposable run prefix. Its sequencing
@@ -252,10 +271,10 @@ dispatch as a UI substitute, or inspect/mutate private Session state.
 |---|---|---|
 | Authoritative commit/tag | **PASS** | Independent Git output and source excerpts |
 | Exact launcher/profile semantics | **PASS from source** | Concrete files/lines above; actual `--help` blocked |
-| Isolated disposable harness | **PASS (preparation)** | Safety guards and preparation proof |
+| Isolated disposable harness | **PASS (preparation)** | Canonical-root/symlink guards and preparation proof |
 | Exact direct pins and alpha.3 overrides | **PASS (manifest)** | 35 direct pins, 253 synchronized overrides |
-| Retained exact npm lock | **BLOCKED** | DNS `ENOTFOUND`; no lock emitted |
-| Installed all-alpha.3 audit | **BLOCKED** | No package installation |
+| Retained exact npm locks | **BLOCKED** | Loopback-only sandbox; isolated npm `ENOTFOUND`; no lock emitted |
+| Installed all-alpha.3 / no-alpha.4 audit | **BLOCKED** | No package installation |
 | Genuine strict public type check | **BLOCKED (exit 2)** | Exact dependencies absent; no compiler invocation |
 | Stock profile roster and additive row dump | **BLOCKED** | Exact alpha.3 CLI unavailable |
 | Host boot / distinct origin | **BLOCKED** | Same package/CLI prerequisite |
@@ -264,7 +283,7 @@ dispatch as a UI substitute, or inspect/mutate private Session state.
 | Activation → disposal → reapplication in stock HMR | **BLOCKED** | No rendered host; automation ready |
 | Real blank DSH Session | **BLOCKED** | No host |
 | Real model turn | **BLOCKED** | No host; after that, isolated provider credential required |
-| Desktop/mobile rendered behavior | **BLOCKED** | Browser available, product host absent |
+| Desktop/mobile rendered behavior | **BLOCKED** | Browser tooling available, product host absent |
 | Legacy `/qq` preserved | **PASS (scope)** | No legacy files/config/processes changed |
 | Root `DESIGN.md` unchanged | **PASS** | File not modified |
 
@@ -321,7 +340,7 @@ navigation.
 
 ## Test status
 
-Recovery verification passed:
+Fresh 2026-09-02 repository verification passed:
 
 ```text
 node experimental/alpha3-stock-web/scripts/build.mjs
@@ -330,34 +349,36 @@ node experimental/alpha3-stock-web/proofs/bundle.proof.mjs
 node experimental/alpha3-stock-web/proofs/public-types-gate.proof.mjs
 node experimental/alpha3-stock-web/proofs/live-harness.proof.mjs
 node --check experimental/alpha3-stock-web/lib/client.js
-npm --prefix experimental/alpha3-stock-web run prove
-node experimental/alpha3-stock-web/scripts/live/prepare.mjs \
-  --run-root /tmp/qq-alpha3-live-recovery-<unique> \
-  --source <authoritative-alpha3-source>
+node --check experimental/alpha3-stock-web/scripts/live/run-root.mjs
+node --check experimental/alpha3-stock-web/scripts/live/prepare.mjs
+node --check experimental/alpha3-stock-web/scripts/live/isolated-exec.mjs
+node --check experimental/alpha3-stock-web/scripts/live/browser.mjs
 npm test
 ```
 
-The root suite used a temporary read-only link to the existing exact root
+The full root suite used a temporary read-only link to the existing root
 `node_modules` installation at `/home/qqp/projects/qq-ui/node_modules`; the link
-was removed immediately afterward. This does not revise the original retained
-`root-npm-test.log`, which accurately records that the first isolated run had no
-root dependencies. Full recovery output is retained in
-`evidence/live-gate-2026-09-01/recovery-verification.txt`.
+was removed immediately afterward. Output is retained in the new evidence set.
+The tooling preflight also launched Playwright `1.62.1` with Chromium
+`151.0.7922.34` and captured only a clearly labeled inert-page image.
 
 Still blocked, not passed:
 
 ```text
-node experimental/alpha3-stock-web/scripts/check-public-types.mjs
-  BLOCKED — exit 2; all 35 exact dev dependencies are absent from the spike.
-getent ahosts registry.npmjs.org
-  BLOCKED — exit 2; no address.
-curl --head https://registry.npmjs.org/@deepseek-ai%2fdsh
-  BLOCKED — exit 6; Could not resolve host.
+isolated npm install                 exit 1, ENOTFOUND at @deepseek-ai/cordis
+spike package-lock.json              absent
+host package-lock.json               absent
+node scripts/check-public-types.mjs  exit 2, exact dependencies absent
+strict tsc                           not invoked
+CLI/help/dumps/host/product browser  not run
 ```
 
-The dependency closure cannot be installed, so the real strict compiler, CLI
-help/config dumps, host boot, rendered browser assertions, HMR, and Session/model
-claims remain blocked. Passing repository tests do not upgrade those statuses.
+Passing repository tests and browser-tooling availability do not upgrade the
+strict public type, installed closure, host, HMR, Session, viewport, or model
+statuses. No credential was inherited or inspected. The run stopped before the
+credential stage, so the immediate requirement is registry-capable execution;
+a credential intentionally entered into the isolated profile is a later,
+separate requirement only for the real model-turn assertion.
 
 ## Rerun/decision gate
 

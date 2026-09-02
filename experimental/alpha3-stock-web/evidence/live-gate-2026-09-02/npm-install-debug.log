@@ -1,0 +1,179 @@
+0 verbose cli /home/linuxbrew/.linuxbrew/Cellar/node/26.7.0/bin/node /home/qqp/.local/bin/npm
+1 info using npm@11.19.0
+2 info using node@v26.7.0
+3 silly config load:file:/home/linuxbrew/.linuxbrew/lib/node_modules/npm/npmrc
+4 silly config load:file:/tmp/qq-alpha3-live-20260902-tOGSQnO8/spike/.npmrc
+5 silly config load:file:/tmp/qq-alpha3-live-20260902-tOGSQnO8/os-home/.npmrc
+6 silly config load:file:/home/linuxbrew/.linuxbrew/etc/npmrc
+7 verbose title npm install
+8 verbose argv "install" "--ignore-scripts" "--no-audit" "--no-fund" "--fetch-retries" "0" "--fetch-timeout" "15000"
+9 verbose logfile logs-max:10 dir:/tmp/qq-alpha3-live-20260902-tOGSQnO8/npm-cache/_logs/2026-09-02T05_56_23_355Z-
+10 verbose logfile /tmp/qq-alpha3-live-20260902-tOGSQnO8/npm-cache/_logs/2026-09-02T05_56_23_355Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4395630592 maxSize:1098907648 maxEntrySize:549453824
+13 silly idealTree buildDeps
+14 silly fetch manifest @deepseek-ai/cordis@4.0.2
+15 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fcordis cache-miss
+16 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fcordis attempt 1 failed with ENOTFOUND
+17 silly fetch manifest @deepseek-ai/dsh-api-gateway@0.1.2-alpha.3
+18 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-api-gateway cache-miss
+19 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-api-gateway attempt 1 failed with ENOTFOUND
+20 silly fetch manifest @deepseek-ai/dsh-api-remotes@0.1.2-alpha.3
+21 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-api-remotes cache-miss
+22 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-api-remotes attempt 1 failed with ENOTFOUND
+23 silly fetch manifest @deepseek-ai/dsh-api-session-controller@0.1.2-alpha.3
+24 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-api-session-controller cache-miss
+25 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-api-session-controller attempt 1 failed with ENOTFOUND
+26 silly fetch manifest @deepseek-ai/dsh-api-workspace-controller@0.1.2-alpha.3
+27 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-api-workspace-controller cache-miss
+28 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-api-workspace-controller attempt 1 failed with ENOTFOUND
+29 silly fetch manifest @deepseek-ai/dsh-attachment@0.1.2-alpha.3
+30 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-attachment cache-miss
+31 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-attachment attempt 1 failed with ENOTFOUND
+32 silly fetch manifest @deepseek-ai/dsh-client-connection@0.1.2-alpha.3
+33 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-client-connection cache-miss
+34 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-client-connection attempt 1 failed with ENOTFOUND
+35 silly fetch manifest @deepseek-ai/dsh-client-store@0.1.2-alpha.3
+36 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-client-store cache-miss
+37 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-client-store attempt 1 failed with ENOTFOUND
+38 silly fetch manifest @deepseek-ai/dsh-client-ui-commands@0.1.2-alpha.3
+39 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-commands cache-miss
+40 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-commands attempt 1 failed with ENOTFOUND
+41 silly fetch manifest @deepseek-ai/dsh-client-ui-conversation@0.1.2-alpha.3
+42 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-conversation cache-miss
+43 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-conversation attempt 1 failed with ENOTFOUND
+44 silly fetch manifest @deepseek-ai/dsh-client-ui-input-trigger@0.1.2-alpha.3
+45 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-input-trigger cache-miss
+46 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-input-trigger attempt 1 failed with ENOTFOUND
+47 silly fetch manifest @deepseek-ai/dsh-client-ui-layout@0.1.2-alpha.3
+48 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-layout cache-miss
+49 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-layout attempt 1 failed with ENOTFOUND
+50 silly fetch manifest @deepseek-ai/dsh-client-ui-renderer@0.1.2-alpha.3
+51 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-renderer cache-miss
+52 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-renderer attempt 1 failed with ENOTFOUND
+53 silly fetch manifest @deepseek-ai/dsh-client-ui-session@0.1.2-alpha.3
+54 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-session cache-miss
+55 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-session attempt 1 failed with ENOTFOUND
+56 silly fetch manifest @deepseek-ai/dsh-client-ui-settings@0.1.2-alpha.3
+57 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-settings cache-miss
+58 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-settings attempt 1 failed with ENOTFOUND
+59 silly fetch manifest @deepseek-ai/dsh-client-ui-slots@0.1.2-alpha.3
+60 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-slots cache-miss
+61 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-slots attempt 1 failed with ENOTFOUND
+62 silly fetch manifest @deepseek-ai/dsh-client-ui-theme@0.1.2-alpha.3
+63 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-theme cache-miss
+64 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-client-ui-theme attempt 1 failed with ENOTFOUND
+65 silly fetch manifest @deepseek-ai/dsh-commands@0.1.2-alpha.3
+66 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-commands cache-miss
+67 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-commands attempt 1 failed with ENOTFOUND
+68 silly fetch manifest @deepseek-ai/dsh-cordis-host-runner@0.1.2-alpha.3
+69 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-cordis-host-runner cache-miss
+70 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-cordis-host-runner attempt 1 failed with ENOTFOUND
+71 silly fetch manifest @deepseek-ai/dsh-credentials@0.1.2-alpha.3
+72 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-credentials cache-miss
+73 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-credentials attempt 1 failed with ENOTFOUND
+74 silly fetch manifest @deepseek-ai/dsh-file-reference@0.1.2-alpha.3
+75 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-file-reference cache-miss
+76 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-file-reference attempt 1 failed with ENOTFOUND
+77 silly fetch manifest @deepseek-ai/dsh-host-directory-picker@0.1.2-alpha.3
+78 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-host-directory-picker cache-miss
+79 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-host-directory-picker attempt 1 failed with ENOTFOUND
+80 silly fetch manifest @deepseek-ai/dsh-host-plugin-inventory@0.1.2-alpha.3
+81 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-host-plugin-inventory cache-miss
+82 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-host-plugin-inventory attempt 1 failed with ENOTFOUND
+83 silly fetch manifest @deepseek-ai/dsh-jobs@0.1.2-alpha.3
+84 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-jobs cache-miss
+85 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-jobs attempt 1 failed with ENOTFOUND
+86 silly fetch manifest @deepseek-ai/dsh-llm-retry@0.1.2-alpha.3
+87 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-llm-retry cache-miss
+88 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-llm-retry attempt 1 failed with ENOTFOUND
+89 silly fetch manifest @deepseek-ai/dsh-session@0.1.2-alpha.3
+90 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-session cache-miss
+91 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-session attempt 1 failed with ENOTFOUND
+92 silly fetch manifest @deepseek-ai/dsh-session-projection@0.1.2-alpha.3
+93 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-session-projection cache-miss
+94 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-session-projection attempt 1 failed with ENOTFOUND
+95 silly fetch manifest @deepseek-ai/dsh-session-reference@0.1.2-alpha.3
+96 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-session-reference cache-miss
+97 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-session-reference attempt 1 failed with ENOTFOUND
+98 silly fetch manifest @deepseek-ai/dsh-settings@0.1.2-alpha.3
+99 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-settings cache-miss
+100 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-settings attempt 1 failed with ENOTFOUND
+101 silly fetch manifest @deepseek-ai/dsh-subagent@0.1.2-alpha.3
+102 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-subagent cache-miss
+103 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-subagent attempt 1 failed with ENOTFOUND
+104 silly fetch manifest @deepseek-ai/dsh-tool-todo@0.1.2-alpha.3
+105 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-tool-todo cache-miss
+106 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-tool-todo attempt 1 failed with ENOTFOUND
+107 silly fetch manifest @deepseek-ai/dsh-workspace@0.1.2-alpha.3
+108 silly packumentCache full:https://registry.npmjs.org/@deepseek-ai%2fdsh-workspace cache-miss
+109 http fetch GET https://registry.npmjs.org/@deepseek-ai%2fdsh-workspace attempt 1 failed with ENOTFOUND
+110 silly fetch manifest @types/react@18.3.24
+111 silly packumentCache full:https://registry.npmjs.org/@types%2freact cache-miss
+112 http fetch GET https://registry.npmjs.org/@types%2freact attempt 1 failed with ENOTFOUND
+113 silly fetch manifest react@18.3.1
+114 silly packumentCache full:https://registry.npmjs.org/react cache-miss
+115 http fetch GET https://registry.npmjs.org/react attempt 1 failed with ENOTFOUND
+116 silly fetch manifest typescript@6.0.3
+117 silly packumentCache full:https://registry.npmjs.org/typescript cache-miss
+118 http fetch GET https://registry.npmjs.org/typescript attempt 1 failed with ENOTFOUND
+119 silly placeDep ROOT @deepseek-ai/cordis@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 4.0.2
+120 silly placeDep ROOT @deepseek-ai/dsh-api-gateway@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+121 silly placeDep ROOT @deepseek-ai/dsh-api-remotes@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+122 silly placeDep ROOT @deepseek-ai/dsh-api-session-controller@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+123 silly placeDep ROOT @deepseek-ai/dsh-api-workspace-controller@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+124 silly placeDep ROOT @deepseek-ai/dsh-attachment@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+125 silly placeDep ROOT @deepseek-ai/dsh-client-connection@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+126 silly placeDep ROOT @deepseek-ai/dsh-client-store@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+127 silly placeDep ROOT @deepseek-ai/dsh-client-ui-commands@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+128 silly placeDep ROOT @deepseek-ai/dsh-client-ui-conversation@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+129 silly placeDep ROOT @deepseek-ai/dsh-client-ui-input-trigger@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+130 silly placeDep ROOT @deepseek-ai/dsh-client-ui-layout@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+131 silly placeDep ROOT @deepseek-ai/dsh-client-ui-renderer@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+132 silly placeDep ROOT @deepseek-ai/dsh-client-ui-session@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+133 silly placeDep ROOT @deepseek-ai/dsh-client-ui-settings@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+134 silly placeDep ROOT @deepseek-ai/dsh-client-ui-slots@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+135 silly placeDep ROOT @deepseek-ai/dsh-client-ui-theme@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+136 silly placeDep ROOT @deepseek-ai/dsh-commands@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+137 silly placeDep ROOT @deepseek-ai/dsh-cordis-host-runner@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+138 silly placeDep ROOT @deepseek-ai/dsh-credentials@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+139 silly placeDep ROOT @deepseek-ai/dsh-file-reference@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+140 silly placeDep ROOT @deepseek-ai/dsh-host-directory-picker@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+141 silly placeDep ROOT @deepseek-ai/dsh-host-plugin-inventory@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+142 silly placeDep ROOT @deepseek-ai/dsh-jobs@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+143 silly placeDep ROOT @deepseek-ai/dsh-llm-retry@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+144 silly placeDep ROOT @deepseek-ai/dsh-session@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+145 silly placeDep ROOT @deepseek-ai/dsh-session-projection@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+146 silly placeDep ROOT @deepseek-ai/dsh-session-reference@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+147 silly placeDep ROOT @deepseek-ai/dsh-settings@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+148 silly placeDep ROOT @deepseek-ai/dsh-subagent@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+149 silly placeDep ROOT @deepseek-ai/dsh-tool-todo@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+150 silly placeDep ROOT @deepseek-ai/dsh-workspace@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 0.1.2-alpha.3
+151 silly placeDep ROOT @types/react@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 18.3.24
+152 silly placeDep ROOT react@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 18.3.1
+153 silly placeDep ROOT typescript@ OK for: @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike want: 6.0.3
+154 verbose type system
+155 verbose stack FetchError: request to https://registry.npmjs.org/@deepseek-ai%2fcordis failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org
+155 verbose stack     at ClientRequest.<anonymous> (/home/linuxbrew/.linuxbrew/lib/node_modules/npm/node_modules/minipass-fetch/lib/index.js:130:14)
+155 verbose stack     at ClientRequest.emit (node:events:514:20)
+155 verbose stack     at emitErrorEvent (node:_http_client:114:11)
+155 verbose stack     at _destroy (node:_http_client:1169:9)
+155 verbose stack     at onSocketNT (node:_http_client:1190:5)
+155 verbose stack     at process.processTicksAndRejections (node:internal/process/task_queues:91:21)
+156 error code ENOTFOUND
+157 error syscall getaddrinfo
+158 error errno ENOTFOUND
+159 error network request to https://registry.npmjs.org/@deepseek-ai%2fcordis failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org
+160 error network This is a problem related to network connectivity.
+160 error network In most cases you are behind a proxy or have bad network settings.
+160 error network
+160 error network If you are behind a proxy, please make sure that the 'proxy' config is set properly.  See: 'npm help config'
+161 silly unfinished npm timer reify 1788328583499
+162 silly unfinished npm timer reify:loadTrees 1788328583502
+163 verbose cwd /tmp/qq-alpha3-live-20260902-tOGSQnO8/spike
+164 verbose os Linux 6.17.0-1030-oem
+165 verbose node v26.7.0
+166 verbose npm  v11.19.0
+167 verbose exit 1
+168 verbose code 1
+169 error A complete log of this run can be found in: /tmp/qq-alpha3-live-20260902-tOGSQnO8/npm-cache/_logs/2026-09-02T05_56_23_355Z-debug-0.log

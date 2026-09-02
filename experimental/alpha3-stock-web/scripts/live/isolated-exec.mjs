@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { join } from "node:path";
+import { disposableRunRoot } from "./run-root.mjs";
 
 const [runArg, command, ...args] = process.argv.slice(2);
 if (runArg === undefined || command === undefined) {
   console.error("usage: node scripts/live/isolated-exec.mjs </tmp/qq-alpha3-live-id> <command> [...args]");
   process.exit(2);
 }
-const runRoot = resolve(runArg);
-if (!runRoot.startsWith("/tmp/qq-alpha3-live-") || basename(runRoot).length <= "qq-alpha3-live-".length) {
-  console.error(`refusing non-disposable run root: ${runRoot}`);
+let runRoot;
+try {
+  runRoot = disposableRunRoot(runArg, { create: true });
+} catch (error) {
+  console.error(error.message);
   process.exit(2);
 }
 const home = join(runRoot, "os-home");
