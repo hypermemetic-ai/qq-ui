@@ -16,13 +16,6 @@ const THEME = {
   "--dsw-alias-brand-primary": { light: "#000000", dark: "#ffffff" },
   "--dsw-alias-label-primary": { light: "#000000", dark: "#ffffff" },
 };
-const STOCK_THEME = {
-  "--dsw-alias-bg-base": { light: "rgb(255, 255, 255)", dark: "rgb(21, 21, 23)" },
-  "--dsw-alias-bg-layer-1": { light: "rgb(255, 255, 255)", dark: "rgb(35, 35, 36)" },
-  "--dsw-alias-border-l1": { light: "rgba(0, 0, 0, 0.04)", dark: "rgba(255, 255, 255, 0.06)" },
-  "--dsw-alias-brand-primary": { light: "rgb(15, 17, 21)", dark: "rgb(249, 250, 251)" },
-  "--dsw-alias-label-primary": { light: "rgb(15, 17, 21)", dark: "rgb(249, 250, 251)" },
-};
 function usage(message) {
   if (message) console.error(message);
   console.error("usage: node scripts/live/browser.mjs --url <printed dsh launch URL> --spike </tmp/.../spike> --workspace </tmp/.../workspace> --artifacts </tmp/.../artifacts> [--playwright <module-dir>]");
@@ -108,7 +101,11 @@ async function connectWorkspace() {
 }
 async function currentTheme() {
   return await page.evaluate((keys) => {
-    const style = getComputedStyle(document.body);
+    // The alpha.3 ThemePresenter projects active theme tokens as inline body
+    // declarations. Computed-style custom-property serialization reflects the
+    // stylesheet cascade after disposal; it is not the boundary that proves
+    // whether the presenter removed QQ's override.
+    const style = document.body.style;
     return {
       mode: document.body.hasAttribute("data-ds-dark-theme") ? "dark" : "light",
       values: Object.fromEntries(keys.map((key) => [key, style.getPropertyValue(key).trim()])),
@@ -117,8 +114,10 @@ async function currentTheme() {
 }
 async function assertTheme(expectedQQ) {
   const theme = await currentTheme();
-  for (const [key, modes] of Object.entries(expectedQQ ? THEME : STOCK_THEME)) {
-    assert.equal(theme.values[key].toLowerCase(), modes[theme.mode], `${key} ${expectedQQ ? "QQ" : "stock"} ${theme.mode} token`);
+  for (const [key, modes] of Object.entries(THEME)) {
+    const expected = expectedQQ ? modes[theme.mode] : "";
+    assert.equal(theme.values[key].toLowerCase(), expected,
+      `${key} ${expectedQQ ? `QQ ${theme.mode} inline token` : "QQ inline override removed"}`);
   }
   return theme;
 }
@@ -253,7 +252,7 @@ async function transitionSessionThroughComposer() {
   const marker = `QQ_ALPHA3_LIVE_MODEL_TURN_${Date.now()}`;
   const prompt = `Reply with exactly ${marker} and nothing else.`;
   await composer.fill(prompt);
-  const send = page.getByRole("button", { name: "Send", exact: true });
+  const send = page.getByRole("button", { name: "Send message", exact: true });
   await send.waitFor({ timeout: 15_000 });
   const sendDeadline = Date.now() + 5_000;
   do {

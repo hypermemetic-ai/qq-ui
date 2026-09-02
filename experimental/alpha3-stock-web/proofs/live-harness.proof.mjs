@@ -112,7 +112,7 @@ try {
   );
   const blocked = transition.indexOf('status: "BLOCKED_PROVIDER_CONFIGURATION"');
   const fill = transition.indexOf("await composer.fill(prompt)");
-  const send = transition.indexOf('getByRole("button", { name: "Send"');
+  const send = transition.indexOf('getByRole("button", { name: "Send message", exact: true })');
   const sendDisabled = transition.indexOf("await send.isDisabled()");
   const sendBlocked = transition.indexOf('status: "BLOCKED_PROVIDER_CONFIGURATION"', blocked + 1);
   const click = transition.indexOf("await send.click");
@@ -123,6 +123,8 @@ try {
     "disabled rendered Send must block instead of timing out or fabricating a submission");
   assert.ok(click < chromeWait,
     "transition must click an enabled rendered Send before grading active chrome");
+  assert.ok(!transition.includes('name: "Send", exact: true'),
+    "composer locator must not regress to a whole-string mismatch for alpha.3's Send message label");
   for (const forbidden of ["page.evaluate", "__DSH", ".dispatch(", ".controller", "getSnapshot(", "promptAttempted"]) {
     assert.ok(!transition.includes(forbidden), `transition must not use private state path ${forbidden}`);
   }
@@ -156,6 +158,17 @@ try {
   assert.ok(modelTurn.includes('"BLOCKED_PROVIDER_OR_CREDENTIAL"')
     && modelTurn.includes('"BLOCKED_NO_ASSISTANT_RESPONSE"'),
   "provider failure or absent response must remain blocked, not pass");
+
+  const themeInspection = browserHarness.slice(
+    browserHarness.indexOf("async function currentTheme"),
+    browserHarness.indexOf("async function assertBlankChromeHidden"),
+  );
+  assert.ok(themeInspection.includes("const style = document.body.style"),
+    "theme cleanup must inspect the presenter's inline declaration boundary");
+  assert.ok(themeInspection.includes('const expected = expectedQQ ? modes[theme.mode] : ""'),
+    "stock restoration must require QQ inline overrides to be removed");
+  assert.ok(!browserHarness.includes("const STOCK_THEME") && !themeInspection.includes("getComputedStyle(document.body)"),
+    "theme cleanup must not compare specified custom properties with guessed resolved stock colors");
 
   const disposal = browserHarness.slice(
     browserHarness.indexOf("async function waitForDisposal"),
