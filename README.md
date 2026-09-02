@@ -1,53 +1,44 @@
 # `@hypermemetic-ai/qq-ui`
 
-Server-rendered Cordis plugin for the qq operator console. This is a private ES module package; its root entry point is [`src/plugin.mjs`](src/plugin.mjs), and it depends on the sibling package `@hypermemetic-ai/qq-core` through `file:../qq-core`.
+Private ESM package providing the server-rendered Cordis plugin for the qq operator console. The package entry point is [`src/plugin.mjs`](src/plugin.mjs); it also exposes explicit HTTP, rendering, and Markdown module boundaries.
 
-## Run the established checks
+## Setup and checks
 
-The package defines no standalone start, build, or development script. Ensure the sibling `../qq-core` dependency is available before installing dependencies with your chosen Node package manager.
+The package declares `@hypermemetic-ai/qq-core` as `file:../qq-core`, so that sibling dependency must be available when dependencies are installed. No standalone `start` or `dev` script is declared.
 
-Run the complete syntax-and-proof suite:
+Run the complete established check suite with:
 
 ```sh
 npm test
 ```
 
-Focused package scripts are also available:
+This syntax-checks [`src/plugin.mjs`](src/plugin.mjs) and [`assets/browser-v9.js`](assets/browser-v9.js), runs the repository proof scripts, and finishes with the experimental stock-web build and proofs. Useful narrower package scripts are:
 
 ```sh
 npm run prove:sessions-rendered
 npm run prove:prompt-echo
 npm run prove:prompt-correlation
 npm run prove:prompt-geometry
+npm run prove:alpha3-stock-web
 npm run latency:report
 ```
 
-See [`package.json`](package.json) for the exact commands and the full proof sequence.
+See [`package.json`](package.json) for the exact commands and dependency declarations.
 
-## System map
+## Repository map
 
-- [`src/plugin.mjs`](src/plugin.mjs) — package main and root export; start here for Cordis plugin integration.
-- [`src/http-app.mjs`](src/http-app.mjs) — `./http` export and the most widely imported module in the repository; start here for HTTP and route work.
-- [`src/render.mjs`](src/render.mjs) — `./render` export and a central, frequently changed module for rendered output.
-- [`src/markdown.mjs`](src/markdown.mjs) — `./markdown` export.
-- [`assets/browser-v9.js`](assets/browser-v9.js) and [`assets/console.css`](assets/console.css) — the browser file checked by the test script and the frequently changed console stylesheet.
-- [`scripts/`](scripts/prove-sessions-rendered.mjs) — executable proof scripts. Their focused names are the best available routing guide for validation.
+- **Package integration:** [`src/plugin.mjs`](src/plugin.mjs) is both `main` and the root export.
+- **Server boundary:** [`src/http-app.mjs`](src/http-app.mjs) is exported as `./http` and has the highest relative-module fan-in in the repository.
+- **Output boundaries:** [`src/render.mjs`](src/render.mjs) and [`src/markdown.mjs`](src/markdown.mjs) are exported as `./render` and `./markdown`. `render.mjs` is also a high-change, high-fan-in file, so rendering edits merit the full test suite.
+- **Browser presentation:** [`assets/browser-v9.js`](assets/browser-v9.js) and [`assets/console.css`](assets/console.css) are the most actively changed tracked browser/CSS files; `npm test` directly syntax-checks `browser-v9.js`.
+- **Executable proofs:** [`scripts/`](scripts/prove-sessions-rendered.mjs) contains the proof programs composed by `npm test`. Use the named package scripts above where one matches the change, then run the complete suite.
+- **Experimental stock web:** [`experimental/alpha3-stock-web/README.md`](experimental/alpha3-stock-web/README.md) is the entry point for that subtree; its build and proofs are wired into `npm test` through `prove:alpha3-stock-web`.
 
-## Route common changes
-
-| Change | Start with | Relevant proof or report |
-| --- | --- | --- |
-| Plugin or package surface | [`package.json`](package.json), [`src/plugin.mjs`](src/plugin.mjs) | Full `npm test` |
-| HTTP or root/workflow routing | [`src/http-app.mjs`](src/http-app.mjs) | [`prove-root-routing.mjs`](scripts/prove-root-routing.mjs), [`prove-workflow-selection-route.mjs`](scripts/prove-workflow-selection-route.mjs) |
-| Server-rendered sessions or transcript projection | [`src/render.mjs`](src/render.mjs) | [`prove-sessions-rendered.mjs`](scripts/prove-sessions-rendered.mjs), [`prove-transcript-projection.mjs`](scripts/prove-transcript-projection.mjs) |
-| Browser prompt behavior or geometry | [`assets/browser-v9.js`](assets/browser-v9.js), [`assets/console.css`](assets/console.css) | [`prove-prompt-echo.mjs`](scripts/prove-prompt-echo.mjs), [`prove-prompt-correlation-browser.mjs`](scripts/prove-prompt-correlation-browser.mjs), [`prove-prompt-geometry-browser.mjs`](scripts/prove-prompt-geometry-browser.mjs) |
-| UI latency | [`src/latency-store.mjs`](src/latency-store.mjs), [`scripts/report-ui-latency.mjs`](scripts/report-ui-latency.mjs) | `npm run latency:report`, [`prove-visual-latency.mjs`](scripts/prove-visual-latency.mjs), [`prove-passive-latency.mjs`](scripts/prove-passive-latency.mjs) |
-
-Run the full suite after a focused proof: `npm test` is the repository's only aggregate test command.
+The package boundary is intentionally explicit: it is private, uses ESM, and publishes only `.`, `./http`, `./render`, and `./markdown`. Treat [`package.json`](package.json) and those four target modules as the canonical starting points for public-surface changes.
 
 ## Further orientation
 
-- [`wiki/operator-console.md`](wiki/operator-console.md) — operator-console detail.
-- [`wiki/latency-roadmap.md`](wiki/latency-roadmap.md) — latency-focused detail.
-- [`wiki/index.md`](wiki/index.md) — documentation index.
-- [`vendor-pins.json`](vendor-pins.json) — tracked vendor pin data; corresponding licenses live under [`vendor/`](vendor/HTMX-LICENSE).
+- [`DESIGN.md`](DESIGN.md) — repository design notes
+- [`wiki/operator-console.md`](wiki/operator-console.md) — operator-console documentation
+- [`wiki/latency-roadmap.md`](wiki/latency-roadmap.md) — latency roadmap
+- [`experimental/alpha3-stock-web/SPIKE_REPORT.md`](experimental/alpha3-stock-web/SPIKE_REPORT.md) — experimental spike report
