@@ -1,0 +1,251 @@
+Authoritative checkout: dsh-v0.1.2-alpha.3 @ dd6322d604e00eec1ba5e0c8541159906a21094a
+
+### apps/cli/src/args.ts:4-14, 120-168
+     4	 * The launcher parses only what it owns — which profile to boot, which extra
+     5	 * patch overlays to apply, and the config dumps — and hands **everything after
+     6	 * its own flags** to the booted tree verbatim, where injected app plugins parse
+     7	 * their own flag families and print their own `--help` (see
+     8	 * `@deepseek-ai/dsh-cmdline`). Launcher flags therefore come first: the first
+     9	 * token this parser does not recognize starts the inner arguments, so
+    10	 * `dsh --profile tui --resume abc` boots the tui profile with `--resume abc`,
+    11	 * and `dsh --profile web -h` prints the web app's help, not this one's.
+    12	 *
+    13	 * `web` is a hardcoded alias for `--profile web`; `plugin` manages a profile's
+    14	 * plugin dependencies by forwarding to pnpm.
+   120	    .description('dsh: boot a DeepSeek Harness profile — an ordered stack of plugin-bundle patch layers under your own overrides.')
+   121	    .addHelpText('after', HELP_EXAMPLES)
+   122	    .exitOverride()
+   123	    // The launcher's flags come first and end at the first token it does not
+   124	    // know; everything from there on belongs to the booted app, including
+   125	    // its -h. `dsh -h` with no profile still prints this help, below.
+   126	    .helpOption(false)
+   127	    .allowUnknownOption()
+   128	    .passThroughOptions()
+   129	    .enablePositionalOptions()
+   130	    .argument('[args...]', 'arguments for the booted profile\'s app (see: dsh --profile <name> --help)')
+   131	    .option('--profile <name>', 'the profile under $DSH_HOME/profiles to boot')
+   132	    .option('--patch <path>', 'extra patch-list overlay applied after the profile layer (repeatable)', collect)
+   133	    .option('--dump-config', 'print the composed profile tree and exit')
+   134	    .option('--dump-default-config', 'print the profile tree without its user layer or --patch overlays and exit')
+   135	    .action((args: string[], options: BootOptions & { profile?: string }) => {
+   136	      // With the app owning -h, the launcher's own help is what a bare
+   137	      // `dsh -h` (no profile to hand it to) must print.
+   138	      if (options.profile === undefined) {
+   139	        if (args.some(argument => argument === '-h' || argument === '--help')) program.help()
+   140	        program.error('error: --profile <name> is required')
+   141	      }
+   142	      const profile = options.profile
+   143	      if (profile === '') program.error('error: --profile needs a name')
+   144	      resolved = resolveBoot(program, profile, options, args)
+   145	    })
+   146	
+   147	  /** Reject parent options supplied before a subcommand. */
+   148	  const rejectParentOptions = (command: string): void => {
+   149	    const parent = program.opts<BootOptions & { profile?: string }>()
+   150	    if (parent.profile !== undefined || parent.patch !== undefined
+   151	      || parent.dumpConfig !== undefined || parent.dumpDefaultConfig !== undefined) {
+   152	      program.error(`error: ${command} takes none of parent --profile, --patch, --dump-config, or --dump-default-config`)
+   153	    }
+   154	  }
+   155	
+   156	  const web = program.command('web').description('boot the web profile (alias of --profile web); the web app\'s own flags follow')
+   157	  web
+   158	    .helpOption(false)
+   159	    .allowUnknownOption()
+   160	    .passThroughOptions()
+   161	    .enablePositionalOptions()
+   162	    .argument('[args...]', 'arguments for the web app (see: dsh web --help)')
+   163	    .option('--patch <path>', 'extra patch-list overlay applied after the profile layer (repeatable)', collect)
+   164	    .option('--dump-config', 'print the composed web-profile tree (with the user layer and any --patch) and exit')
+   165	    .option('--dump-default-config', 'print the web profile\'s bundle layers (no user layer) and exit')
+   166	    .action((args: string[], options: BootOptions) => {
+   167	      rejectParentOptions('web')
+   168	      resolved = resolveBoot(web, 'web', options, args)
+
+### packages/boot/app-boot/src/profile.ts:122-145, 805-843
+   122	 * Resolve a profile's directory under the Harness home.
+   123	 * @param name - the profile name (`dsh --profile <name>`).
+   124	 * @param home - the Harness home; defaults to {@link resolveDshHome}.
+   125	 * @returns the absolute profile directory (which may not exist yet).
+   126	 */
+   127	export function resolveProfileDir(name: string, home: string = resolveDshHome()): string {
+   128	  if (name === '' || name.includes('/') || name.includes('\\') || name === '.' || name === '..'
+   129	    // The launcher-maintained flat module fallback lives at this sibling path.
+   130	    || name === 'node_modules') {
+   131	    throw new Error(`dsh: invalid profile name ${JSON.stringify(name)}`)
+   132	  }
+   133	  return join(home, PROFILES_DIR, name)
+   134	}
+   135	
+   136	/** The shipped profile templates auto-initialized on first use, by name. */
+   137	export const PROFILE_TEMPLATES: Record<string, ProfileTemplate> = {
+   138	  acp: {
+   139	    bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-acp-app'],
+   140	    patchReload: 'startup',
+   141	  },
+   142	  web: {
+   143	    bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
+   144	    patchReload: 'live',
+   145	  },
+   805	export function loadProfile(
+   806	  binName: string, name: string, installAnchor: string, home: string = resolveDshHome(),
+   807	  options: { userLayer?: boolean } = {},
+   808	): Profile {
+   809	  const dir = resolveProfileDir(name, home)
+   810	  if (!existsSync(join(dir, 'package.json'))) {
+   811	    const template = PROFILE_TEMPLATES[name]
+   812	    if (template === undefined) {
+   813	      throw new Error(
+   814	        `${binName}: profile ${JSON.stringify(name)} does not exist; create it with 'dsh plugin --profile ${name} add <package>'`,
+   815	      )
+   816	    }
+   817	    initProfile(dir, template.bundles, template.patchReload)
+   818	  }
+   819	  const manifest = normalizeShippedProfile(name, dir, readProfileManifest(binName, dir))
+   820	  // A hand-written profile manifest may omit the dsh section entirely.
+   821	  const bundles = manifest.dsh?.profile?.bundles ?? []
+   822	  const rawPatchReload: unknown = manifest.dsh?.profile?.patchReload
+   823	  if (rawPatchReload !== undefined && rawPatchReload !== 'live' && rawPatchReload !== 'startup') {
+   824	    throw new Error(
+   825	      `${binName}: profile manifest ${join(dir, 'package.json')} dsh.profile.patchReload must be "live" or "startup"`,
+   826	    )
+   827	  }
+   828	  const patchReload = rawPatchReload ?? DEFAULT_PROFILE_PATCH_RELOAD
+   829	  const layers = bundles.map((packageName): ProfileLayer => {
+   830	    const packageDir = resolveBundleDir(binName, packageName, installAnchor, dir)
+   831	    const bundleManifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as ProfileManifest
+   832	    const declared = bundleManifest.dsh?.bundle?.patch
+   833	    if (declared === undefined) {
+   834	      throw new Error(`${binName}: profile bundle ${JSON.stringify(packageName)} declares no dsh.bundle in its package.json`)
+   835	    }
+   836	    const patchPath = join(packageDir, declared)
+   837	    return { packageName, packageDir, patchPath, patches: loadOverlayPatches(binName, patchPath) }
+   838	  })
+   839	  const patchPath = join(dir, PROFILE_PATCH_FILENAME)
+   840	  const patches = options.userLayer !== false && existsSync(patchPath)
+   841	    ? loadOverlayPatches(binName, patchPath)
+   842	    : []
+   843	  return { name, dir, layers, patchPath, patches, patchReload }
+
+### apps/cli/src/profile-boot.ts:124-172
+   124	/** One profile's patch layers, in application order. */
+   125	interface ComposedProfile {
+   126	  profile: Profile
+   127	  /** Bundle layers concatenated — the part below the user layers on a live reload. */
+   128	  bundlePatches: PatchOptions[]
+   129	  /** The home-level user layer (`$DSH_HOME/cordis.patch.yml`), applied after the profile's own. */
+   130	  homePatches: PatchOptions[]
+   131	  /** Layers above the user layers on a live reload: `--patch` overlays and the telemetry switch. */
+   132	  overlays: PatchOptions[]
+   133	}
+   134	
+   135	/** The full patch stack of one composed profile, in application order. */
+   136	function allPatches(composed: ComposedProfile): PatchOptions[] {
+   137	  return [
+   138	    ...composed.bundlePatches,
+   139	    ...composed.profile.patches,
+   140	    ...composed.homePatches,
+   141	    ...composed.overlays,
+   142	  ]
+   143	}
+   144	
+   145	/**
+   146	 * Load `name` and compose its effective patch stack: bundle layers in
+   147	 * `dsh.profile.bundles` order (a base-backed profile gets the base bundle's
+   148	 * platform-gated shell rows), the profile's user layer, the home-level user
+   149	 * layer (`$DSH_HOME/cordis.patch.yml` — machine-local preferences that apply
+   150	 * to every profile, so it outranks the per-profile layer), `--patch` overlays,
+   151	 * then the telemetry switch.
+   152	 * @param name - the profile name.
+   153	 * @param patchFiles - `--patch` overlay paths, in argv order.
+   154	 * @returns the profile and its patch layers.
+   155	 */
+   156	async function composeProfile(
+   157	  name: string,
+   158	  patchFiles: readonly string[],
+   159	): Promise<ComposedProfile> {
+   160	  const profile = prepareProfile(name)
+   161	  await healProfilesModuleFallback({ installAnchor: INSTALL_ANCHOR, profile })
+   162	  const homePatches = loadOptionalPatches(NAME, homePatchPath()) ?? []
+   163	  const overlays = patchFiles.flatMap(file => loadOverlayPatches(NAME, resolve(file)))
+   164	  const bundlePatches = profile.layers.flatMap(layer => layer.patches)
+   165	  const rows = new Map<string, EntryOptions>()
+   166	  for (const row of composeEntries([bundlePatches, profile.patches, homePatches, overlays])) {
+   167	    if (typeof row.id === 'string') rows.set(row.id, row)
+   168	  }
+   169	  const composedOverlays = [...overlays]
+   170	  const telemetryPatch = resolveTelemetryPatch(process.env.DSH_TELEMETRY_DISABLED, rows.has(TELEMETRY_ROW_ID))
+   171	  if (telemetryPatch !== undefined) composedOverlays.push(telemetryPatch)
+   172	  return { profile, bundlePatches, homePatches, overlays: composedOverlays }
+
+### packages/bundle/web-app/src/startup.ts:1-5, 46-87
+     1	/**
+     2	 * The web app's command-line provider: it parses the `dsh --profile web` flag
+     3	 * family (`--host`, `--port`, `--trusted-host`, `--no-open`) and its `--help`
+     4	 * text, then provides the immutable values as {@link WEB_STARTUP_SERVICE}.
+     5	 * Ordinary rows inject that service before reading it from lazy config.
+    46	function webCommand(): Command {
+    47	  return new Command()
+    48	    .name('dsh --profile web')
+    49	    .description('Serve the DeepSeek Harness browser UI.')
+    50	    .helpOption('-h, --help', 'show this help')
+    51	    .option('--host <host>', 'bind host')
+    52	    .option('--no-open', 'do not open the Web UI in the default browser')
+    53	    .option('--port <port>', 'listen port; pass 0 to let the OS pick a free one')
+    54	    .option('--trusted-host <authority...>', 'extra authority the /api browser-trust fence accepts (host or host:port; repeatable)')
+    55	    .addHelpText('after', `
+    56	Examples:
+    57	  dsh --profile web                          serve on the composed host and port
+    58	  dsh --profile web --no-open                serve without opening a browser
+    59	  dsh --profile web --port 8080              serve on another port
+    60	`)
+    61	}
+    62	
+    63	/**
+    64	 * Parse and provide the Web invocation as an ordinary Cordis service. The
+    65	 * command's action publishes the flags this invocation named; `--host 0.0.0.0`
+    66	 * or a non-numeric `--port` is a usage error, so on rejection (and on `--help`)
+    67	 * nothing is provided.
+    68	 * @param ctx - plugin context carrying the command line.
+    69	 */
+    70	export function apply(ctx: Context): void {
+    71	  const program = webCommand()
+    72	  program.action(() => {
+    73	    const options = program.opts<WebOptions>()
+    74	    if (options.host === '0.0.0.0') {
+    75	      program.error('error: --host 0.0.0.0 is intentionally not supported yet for safety: it would expose remote code execution to the network; use 127.0.0.1 instead')
+    76	    }
+    77	    if (options.port !== undefined && !/^\d+$/.test(options.port)) {
+    78	      program.error(`error: --port must be a number, got ${JSON.stringify(options.port)}`)
+    79	    }
+    80	    ctx.provide(WEB_STARTUP_SERVICE, {
+    81	      openBrowser: options.open,
+    82	      ...options.host !== undefined && { host: options.host },
+    83	      ...options.port !== undefined && { port: Number(options.port) },
+    84	      trustedHosts: options.trustedHost ?? [],
+    85	    } satisfies WebStartupValues)
+    86	  })
+    87	  parseCmdline(ctx, program)
+
+### apps/cli/src/bin.ts:24-44
+    24	const invocation = parseDshArgs(process.argv.slice(2), readVersion())
+    25	
+    26	switch (invocation.mode) {
+    27	  case 'profile': {
+    28	    const { runProfile } = await import('./profile-boot.ts')
+    29	    await runProfile({
+    30	      environment: loadLayeredEnv('dsh'),
+    31	      profile: invocation.profile,
+    32	      patchFiles: invocation.patches,
+    33	      args: invocation.args,
+    34	    })
+    35	    break
+    36	  }
+    37	  case 'plugin': {
+    38	    const { runPlugin } = await import('./plugin.ts')
+    39	    process.exit(runPlugin(invocation.profile, invocation.args))
+    40	    break
+    41	  }
+    42	  case 'dump-config': {
+    43	    const { runDumpConfig } = await import('./dump-config.ts')
+    44	    runDumpConfig(invocation.profile, invocation.defaultOnly, invocation.patches)

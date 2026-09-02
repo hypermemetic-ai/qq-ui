@@ -1,0 +1,14 @@
+observed_at=2026-09-01T23:03:14Z..23:20:xxZ
+node=v26.7.0
+npm=11.19.0
+pnpm=11.18.0
+playwright=1.62.1 (/home/qqp/.npm/_npx/e41f203b7505f1fb/node_modules/playwright)
+chromium=151.0.7922.34 (/home/qqp/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome)
+tcp_listeners_at_preflight=none
+protected_legacy_port=3082 (browser harness hard-refuses it)
+authoritative_source_built_cli=absent
+authoritative_source_node_modules=absent
+retained_alpha3_tarballs=4 (insufficient for package/type/host closure)
+root_DESIGN_sha256=a13d696545bd048e4d423b2ce2b110ddec5de216f2c7336754a3fadc7306ed22
+legacy_DSH_HOME=/home/qqp/.local/state/qq (observed only with stat; not read or used)
+ambient_environment_policy=only PATH/LANG/LC_ALL cross; task paths generated; all other variables removed

@@ -1,0 +1,21 @@
+{
+  "date": "2026-09-01",
+  "sourceProvenance": "PASS",
+  "launchSemanticsFromSource": "PASS",
+  "isolatedHarnessPreparation": "PASS",
+  "overrideSynchronization": "PASS",
+  "repositoryLifecycleAndBundleProofs": "PASS",
+  "realBrowserToolingAvailability": "PASS",
+  "publicPackageInstall": "BLOCKED_DNS_ENOTFOUND",
+  "retainedExactPackageLock": "BLOCKED_DNS_ENOTFOUND",
+  "strictPublicTypeContract": "BLOCKED_DEPENDENCIES_UNAVAILABLE_EXIT_2",
+  "alpha3CliHelp": "BLOCKED_CLI_UNAVAILABLE",
+  "stockHostDumpAndBoot": "BLOCKED_CLI_UNAVAILABLE",
+  "liveClientAndVisibleContributions": "BLOCKED_NO_HOST",
+  "liveHmrCleanup": "BLOCKED_NO_HOST",
+  "realDshSession": "BLOCKED_NO_HOST_BEFORE_CREDENTIAL_STAGE",
+  "desktopMobileRenderedAssertions": "BLOCKED_NO_HOST",
+  "screenshots": [],
+  "ambientCredentialIsolation": "PASS_ALL_NONALLOWLIST_VARIABLES_REMOVED",
+  "rootNpmTest": "BLOCKED_ROOT_DEPENDENCIES_ABSENT"
+}

@@ -1,0 +1,5 @@
+alpha3 spike bundle built: 8120 bytes sha256:6f8ca61e9b26557eb1b17974b0f1d58f00da098b4ec1ec5c232b3fdf87d6b1fe
+alpha3 lifecycle proof passed: activation, disposal, reapplication, shared dispatch, no stale registrations
+alpha3 stock-module composition proof passed: one @hypermemetic-ai/qq-ui-alpha3-spike factory, sha256:3bebe811eebcd5c6e29fada5a5a36cbaf4e670395fbf11a10e425b78c39ecd50
+alpha3 public-type dependency gate proof passed: missing/mismatch block, exact set invokes tsc
+alpha3 live-harness proof passed: protected origin, reversible HMR probe, stock roster pinning, version drift rejection
