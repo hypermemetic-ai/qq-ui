@@ -1,0 +1,18 @@
+{
+  "classification": "EXTERNAL_PREREQUISITE",
+  "inspectedAt": "2026-09-02T14:07:56.823Z",
+  "commit": "6dc6fb1a6d76aa0c83edfc8326481760e0b1aac2",
+  "treeClean": true,
+  "requiredAlpha4AdapterMethods": {
+    "grok": {
+      "imageRequestPricing": false,
+      "prepareCall": false
+    },
+    "codex": {
+      "imageRequestPricing": false,
+      "prepareCall": false
+    }
+  },
+  "compatible": false,
+  "gate": "BLOCKED_UNTIL_OWN_REPOSITORY_FIX_LANDS"
+}
