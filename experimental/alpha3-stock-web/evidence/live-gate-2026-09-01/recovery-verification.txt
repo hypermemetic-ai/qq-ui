@@ -1,0 +1,253 @@
+# Recovery verification — blank-Session sequencing fix
+observed_at=2026-09-02T01:07:37Z
+node=v26.7.0
+npm=11.19.0
+handoff_sha256=3975d4dd21f242e2d626a468ad7b5bf0719726cf956217872870aec8c1e76814
+source_commit=dd6322d604e00eec1ba5e0c8541159906a21094a
+source_tag=dsh-v0.1.2-alpha.3
+root_test_dependency_policy=temporary read-only symlink to /home/qqp/projects/qq-ui/node_modules; removed after test
+live_claim_policy=no host was booted; repository checks do not change live BLOCKED status
+
+### node experimental/alpha3-stock-web/scripts/build.mjs
+alpha3 spike bundle built: 8120 bytes sha256:6f8ca61e9b26557eb1b17974b0f1d58f00da098b4ec1ec5c232b3fdf87d6b1fe
+### exit=0
+
+### node experimental/alpha3-stock-web/proofs/lifecycle.proof.mjs
+alpha3 lifecycle proof passed: activation, disposal, reapplication, shared dispatch, no stale registrations
+### exit=0
+
+### node experimental/alpha3-stock-web/proofs/bundle.proof.mjs
+alpha3 stock-module composition proof passed: one @hypermemetic-ai/qq-ui-alpha3-spike factory, sha256:3bebe811eebcd5c6e29fada5a5a36cbaf4e670395fbf11a10e425b78c39ecd50
+### exit=0
+
+### node experimental/alpha3-stock-web/proofs/public-types-gate.proof.mjs
+alpha3 public-type dependency gate proof passed: missing/mismatch block, exact set invokes tsc
+### exit=0
+
+### node experimental/alpha3-stock-web/proofs/live-harness.proof.mjs
+alpha3 live-harness proof passed: blank-before-Send sequencing, conditional chrome/HMR grading, protected origin, reversible probe, stock pins, drift rejection
+### exit=0
+
+### node --check experimental/alpha3-stock-web/lib/client.js
+### exit=0
+
+### npm --prefix experimental/alpha3-stock-web run prove
+
+> @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike prove
+> node proofs/lifecycle.proof.mjs && node proofs/bundle.proof.mjs && node proofs/public-types-gate.proof.mjs && node proofs/live-harness.proof.mjs
+
+alpha3 lifecycle proof passed: activation, disposal, reapplication, shared dispatch, no stale registrations
+alpha3 stock-module composition proof passed: one @hypermemetic-ai/qq-ui-alpha3-spike factory, sha256:3bebe811eebcd5c6e29fada5a5a36cbaf4e670395fbf11a10e425b78c39ecd50
+alpha3 public-type dependency gate proof passed: missing/mismatch block, exact set invokes tsc
+alpha3 live-harness proof passed: blank-before-Send sequencing, conditional chrome/HMR grading, protected origin, reversible probe, stock pins, drift rejection
+### exit=0
+
+### node experimental/alpha3-stock-web/scripts/check-public-types.mjs
+BLOCKED public alpha.3 type check: install this package's exact devDependencies; unavailable @deepseek-ai/cordis (missing; expected 4.0.2), @deepseek-ai/dsh-api-gateway (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-api-remotes (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-api-session-controller (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-api-workspace-controller (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-attachment (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-connection (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-store (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-commands (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-conversation (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-input-trigger (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-layout (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-renderer (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-session (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-settings (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-slots (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-theme (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-commands (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-cordis-host-runner (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-credentials (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-file-reference (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-host-directory-picker (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-host-plugin-inventory (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-jobs (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-llm-retry (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-session (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-session-projection (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-session-reference (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-settings (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-subagent (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-tool-todo (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-workspace (missing; expected 0.1.2-alpha.3), @types/react (missing; expected 18.3.24), react (missing; expected 18.3.1), typescript (missing; expected 6.0.3)
+### exit=2 (expected BLOCKED exit 2)
+
+### fresh bounded registry prerequisite
+getent_exit=2
+curl: (6) Could not resolve host: registry.npmjs.org
+curl_exit=6 (expected DNS block 6)
+
+### node experimental/alpha3-stock-web/scripts/live/prepare.mjs --run-root /tmp/qq-alpha3-live-recovery-4sAYTZZH --source /home/qqp/.local/state/.qq-workflows-research/research-15f22e5b/dsh-alpha3
+{
+  "preparedAt": "2026-09-02T01:07:39.156Z",
+  "source": {
+    "path": "/home/qqp/.local/state/.qq-workflows-research/research-15f22e5b/dsh-alpha3",
+    "commit": "dd6322d604e00eec1ba5e0c8541159906a21094a",
+    "tag": "dsh-v0.1.2-alpha.3"
+  },
+  "runRoot": "/tmp/qq-alpha3-live-recovery-4sAYTZZH",
+  "isolation": {
+    "HOME": "/tmp/qq-alpha3-live-recovery-4sAYTZZH/os-home",
+    "DSH_HOME": "/tmp/qq-alpha3-live-recovery-4sAYTZZH/dsh-home",
+    "npmCache": "/tmp/qq-alpha3-live-recovery-4sAYTZZH/npm-cache",
+    "host": "127.0.0.1",
+    "port": 0,
+    "openBrowser": false
+  },
+  "overrides": 253
+}
+### exit=0
+disposable_run_root_removed=yes
+
+### npm test
+
+> @hypermemetic-ai/qq-ui@0.0.0 test
+> node --check src/plugin.mjs && node --check assets/browser-v9.js && node scripts/prove-provider-failure-diagnostic.mjs && node scripts/prove-console-menu-contributions.mjs && node scripts/prove-workflow-selection-route.mjs && node scripts/prove-live-switch-enrichment.mjs && node scripts/prove-prompt-echo.mjs && node scripts/prove-prompt-correlation-browser.mjs && node scripts/prove-prompt-geometry-browser.mjs && node scripts/prove-server-switch-timings.mjs && node scripts/prove-snapshot-handoff-switch.mjs && node scripts/prove-transcript-projection.mjs && node scripts/prove-selective-render-cache.mjs && node scripts/prove-root-routing.mjs && node scripts/prove-visual-latency.mjs && node scripts/prove-passive-latency.mjs && node scripts/prove-reasoning-transcript-gestures.mjs && node scripts/prove-session-switcher-polish.mjs && node scripts/prove-desktop-case-rail.mjs && node scripts/prove-plugin-context-cards.mjs && node scripts/prove-strip-metadata.mjs && node scripts/prove-dashboard-usage.mjs && node scripts/prove-dashboard-live-tracker.mjs && node scripts/prove-sessions-rendered.mjs && npm run prove:alpha3-stock-web
+
+provider failure diagnostic rendering: ok
+console menu contribution proof passed
+workflow selection route proof passed
+prove-live-switch-enrichment: pass
+prompt echo proof passed
+prompt correlation browser proof passed
+prompt geometry browser proof passed (desktop + Android)
+prove-server-switch-timings: pass
+prove-snapshot-handoff-switch: pass
+transcript projection proof passed
+selective live rendering and settled cache proof passed
+prove-root-routing: stale root p95 0.6ms
+prove-root-routing: pass
+visual latency study proof passed
+passive latency ingestion, retention, and reporter proof passed
+prove-reasoning-transcript-gestures: pass
+prove-session-switcher-polish: pass
+prove-desktop-case-rail: pass
+prove-plugin-context-cards: pass
+prove-strip-metadata: pass
+dashboard usage validation, menu, rendering, and incremental proof passed
+prove-dashboard-live-tracker: pass
+sessions rendered proof passed: /home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-re-architecture-882fab14.workspace/.artifacts/sessions-rendered
+
+> @hypermemetic-ai/qq-ui@0.0.0 prove:alpha3-stock-web
+> node experimental/alpha3-stock-web/scripts/build.mjs && node experimental/alpha3-stock-web/proofs/lifecycle.proof.mjs && node experimental/alpha3-stock-web/proofs/bundle.proof.mjs && node experimental/alpha3-stock-web/proofs/public-types-gate.proof.mjs && node experimental/alpha3-stock-web/proofs/live-harness.proof.mjs
+
+alpha3 spike bundle built: 8120 bytes sha256:6f8ca61e9b26557eb1b17974b0f1d58f00da098b4ec1ec5c232b3fdf87d6b1fe
+alpha3 lifecycle proof passed: activation, disposal, reapplication, shared dispatch, no stale registrations
+alpha3 stock-module composition proof passed: one @hypermemetic-ai/qq-ui-alpha3-spike factory, sha256:3bebe811eebcd5c6e29fada5a5a36cbaf4e670395fbf11a10e425b78c39ecd50
+alpha3 public-type dependency gate proof passed: missing/mismatch block, exact set invokes tsc
+alpha3 live-harness proof passed: blank-before-Send sequencing, conditional chrome/HMR grading, protected origin, reversible probe, stock pins, drift rejection
+### exit=0
+temporary_node_modules_link_removed=yes
+
+final_repository_status=PASS
+real_public_type_status=BLOCKED_EXIT_2
+live_host_browser_status=BLOCKED_NOT_EXECUTED
+
+# Final verification after disabled-Send and safety-edge fixes
+observed_at=2026-09-02T01:16:12Z
+
+### node experimental/alpha3-stock-web/scripts/build.mjs
+alpha3 spike bundle built: 8120 bytes sha256:6f8ca61e9b26557eb1b17974b0f1d58f00da098b4ec1ec5c232b3fdf87d6b1fe
+### exit=0
+
+### node experimental/alpha3-stock-web/proofs/lifecycle.proof.mjs
+alpha3 lifecycle proof passed: activation, disposal, reapplication, shared dispatch, no stale registrations
+### exit=0
+
+### node experimental/alpha3-stock-web/proofs/bundle.proof.mjs
+alpha3 stock-module composition proof passed: one @hypermemetic-ai/qq-ui-alpha3-spike factory, sha256:3bebe811eebcd5c6e29fada5a5a36cbaf4e670395fbf11a10e425b78c39ecd50
+### exit=0
+
+### node experimental/alpha3-stock-web/proofs/public-types-gate.proof.mjs
+alpha3 public-type dependency gate proof passed: missing/mismatch block, exact set invokes tsc
+### exit=0
+
+### node experimental/alpha3-stock-web/proofs/live-harness.proof.mjs
+alpha3 live-harness proof passed: blank-before-Send sequencing, conditional chrome/HMR grading, protected origin, reversible probe, stock pins, drift rejection
+### exit=0
+
+### node --check experimental/alpha3-stock-web/lib/client.js
+### exit=0
+
+### node --check experimental/alpha3-stock-web/scripts/live/browser.mjs
+### exit=0
+
+### npm --prefix experimental/alpha3-stock-web run prove
+
+> @hypermemetic-ai/qq-ui-alpha3-spike@0.0.0-alpha.3-spike prove
+> node proofs/lifecycle.proof.mjs && node proofs/bundle.proof.mjs && node proofs/public-types-gate.proof.mjs && node proofs/live-harness.proof.mjs
+
+alpha3 lifecycle proof passed: activation, disposal, reapplication, shared dispatch, no stale registrations
+alpha3 stock-module composition proof passed: one @hypermemetic-ai/qq-ui-alpha3-spike factory, sha256:3bebe811eebcd5c6e29fada5a5a36cbaf4e670395fbf11a10e425b78c39ecd50
+alpha3 public-type dependency gate proof passed: missing/mismatch block, exact set invokes tsc
+alpha3 live-harness proof passed: blank-before-Send sequencing, conditional chrome/HMR grading, protected origin, reversible probe, stock pins, drift rejection
+### exit=0
+
+### node experimental/alpha3-stock-web/scripts/check-public-types.mjs
+BLOCKED public alpha.3 type check: install this package's exact devDependencies; unavailable @deepseek-ai/cordis (missing; expected 4.0.2), @deepseek-ai/dsh-api-gateway (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-api-remotes (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-api-session-controller (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-api-workspace-controller (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-attachment (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-connection (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-store (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-commands (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-conversation (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-input-trigger (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-layout (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-renderer (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-session (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-settings (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-slots (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-client-ui-theme (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-commands (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-cordis-host-runner (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-credentials (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-file-reference (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-host-directory-picker (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-host-plugin-inventory (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-jobs (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-llm-retry (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-session (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-session-projection (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-session-reference (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-settings (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-subagent (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-tool-todo (missing; expected 0.1.2-alpha.3), @deepseek-ai/dsh-workspace (missing; expected 0.1.2-alpha.3), @types/react (missing; expected 18.3.24), react (missing; expected 18.3.1), typescript (missing; expected 6.0.3)
+### exit=2 (expected BLOCKED exit 2)
+
+### npm test
+
+> @hypermemetic-ai/qq-ui@0.0.0 test
+> node --check src/plugin.mjs && node --check assets/browser-v9.js && node scripts/prove-provider-failure-diagnostic.mjs && node scripts/prove-console-menu-contributions.mjs && node scripts/prove-workflow-selection-route.mjs && node scripts/prove-live-switch-enrichment.mjs && node scripts/prove-prompt-echo.mjs && node scripts/prove-prompt-correlation-browser.mjs && node scripts/prove-prompt-geometry-browser.mjs && node scripts/prove-server-switch-timings.mjs && node scripts/prove-snapshot-handoff-switch.mjs && node scripts/prove-transcript-projection.mjs && node scripts/prove-selective-render-cache.mjs && node scripts/prove-root-routing.mjs && node scripts/prove-visual-latency.mjs && node scripts/prove-passive-latency.mjs && node scripts/prove-reasoning-transcript-gestures.mjs && node scripts/prove-session-switcher-polish.mjs && node scripts/prove-desktop-case-rail.mjs && node scripts/prove-plugin-context-cards.mjs && node scripts/prove-strip-metadata.mjs && node scripts/prove-dashboard-usage.mjs && node scripts/prove-dashboard-live-tracker.mjs && node scripts/prove-sessions-rendered.mjs && npm run prove:alpha3-stock-web
+
+provider failure diagnostic rendering: ok
+console menu contribution proof passed
+workflow selection route proof passed
+prove-live-switch-enrichment: pass
+prompt echo proof passed
+prompt correlation browser proof passed
+prompt geometry browser proof passed (desktop + Android)
+prove-server-switch-timings: pass
+prove-snapshot-handoff-switch: pass
+transcript projection proof passed
+selective live rendering and settled cache proof passed
+prove-root-routing: stale root p95 0.9ms
+prove-root-routing: pass
+visual latency study proof passed
+passive latency ingestion, retention, and reporter proof passed
+prove-reasoning-transcript-gestures: pass
+prove-session-switcher-polish: pass
+prove-desktop-case-rail: pass
+prove-plugin-context-cards: pass
+prove-strip-metadata: pass
+dashboard usage validation, menu, rendering, and incremental proof passed
+prove-dashboard-live-tracker: pass
+sessions rendered proof passed: /home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-re-architecture-882fab14.workspace/.artifacts/sessions-rendered
+
+> @hypermemetic-ai/qq-ui@0.0.0 prove:alpha3-stock-web
+> node experimental/alpha3-stock-web/scripts/build.mjs && node experimental/alpha3-stock-web/proofs/lifecycle.proof.mjs && node experimental/alpha3-stock-web/proofs/bundle.proof.mjs && node experimental/alpha3-stock-web/proofs/public-types-gate.proof.mjs && node experimental/alpha3-stock-web/proofs/live-harness.proof.mjs
+
+alpha3 spike bundle built: 8120 bytes sha256:6f8ca61e9b26557eb1b17974b0f1d58f00da098b4ec1ec5c232b3fdf87d6b1fe
+alpha3 lifecycle proof passed: activation, disposal, reapplication, shared dispatch, no stale registrations
+alpha3 stock-module composition proof passed: one @hypermemetic-ai/qq-ui-alpha3-spike factory, sha256:3bebe811eebcd5c6e29fada5a5a36cbaf4e670395fbf11a10e425b78c39ecd50
+alpha3 public-type dependency gate proof passed: missing/mismatch block, exact set invokes tsc
+alpha3 live-harness proof passed: blank-before-Send sequencing, conditional chrome/HMR grading, protected origin, reversible probe, stock pins, drift rejection
+### exit=0
+temporary_node_modules_link_removed=yes
+final_followup_repository_status=PASS
+final_followup_public_type_status=BLOCKED_EXIT_2
+
+# Final temporary-root cleanup verification
+observed_at=2026-09-02T01:20:50Z
+
+### node experimental/alpha3-stock-web/proofs/live-harness.proof.mjs
+alpha3 live-harness proof passed: blank-before-Send sequencing, conditional chrome/HMR grading, protected origin, reversible probe, stock pins, drift rejection
+### exit=0
+
+### npm test
+
+> @hypermemetic-ai/qq-ui@0.0.0 test
+> node --check src/plugin.mjs && node --check assets/browser-v9.js && node scripts/prove-provider-failure-diagnostic.mjs && node scripts/prove-console-menu-contributions.mjs && node scripts/prove-workflow-selection-route.mjs && node scripts/prove-live-switch-enrichment.mjs && node scripts/prove-prompt-echo.mjs && node scripts/prove-prompt-correlation-browser.mjs && node scripts/prove-prompt-geometry-browser.mjs && node scripts/prove-server-switch-timings.mjs && node scripts/prove-snapshot-handoff-switch.mjs && node scripts/prove-transcript-projection.mjs && node scripts/prove-selective-render-cache.mjs && node scripts/prove-root-routing.mjs && node scripts/prove-visual-latency.mjs && node scripts/prove-passive-latency.mjs && node scripts/prove-reasoning-transcript-gestures.mjs && node scripts/prove-session-switcher-polish.mjs && node scripts/prove-desktop-case-rail.mjs && node scripts/prove-plugin-context-cards.mjs && node scripts/prove-strip-metadata.mjs && node scripts/prove-dashboard-usage.mjs && node scripts/prove-dashboard-live-tracker.mjs && node scripts/prove-sessions-rendered.mjs && npm run prove:alpha3-stock-web
+
+provider failure diagnostic rendering: ok
+console menu contribution proof passed
+workflow selection route proof passed
+prove-live-switch-enrichment: pass
+prompt echo proof passed
+prompt correlation browser proof passed
+prompt geometry browser proof passed (desktop + Android)
+prove-server-switch-timings: pass
+prove-snapshot-handoff-switch: pass
+transcript projection proof passed
+selective live rendering and settled cache proof passed
+prove-root-routing: stale root p95 0.6ms
+prove-root-routing: pass
+visual latency study proof passed
+passive latency ingestion, retention, and reporter proof passed
+prove-reasoning-transcript-gestures: pass
+prove-session-switcher-polish: pass
+prove-desktop-case-rail: pass
+prove-plugin-context-cards: pass
+prove-strip-metadata: pass
+dashboard usage validation, menu, rendering, and incremental proof passed
+prove-dashboard-live-tracker: pass
+sessions rendered proof passed: /home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-re-architecture-882fab14.workspace/.artifacts/sessions-rendered
+
+> @hypermemetic-ai/qq-ui@0.0.0 prove:alpha3-stock-web
+> node experimental/alpha3-stock-web/scripts/build.mjs && node experimental/alpha3-stock-web/proofs/lifecycle.proof.mjs && node experimental/alpha3-stock-web/proofs/bundle.proof.mjs && node experimental/alpha3-stock-web/proofs/public-types-gate.proof.mjs && node experimental/alpha3-stock-web/proofs/live-harness.proof.mjs
+
+alpha3 spike bundle built: 8120 bytes sha256:6f8ca61e9b26557eb1b17974b0f1d58f00da098b4ec1ec5c232b3fdf87d6b1fe
+alpha3 lifecycle proof passed: activation, disposal, reapplication, shared dispatch, no stale registrations
+alpha3 stock-module composition proof passed: one @hypermemetic-ai/qq-ui-alpha3-spike factory, sha256:3bebe811eebcd5c6e29fada5a5a36cbaf4e670395fbf11a10e425b78c39ecd50
+alpha3 public-type dependency gate proof passed: missing/mismatch block, exact set invokes tsc
+alpha3 live-harness proof passed: blank-before-Send sequencing, conditional chrome/HMR grading, protected origin, reversible probe, stock pins, drift rejection
+### exit=0
+temporary_node_modules_link_removed=yes
+temporary_proof_roots_remaining=0
+final_cleanup_verification=PASS

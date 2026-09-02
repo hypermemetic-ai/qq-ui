@@ -1,0 +1,18 @@
+Command (paths abbreviated):
+  node scripts/live/browser.mjs \
+    --url http://127.0.0.1:49152/not-a-host \
+    --spike /tmp/qq-alpha3-live-browser-preflight/spike \
+    --workspace /tmp/qq-alpha3-live-browser-preflight/workspace \
+    --artifacts /tmp/qq-alpha3-live-browser-preflight/artifacts \
+    --playwright /home/qqp/.npm/_npx/e41f203b7505f1fb/node_modules/playwright \
+    --executable /home/qqp/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome
+
+Observed:
+  Playwright 1.62.1 loaded.
+  Chromium 151.0.7922.34 launched.
+  page.goto failed net::ERR_CONNECTION_REFUSED at the intentionally unused
+  loopback port 49152.
+  Browser process/context closed.
+
+Status: PASS for real-browser tooling availability only. This is not a host,
+rendering, or QQ behavior assertion.

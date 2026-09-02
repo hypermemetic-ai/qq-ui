@@ -2,14 +2,22 @@
   "compilerOptions": {
     "allowJs": false,
     "exactOptionalPropertyTypes": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2024",
+      "DOM",
+      "DOM.Iterable",
+      "ESNext.Disposable"
+    ],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "noEmit": true,
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": false,
     "strict": true,
-    "target": "ES2022"
+    "target": "ES2024"
   },
-  "include": ["src/client.d.ts", "proofs/public-contract.ts"]
+  "include": [
+    "src/client.d.ts",
+    "proofs/public-contract.ts"
+  ]
 }

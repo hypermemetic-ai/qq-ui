@@ -1,0 +1,15 @@
+npm verbose cli /home/linuxbrew/.linuxbrew/Cellar/node/26.7.0/bin/node /home/qqp/.local/bin/npm
+npm info using npm@11.19.0
+npm info using node@v26.7.0
+npm silly config load:file:/home/linuxbrew/.linuxbrew/lib/node_modules/npm/npmrc
+npm silly config load:file:/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-re-architecture-a3491bae.workspace/.npmrc
+npm silly config load:file:/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-re-architecture-a3491bae.workspace/.artifacts/alpha3-live-gate-install/home/.npmrc
+npm silly config load:file:/home/linuxbrew/.linuxbrew/etc/npmrc
+npm verbose title npm ping
+npm verbose argv "--loglevel" "silly" "ping"
+npm verbose logfile logs-max:10 dir:/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-re-architecture-a3491bae.workspace/.artifacts/alpha3-live-gate-install/npm-cache/_logs/2026-09-01T23_03_17_187Z-
+npm verbose logfile /home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-re-architecture-a3491bae.workspace/.artifacts/alpha3-live-gate-install/npm-cache/_logs/2026-09-01T23_03_17_187Z-debug-0.log
+npm silly logfile done cleaning log files
+npm notice PING https://registry.npmjs.org/
+npm http fetch GET https://registry.npmjs.org/-/ping attempt 1 failed with ENOTFOUND
+npm http fetch GET https://registry.npmjs.org/-/ping attempt 2 failed with ENOTFOUND

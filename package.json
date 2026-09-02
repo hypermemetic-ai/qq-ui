@@ -31,6 +31,6 @@
     "prove:prompt-echo": "node scripts/prove-prompt-echo.mjs",
     "prove:prompt-correlation": "node scripts/prove-prompt-correlation-browser.mjs",
     "prove:prompt-geometry": "node scripts/prove-prompt-geometry-browser.mjs",
-    "prove:alpha3-stock-web": "node experimental/alpha3-stock-web/scripts/build.mjs && node experimental/alpha3-stock-web/proofs/lifecycle.proof.mjs && node experimental/alpha3-stock-web/proofs/bundle.proof.mjs && node experimental/alpha3-stock-web/proofs/public-types-gate.proof.mjs"
+    "prove:alpha3-stock-web": "node experimental/alpha3-stock-web/scripts/build.mjs && node experimental/alpha3-stock-web/proofs/lifecycle.proof.mjs && node experimental/alpha3-stock-web/proofs/bundle.proof.mjs && node experimental/alpha3-stock-web/proofs/public-types-gate.proof.mjs && node experimental/alpha3-stock-web/proofs/live-harness.proof.mjs"
   }
 }

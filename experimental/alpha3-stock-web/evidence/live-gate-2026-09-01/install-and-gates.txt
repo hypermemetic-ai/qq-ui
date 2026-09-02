@@ -1,0 +1,51 @@
+Spike install attempt
+=====================
+Working copy: experimental/alpha3-stock-web
+Isolation: task-owned HOME and npm cache under ignored .artifacts
+Command: npm install --ignore-scripts --no-audit --no-fund
+Bound: timeout 52s
+Exit: 124
+Output before timeout: none
+Created package-lock.json: no
+Created node_modules: no
+
+Independent network diagnosis
+=============================
+getent ahostsv4 registry.npmjs.org: no result
+curl --connect-timeout 5 --max-time 15 https://registry.npmjs.org/...alpha.3
+  exit 6, Could not resolve host
+npm --loglevel silly ping (bounded at 20s)
+  ENOTFOUND attempt 1
+  ENOTFOUND attempt 2
+  outer exit 124 while npm awaited its next configured retry
+Local authoritative npm cache: exactly four alpha.3 tarball keys, not a closure
+
+Repository gates after edits
+============================
+node scripts/build.mjs: PASS
+node proofs/lifecycle.proof.mjs: PASS
+node proofs/bundle.proof.mjs: PASS
+node proofs/public-types-gate.proof.mjs: PASS (gate behavior only; not a real type pass)
+node proofs/live-harness.proof.mjs: PASS (includes ambient-secret removal and drift rejection)
+node --check lib/client.js: PASS
+node scripts/sync-alpha3-overrides.mjs <authoritative-source>: PASS, 253, byte-stable manifest
+node scripts/check-public-types.mjs: BLOCKED, exit 2; all 35 exact dev dependencies absent
+node scripts/audit-alpha3-closure.mjs: BLOCKED; package-lock.json absent by design after failed install
+
+Host and product assertions
+===========================
+dsh alpha.3 --help: BLOCKED (no installed/built alpha.3 CLI)
+stock/patched --dump-config: BLOCKED (same prerequisite)
+host boot: BLOCKED (same prerequisite)
+client-module network load: BLOCKED (no host)
+visible QQ header/view/theme/slash UI: BLOCKED (no host)
+live activation -> disposal -> reapplication: BLOCKED (no host)
+real DSH session/model turn: BLOCKED before credential stage; no credential inspected/copied
+rendered desktop/mobile product assertions: BLOCKED (no host)
+screenshots: none (no host; static/fake substitute deliberately not used)
+
+Root full-suite attempt
+=======================
+npm test: BLOCKED before alpha.3 subcommand
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'highlight.js' imported from src/markdown.mjs
+  Root node_modules is absent and registry DNS is unavailable.

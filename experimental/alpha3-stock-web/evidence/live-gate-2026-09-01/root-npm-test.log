@@ -1,0 +1,23 @@
+
+> @hypermemetic-ai/qq-ui@0.0.0 test
+> node --check src/plugin.mjs && node --check assets/browser-v9.js && node scripts/prove-provider-failure-diagnostic.mjs && node scripts/prove-console-menu-contributions.mjs && node scripts/prove-workflow-selection-route.mjs && node scripts/prove-live-switch-enrichment.mjs && node scripts/prove-prompt-echo.mjs && node scripts/prove-prompt-correlation-browser.mjs && node scripts/prove-prompt-geometry-browser.mjs && node scripts/prove-server-switch-timings.mjs && node scripts/prove-snapshot-handoff-switch.mjs && node scripts/prove-transcript-projection.mjs && node scripts/prove-selective-render-cache.mjs && node scripts/prove-root-routing.mjs && node scripts/prove-visual-latency.mjs && node scripts/prove-passive-latency.mjs && node scripts/prove-reasoning-transcript-gestures.mjs && node scripts/prove-session-switcher-polish.mjs && node scripts/prove-desktop-case-rail.mjs && node scripts/prove-plugin-context-cards.mjs && node scripts/prove-strip-metadata.mjs && node scripts/prove-dashboard-usage.mjs && node scripts/prove-dashboard-live-tracker.mjs && node scripts/prove-sessions-rendered.mjs && npm run prove:alpha3-stock-web
+
+node:internal/modules/package_json_reader:301
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'highlight.js' imported from /home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-re-architecture-a3491bae.workspace/src/markdown.mjs
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+    at packageResolve (node:internal/modules/esm/resolve:784:25)
+    at moduleResolve (node:internal/modules/esm/resolve:873:18)
+    at defaultResolve (node:internal/modules/esm/resolve:1006:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:708:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:728:38)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:766:56)
+    at #resolve (node:internal/modules/esm/loader:690:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:610:35)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:277:33) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v26.7.0
