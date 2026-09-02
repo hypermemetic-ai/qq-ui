@@ -1,0 +1,10 @@
+{
+  "classification": "SOURCE_FACT",
+  "researchAnswer": "/home/qqp/.local/state/.qq-workflows-research/research-2ef0a02d/answer.md",
+  "researchAnswerSha256": "58b053ac0cc884cb6e5643cfb6bfae315e09d03ca42d9c5829782d6a5abb4a87",
+  "tag": "dsh-v0.1.2-alpha.4",
+  "commit": "4e84901e6471b79ec0338099867ebb4606d12bb5",
+  "version": "0.1.2-alpha.4",
+  "sourcePackageCount": 252,
+  "sourceNameVersionSetSha256": "fe20e208a3359dbd3a39f83c22afa81e184374cbf386b4f33c3598de57439ce5"
+}

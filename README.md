@@ -19,7 +19,7 @@ Run the primary verification gate with:
 npm test
 ```
 
-That gate syntax-checks the plugin and [`assets/browser-v9.js`](assets/browser-v9.js), runs the root UI proof scripts, and finishes with the alpha3 stock-web proof gate. Package-level focused commands are also available:
+That gate syntax-checks the plugin and [`assets/browser-v9.js`](assets/browser-v9.js), runs the root UI proof scripts, and finishes with the preserved alpha3 plus current alpha4 stock-Web proof gates. Package-level focused commands are also available:
 
 ```sh
 npm run prove:sessions-rendered
@@ -28,6 +28,7 @@ npm run prove:prompt-correlation
 npm run prove:prompt-geometry
 npm run latency:report
 npm run prove:alpha3-stock-web
+npm run prove:alpha4-stock-web
 ```
 
 ## System map
@@ -36,7 +37,7 @@ npm run prove:alpha3-stock-web
 - **HTTP and rendering boundary:** [`src/http-app.mjs`](src/http-app.mjs) and [`src/render.mjs`](src/render.mjs) are public exports and the two highest-fan-in relative modules. They are also frequent change points, so changes there deserve the full gate and careful dependent review.
 - **Packaged browser presentation:** [`assets/browser-v9.js`](assets/browser-v9.js) and [`assets/console.css`](assets/console.css) are the most frequently changed asset paths. Of the versioned browser files, `browser-v9.js` is the one explicitly checked by `npm test`.
 - **Supporting server modules:** focused modules under [`src/`](src/plugin.mjs) cover approval, console menus, identifiers, latency storage, Markdown, and project ordering. Start with the public boundary above, then follow imports rather than treating every file as an independent subsystem.
-- **Verification:** executable proofs live under [`scripts/`](scripts/prove-sessions-rendered.mjs). The separate [`experimental/alpha3-stock-web/`](experimental/alpha3-stock-web/README.md) area has its own build and proof sequence, exposed at the root as `prove:alpha3-stock-web`.
+- **Verification:** executable proofs live under [`scripts/`](scripts/prove-sessions-rendered.mjs). The separate [`experimental/alpha3-stock-web/`](experimental/alpha3-stock-web/README.md) historical area and [`experimental/alpha4-stock-web/`](experimental/alpha4-stock-web/README.md) current architecture-A preparation each have isolated build/proof sequences, exposed as `prove:alpha3-stock-web` and `prove:alpha4-stock-web`.
 
 ## Route a change
 
@@ -55,5 +56,6 @@ Proof filenames are useful routing cues, not a substitute for the full gate.
 - [`DESIGN.md`](DESIGN.md) — design notes
 - [`wiki/operator-console.md`](wiki/operator-console.md) — operator-console documentation
 - [`wiki/latency-roadmap.md`](wiki/latency-roadmap.md) — latency roadmap
-- [`experimental/alpha3-stock-web/README.md`](experimental/alpha3-stock-web/README.md) and [`SPIKE_REPORT.md`](experimental/alpha3-stock-web/SPIKE_REPORT.md) — alpha3 experiment orientation
+- [`experimental/alpha3-stock-web/README.md`](experimental/alpha3-stock-web/README.md) and [`SPIKE_REPORT.md`](experimental/alpha3-stock-web/SPIKE_REPORT.md) — historical alpha3 experiment
+- [`experimental/alpha4-stock-web/README.md`](experimental/alpha4-stock-web/README.md) and [`SPIKE_REPORT.md`](experimental/alpha4-stock-web/SPIKE_REPORT.md) — exact alpha4 stock-Web preparation and honest live-gate status
 - [`vendor-pins.json`](vendor-pins.json) — vendored dependency pins

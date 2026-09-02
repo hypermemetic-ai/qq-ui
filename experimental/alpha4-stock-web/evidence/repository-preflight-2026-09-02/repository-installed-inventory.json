@@ -1,0 +1,492 @@
+{
+  "generatedAt": "2026-09-02T10:41:28.536Z",
+  "roots": [
+    "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web"
+  ],
+  "expectedDshVersion": "0.1.2-alpha.4",
+  "packageLocations": 96,
+  "dshPackageLocations": 61,
+  "drift": [],
+  "packages": [
+    {
+      "name": "@deepseek-ai/cordis",
+      "version": "4.0.2",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/cordis"
+    },
+    {
+      "name": "@deepseek-ai/cordis-plugin-include",
+      "version": "1.0.7",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/cordis-plugin-include"
+    },
+    {
+      "name": "@deepseek-ai/cordis-plugin-loader",
+      "version": "1.0.3",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/cordis-plugin-loader"
+    },
+    {
+      "name": "@deepseek-ai/cosmokit",
+      "version": "1.8.3",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/cosmokit"
+    },
+    {
+      "name": "@deepseek-ai/dsh-agent",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-agent"
+    },
+    {
+      "name": "@deepseek-ai/dsh-agent-default-model",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-agent-default-model"
+    },
+    {
+      "name": "@deepseek-ai/dsh-agent-presets",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-agent-presets"
+    },
+    {
+      "name": "@deepseek-ai/dsh-api-gateway",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-api-gateway"
+    },
+    {
+      "name": "@deepseek-ai/dsh-api-remotes",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-api-remotes"
+    },
+    {
+      "name": "@deepseek-ai/dsh-api-session-controller",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-api-session-controller"
+    },
+    {
+      "name": "@deepseek-ai/dsh-api-workspace-controller",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-api-workspace-controller"
+    },
+    {
+      "name": "@deepseek-ai/dsh-atomic-write",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-atomic-write"
+    },
+    {
+      "name": "@deepseek-ai/dsh-attachment",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-attachment"
+    },
+    {
+      "name": "@deepseek-ai/dsh-brand",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-brand"
+    },
+    {
+      "name": "@deepseek-ai/dsh-client-connection",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-client-connection"
+    },
+    {
+      "name": "@deepseek-ai/dsh-client-store",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-client-store"
+    },
+    {
+      "name": "@deepseek-ai/dsh-client-ui-commands",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-client-ui-commands"
+    },
+    {
+      "name": "@deepseek-ai/dsh-client-ui-conversation",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-client-ui-conversation"
+    },
+    {
+      "name": "@deepseek-ai/dsh-client-ui-input-trigger",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-client-ui-input-trigger"
+    },
+    {
+      "name": "@deepseek-ai/dsh-client-ui-layout",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-client-ui-layout"
+    },
+    {
+      "name": "@deepseek-ai/dsh-client-ui-renderer",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-client-ui-renderer"
+    },
+    {
+      "name": "@deepseek-ai/dsh-client-ui-session",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-client-ui-session"
+    },
+    {
+      "name": "@deepseek-ai/dsh-client-ui-settings",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-client-ui-settings"
+    },
+    {
+      "name": "@deepseek-ai/dsh-client-ui-slots",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-client-ui-slots"
+    },
+    {
+      "name": "@deepseek-ai/dsh-client-ui-theme",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-client-ui-theme"
+    },
+    {
+      "name": "@deepseek-ai/dsh-code-runtime",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-code-runtime"
+    },
+    {
+      "name": "@deepseek-ai/dsh-commands",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-commands"
+    },
+    {
+      "name": "@deepseek-ai/dsh-compaction",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-compaction"
+    },
+    {
+      "name": "@deepseek-ai/dsh-cordis-host-runner",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-cordis-host-runner"
+    },
+    {
+      "name": "@deepseek-ai/dsh-credentials",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-credentials"
+    },
+    {
+      "name": "@deepseek-ai/dsh-deque",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-deque"
+    },
+    {
+      "name": "@deepseek-ai/dsh-file-reference",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-file-reference"
+    },
+    {
+      "name": "@deepseek-ai/dsh-home-paths",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-home-paths"
+    },
+    {
+      "name": "@deepseek-ai/dsh-host-directory-picker",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-host-directory-picker"
+    },
+    {
+      "name": "@deepseek-ai/dsh-host-plugin-inventory",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-host-plugin-inventory"
+    },
+    {
+      "name": "@deepseek-ai/dsh-invariants",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-invariants"
+    },
+    {
+      "name": "@deepseek-ai/dsh-jobs",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-jobs"
+    },
+    {
+      "name": "@deepseek-ai/dsh-llm",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-llm"
+    },
+    {
+      "name": "@deepseek-ai/dsh-llm-retry",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-llm-retry"
+    },
+    {
+      "name": "@deepseek-ai/dsh-native-command",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-native-command"
+    },
+    {
+      "name": "@deepseek-ai/dsh-output-retention",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-output-retention"
+    },
+    {
+      "name": "@deepseek-ai/dsh-scope",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-scope"
+    },
+    {
+      "name": "@deepseek-ai/dsh-session",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-session"
+    },
+    {
+      "name": "@deepseek-ai/dsh-session-persistence",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-session-persistence"
+    },
+    {
+      "name": "@deepseek-ai/dsh-session-projection",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-session-projection"
+    },
+    {
+      "name": "@deepseek-ai/dsh-session-query",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-session-query"
+    },
+    {
+      "name": "@deepseek-ai/dsh-session-reference",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-session-reference"
+    },
+    {
+      "name": "@deepseek-ai/dsh-session-title",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-session-title"
+    },
+    {
+      "name": "@deepseek-ai/dsh-settings",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-settings"
+    },
+    {
+      "name": "@deepseek-ai/dsh-skill",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-skill"
+    },
+    {
+      "name": "@deepseek-ai/dsh-storage",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-storage"
+    },
+    {
+      "name": "@deepseek-ai/dsh-storage-domain",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-storage-domain"
+    },
+    {
+      "name": "@deepseek-ai/dsh-subagent",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-subagent"
+    },
+    {
+      "name": "@deepseek-ai/dsh-system-prompt",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-system-prompt"
+    },
+    {
+      "name": "@deepseek-ai/dsh-timeout",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-timeout"
+    },
+    {
+      "name": "@deepseek-ai/dsh-tool-todo",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-tool-todo"
+    },
+    {
+      "name": "@deepseek-ai/dsh-tools",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-tools"
+    },
+    {
+      "name": "@deepseek-ai/dsh-typert-protocol",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-typert-protocol"
+    },
+    {
+      "name": "@deepseek-ai/dsh-typert-registry",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-typert-registry"
+    },
+    {
+      "name": "@deepseek-ai/dsh-user-approval",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-user-approval"
+    },
+    {
+      "name": "@deepseek-ai/dsh-util-crypto",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-util-crypto"
+    },
+    {
+      "name": "@deepseek-ai/dsh-util-time",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-util-time"
+    },
+    {
+      "name": "@deepseek-ai/dsh-util-values",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-util-values"
+    },
+    {
+      "name": "@deepseek-ai/dsh-util-workspace-path",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-util-workspace-path"
+    },
+    {
+      "name": "@deepseek-ai/dsh-workspace",
+      "version": "0.1.2-alpha.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/dsh-workspace"
+    },
+    {
+      "name": "@deepseek-ai/schemastery",
+      "version": "3.18.2",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@deepseek-ai/schemastery"
+    },
+    {
+      "name": "@lexical/clipboard",
+      "version": "0.49.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@lexical/clipboard"
+    },
+    {
+      "name": "@lexical/dragon",
+      "version": "0.49.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@lexical/dragon"
+    },
+    {
+      "name": "@lexical/extension",
+      "version": "0.49.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@lexical/extension"
+    },
+    {
+      "name": "@lexical/history",
+      "version": "0.49.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@lexical/history"
+    },
+    {
+      "name": "@lexical/html",
+      "version": "0.49.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@lexical/html"
+    },
+    {
+      "name": "@lexical/internal",
+      "version": "0.49.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@lexical/internal"
+    },
+    {
+      "name": "@lexical/list",
+      "version": "0.49.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@lexical/list"
+    },
+    {
+      "name": "@lexical/plain-text",
+      "version": "0.49.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@lexical/plain-text"
+    },
+    {
+      "name": "@lexical/selection",
+      "version": "0.49.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@lexical/selection"
+    },
+    {
+      "name": "@lexical/text",
+      "version": "0.49.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@lexical/text"
+    },
+    {
+      "name": "@lexical/utils",
+      "version": "0.49.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@lexical/utils"
+    },
+    {
+      "name": "@preact/signals-core",
+      "version": "1.14.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@preact/signals-core"
+    },
+    {
+      "name": "@standard-schema/spec",
+      "version": "1.1.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@standard-schema/spec"
+    },
+    {
+      "name": "@types/prop-types",
+      "version": "15.7.15",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@types/prop-types"
+    },
+    {
+      "name": "@types/react",
+      "version": "18.3.24",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@types/react"
+    },
+    {
+      "name": "@types/trusted-types",
+      "version": "2.0.7",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/@types/trusted-types"
+    },
+    {
+      "name": "argparse",
+      "version": "2.0.1",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/argparse"
+    },
+    {
+      "name": "clsx",
+      "version": "2.1.1",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/clsx"
+    },
+    {
+      "name": "csstype",
+      "version": "3.2.3",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/csstype"
+    },
+    {
+      "name": "immer",
+      "version": "10.2.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/immer"
+    },
+    {
+      "name": "js-tokens",
+      "version": "4.0.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/js-tokens"
+    },
+    {
+      "name": "js-yaml",
+      "version": "4.3.2",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/js-yaml"
+    },
+    {
+      "name": "lexical",
+      "version": "0.49.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/lexical"
+    },
+    {
+      "name": "loose-envify",
+      "version": "1.4.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/loose-envify"
+    },
+    {
+      "name": "react",
+      "version": "18.3.1",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/react"
+    },
+    {
+      "name": "typescript",
+      "version": "6.0.3",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/typescript"
+    },
+    {
+      "name": "use-sync-external-store",
+      "version": "1.2.0",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/use-sync-external-store"
+    },
+    {
+      "name": "ws",
+      "version": "8.21.3",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/ws"
+    },
+    {
+      "name": "zod",
+      "version": "4.5.4",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/zod"
+    },
+    {
+      "name": "zustand",
+      "version": "4.4.7",
+      "path": "/home/qqp/projects/.qq-worktrees/qq-ui/working-memory-qq-ui-stock-web-re-ar-23f3761a.workspace/experimental/alpha4-stock-web/node_modules/zustand"
+    }
+  ]
+}

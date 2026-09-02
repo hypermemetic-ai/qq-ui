@@ -1,0 +1,33 @@
+{
+  "classification": "MACHINE_STATUS",
+  "generatedAt": "2026-09-02T14:07:56.824Z",
+  "status": "BLOCKED",
+  "phase": "ALPHA4_REPOSITORY_PREPARATION",
+  "gates": {
+    "sourceProvenance": "PASS",
+    "alpha4PackageInstall": "PASS",
+    "sourceGeneratedOverrides": "PASS",
+    "exactLockAndInstalledClosure": "PASS",
+    "build": "PASS",
+    "strictPublicTypes": "PASS",
+    "lifecycle": "PASS",
+    "bundle": "PASS",
+    "packedPrerequisiteHarness": "PASS",
+    "pathEnvironmentPortGuards": "PASS",
+    "persistedTurnExtractorHarness": "PASS",
+    "processGroupSupervisorHarness": "PASS",
+    "fullAlpha4PackageSuite": "PASS",
+    "rootHistoricalSuite": "BLOCKED_MISSING_ROOT_DEPENDENCIES",
+    "qqModelsCompatibility": "BLOCKED",
+    "stockHostInstall": "BLOCKED_NOT_EXECUTED",
+    "cliAndConfig": "BLOCKED_NOT_EXECUTED",
+    "freshGrokLogin": "BLOCKED_NOT_STARTED",
+    "liveStockBrowser": "BLOCKED_NOT_EXECUTED",
+    "liveHmr": "BLOCKED_NOT_EXECUTED",
+    "realModelTurn": "BLOCKED_NOT_EXECUTED",
+    "desktopMobile": "BLOCKED_NOT_EXECUTED",
+    "liveCleanup": "NOT_APPLICABLE_NO_HOST",
+    "legacyIsolation": "PASS_NO_CONNECTION_SIGNAL_OR_CONFIGURATION_CHANGE_BOOLEAN_EXISTENCE_OBSERVATION_DISCLOSED"
+  },
+  "nextRequired": "Land and independently QA qq-models alpha.4 compatibility in its own repository; then supply clean committed packs and run the isolated matrix."
+}

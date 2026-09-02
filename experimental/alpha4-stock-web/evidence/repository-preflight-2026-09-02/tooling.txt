@@ -1,0 +1,7 @@
+generatedAt=2026-09-02T10:41:28Z
+node=v26.7.0
+npm=11.19.0
+pnpm=11.18.0
+playwright_module=/home/qqp/.npm/_npx/e41f203b7505f1fb/node_modules/playwright
+chromium_executable=/home/qqp/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome
+product_browser_executed=false

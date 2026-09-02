@@ -1,0 +1,26 @@
+
+> @hypermemetic-ai/qq-ui-alpha4-spike@0.0.0-alpha.4-spike test
+> npm run build && npm run check && npm run prove
+
+
+> @hypermemetic-ai/qq-ui-alpha4-spike@0.0.0-alpha.4-spike build
+> node scripts/build.mjs
+
+alpha4 spike bundle built: 8120 bytes sha256:b7d4392b3d373f87ab4e0c3f06cb2cd480fe20738b91218448d3661ca7bf471c
+
+> @hypermemetic-ai/qq-ui-alpha4-spike@0.0.0-alpha.4-spike check
+> npm run audit:closure && node scripts/check-public-types.mjs
+
+
+> @hypermemetic-ai/qq-ui-alpha4-spike@0.0.0-alpha.4-spike audit:closure
+> node scripts/audit-alpha4-closure.mjs
+
+alpha4 closure audit passed: 252 source pins, 61 locked and 61 installed DSH package locations are exactly 0.1.2-alpha.4
+
+> @hypermemetic-ai/qq-ui-alpha4-spike@0.0.0-alpha.4-spike prove
+> node proofs/lifecycle.proof.mjs && node proofs/bundle.proof.mjs && node proofs/public-types-gate.proof.mjs && node proofs/live-harness.proof.mjs
+
+alpha4 lifecycle proof passed: activation, disposal, reapplication, shared dispatch, no stale registrations
+alpha4 stock-module composition proof passed: one @hypermemetic-ai/qq-ui-alpha4-spike factory, sha256:791ed5a2532bd5a8510234023209458ce5bdad5b6692e432973d5f8e32e5f8aa
+alpha4 public-type dependency gate proof passed: missing/mismatch block, exact set invokes tsc
+alpha4 live-harness proof passed: packed-clean prerequisites, isolated auth roots, stock/additive/patched composition, stdin launch token, persisted route/stream/terminal/no-tool gate, installed-artifact HMR, process-group cleanup contract

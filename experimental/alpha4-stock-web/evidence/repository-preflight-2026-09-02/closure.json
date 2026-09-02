@@ -1,0 +1,28 @@
+{
+  "classification": "REPOSITORY_PROOF",
+  "generatedAt": "2026-09-02T10:41:28Z",
+  "package": {
+    "name": "@hypermemetic-ai/qq-ui-alpha4-spike",
+    "version": "0.0.0-alpha.4-spike"
+  },
+  "overrides": {
+    "count": 252,
+    "versions": [
+      "0.1.2-alpha.4"
+    ]
+  },
+  "lock": {
+    "lockfileVersion": 3,
+    "sha256": "c7365ec5a9b2fbbc887ad97b4fb8fc88399d7380dffe720494046233ae2cf23d",
+    "packageLocations": 97,
+    "dshLocations": 61,
+    "dshDistinctNames": 61,
+    "dshVersions": [
+      "0.1.2-alpha.4"
+    ],
+    "allDshRowsHaveRegistryIntegrity": true
+  },
+  "directDshPinsExact": true,
+  "skipLibCheck": false,
+  "strict": true
+}
